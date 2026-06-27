@@ -96,6 +96,9 @@ class Exercise(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 'canonical' (curated), 'provisional' (model/user-created, unverified), 'user'
     provenance: Mapped[str] = mapped_column(String, default="provisional", index=True)
+    # Isometric/hold movement (plank, stretches): logged by duration, not reps.
+    # Seeded from free-exercise-db force=="static".
+    is_timed: Mapped[bool] = mapped_column(Boolean, default=False)
     # Alias pointer: when set, this row is a synonym of the referenced canonical exercise.
     canonical_exercise_id: Mapped[int | None] = mapped_column(
         ForeignKey("exercises.id"), nullable=True, index=True
@@ -162,6 +165,8 @@ class TemplateExercise(Base):
     target_reps: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Placeholder starting weight (user-set; the AI coach will propose it later).
     target_weight: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Target hold duration (seconds) for timed exercises (e.g. plank).
+    target_duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     rest_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -210,6 +215,7 @@ class SessionExercise(Base):
     target_sets: Mapped[int | None] = mapped_column(Integer, nullable=True)
     target_reps: Mapped[int | None] = mapped_column(Integer, nullable=True)
     target_weight: Mapped[float | None] = mapped_column(Float, nullable=True)
+    target_duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     rest_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 

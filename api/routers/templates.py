@@ -37,6 +37,7 @@ def to_template_out(tpl: WorkoutTemplate) -> TemplateOut:
                 target_sets=te.target_sets,
                 target_reps=te.target_reps,
                 target_weight=te.target_weight,
+                target_duration_seconds=te.target_duration_seconds,
                 rest_seconds=te.rest_seconds,
                 notes=te.notes,
             )
@@ -61,6 +62,7 @@ def _resolve_exercises(
                 target_sets=item.target_sets,
                 target_reps=item.target_reps,
                 target_weight=item.target_weight,
+                target_duration_seconds=item.target_duration_seconds,
                 rest_seconds=item.rest_seconds,
                 notes=item.notes,
             )

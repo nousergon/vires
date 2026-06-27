@@ -73,6 +73,24 @@ def _load_seed() -> list[dict]:
     return json.loads(SEED_PATH.read_text())
 
 
+def backfill_is_timed(session: Session) -> int:
+    """Sync is_timed on canonical exercises from the seed's force=='static' flag.
+    Runs even when the catalog is already seeded so the flag lands without --reset."""
+    want = {
+        normalize_name(r["name"]): (r.get("force") == "static")
+        for r in _load_seed()
+        if r.get("name")
+    }
+    n = 0
+    for ex in session.scalars(select(Exercise).where(Exercise.provenance == "canonical")):
+        target = want.get(ex.canonical_name)
+        if target is not None and ex.is_timed != target:
+            ex.is_timed = target
+            n += 1
+    session.commit()
+    return n
+
+
 def seed(session: Session, reset: bool = False) -> int:
     ensure_dev_identity(session)
 
@@ -80,7 +98,11 @@ def seed(session: Session, reset: bool = False) -> int:
         select(func.count()).select_from(Exercise).where(Exercise.provenance == "canonical")
     )
     if existing and not reset:
-        print(f"Catalog already has {existing} canonical exercises; skipping (use --reset).")
+        n_timed = backfill_is_timed(session)  # keep is_timed in sync without a full reseed
+        print(
+            f"Catalog already has {existing} canonical exercises; skipping "
+            f"(use --reset). Backfilled is_timed on {n_timed}."
+        )
         return 0
     if reset:
         session.execute(text("DELETE FROM exercises_fts"))
@@ -105,6 +127,7 @@ def seed(session: Session, reset: bool = False) -> int:
             category=rec.get("category"),
             description="\n".join(instructions) if instructions else None,
             provenance="canonical",
+            is_timed=rec.get("force") == "static",  # isometric holds -> timed
         )
         session.add(ex)
         session.flush()  # assign ex.id for the FTS rowid

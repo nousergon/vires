@@ -27,6 +27,7 @@ export interface ExerciseBrief {
   name: string
   primary_muscles: string[]
   equipment: string | null
+  is_timed: boolean
 }
 
 export interface Exercise extends ExerciseBrief {
@@ -84,6 +85,7 @@ export interface SessionExercise {
   target_sets: number | null
   target_reps: number | null
   target_weight: number | null
+  target_duration_seconds: number | null
   rest_seconds: number | null
   notes: string | null
   sets: SetEntry[]
@@ -117,6 +119,7 @@ export interface TemplateExercise {
   target_sets: number | null
   target_reps: number | null
   target_weight: number | null
+  target_duration_seconds: number | null
   rest_seconds: number | null
   notes: string | null
 }
@@ -143,6 +146,7 @@ export interface TemplateExerciseInput {
   target_sets?: number | null
   target_reps?: number | null
   target_weight?: number | null
+  target_duration_seconds?: number | null
   rest_seconds?: number | null
   notes?: string | null
 }
@@ -197,7 +201,13 @@ export const api = {
   logSet: (
     sessionId: number,
     seId: number,
-    body: { reps?: number | null; weight?: number | null; rpe?: number | null; is_warmup?: boolean },
+    body: {
+      reps?: number | null
+      weight?: number | null
+      rpe?: number | null
+      duration_seconds?: number | null
+      is_warmup?: boolean
+    },
   ) =>
     req<SetEntry>(`/workouts/${sessionId}/exercises/${seId}/sets`, {
       method: 'POST',
@@ -207,7 +217,14 @@ export const api = {
     sessionId: number,
     seId: number,
     setId: number,
-    body: Partial<{ reps: number; weight: number; rpe: number; is_warmup: boolean; done: boolean }>,
+    body: Partial<{
+      reps: number
+      weight: number
+      rpe: number
+      duration_seconds: number
+      is_warmup: boolean
+      done: boolean
+    }>,
   ) =>
     req<SetEntry>(`/workouts/${sessionId}/exercises/${seId}/sets/${setId}`, {
       method: 'PATCH',

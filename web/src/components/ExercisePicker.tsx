@@ -63,6 +63,7 @@ export default function ExercisePicker({
     name: ex.name,
     primary_muscles: ex.primary_muscles,
     equipment: ex.equipment,
+    is_timed: ex.is_timed,
   })
 
   return (

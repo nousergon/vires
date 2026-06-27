@@ -76,10 +76,14 @@ function StartView({ onStarted }: { onStarted: (id: number) => void }) {
 }
 
 // --------------------------------------------------------------------------- //
+type TimerKind = 'rest' | 'hold'
+type RunTimer = (kind: TimerKind, seId: number, secs: number, onFinish?: () => void) => void
+
 function ActiveWorkout({ id, onClear }: { id: number; onClear: () => void }) {
   const qc = useQueryClient()
   const nav = useNavigate()
-  const rest = useCountdown()
+  const timer = useCountdown()
+  const [timerCtx, setTimerCtx] = useState<{ seId: number; kind: TimerKind } | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
 
   const { data: ws, isLoading } = useQuery({
@@ -87,6 +91,18 @@ function ActiveWorkout({ id, onClear }: { id: number; onClear: () => void }) {
     queryFn: () => api.getWorkout(id),
   })
   const invalidate = () => qc.invalidateQueries({ queryKey: ['workout', id] })
+
+  const runTimer: RunTimer = (kind, seId, secs, onFinish) => {
+    setTimerCtx({ seId, kind })
+    timer.start(secs, () => {
+      setTimerCtx(null)
+      onFinish?.()
+    })
+  }
+  const stopTimer = () => {
+    timer.stop()
+    setTimerCtx(null)
+  }
 
   const addExercise = useMutation({
     mutationFn: (exerciseId: number) => api.addWorkoutExercise(id, { exercise_id: exerciseId }),
@@ -102,9 +118,7 @@ function ActiveWorkout({ id, onClear }: { id: number; onClear: () => void }) {
   })
   const discard = useMutation({
     mutationFn: () => api.deleteWorkout(id),
-    onSuccess: () => {
-      onClear()
-    },
+    onSuccess: () => onClear(),
   })
 
   if (isLoading || !ws) return <Spinner />
@@ -121,28 +135,17 @@ function ActiveWorkout({ id, onClear }: { id: number; onClear: () => void }) {
         </Button>
       </div>
 
-      {rest.running && (
-        <div className="sticky top-0 z-10 mb-3 flex items-center justify-between rounded-xl border border-amber-700/50 bg-amber-900/30 px-4 py-2">
-          <span className="font-mono text-xl font-bold text-amber-300">{fmtClock(rest.remaining)}</span>
-          <div className="flex gap-2">
-            <Button variant="ghost" onClick={() => rest.addSeconds(30)}>
-              +30s
-            </Button>
-            <Button variant="ghost" onClick={rest.stop}>
-              Skip
-            </Button>
-          </div>
-        </div>
-      )}
-
       <div className="space-y-4">
         {ws.exercises.map((se) => (
           <ExerciseBlock
             key={se.id}
             session={ws}
             se={se}
+            timer={timer}
+            timerCtx={timerCtx}
+            runTimer={runTimer}
+            stopTimer={stopTimer}
             onChanged={invalidate}
-            onRest={(secs) => rest.start(secs)}
           />
         ))}
       </div>
@@ -179,31 +182,87 @@ function Elapsed({ start }: { start: string }) {
   return <div className="text-sm text-slate-400">{fmtClock(secs)} elapsed</div>
 }
 
+// Inline countdown shown directly under the exercise it belongs to.
+function InlineTimerBar({
+  timer,
+  kind,
+  onAdd,
+  onSkip,
+}: {
+  timer: ReturnType<typeof useCountdown>
+  kind: TimerKind
+  onAdd: () => void
+  onSkip: () => void
+}) {
+  const pct = timer.total > 0 ? (timer.remaining / timer.total) * 100 : 0
+  const hold = kind === 'hold'
+  const accent = hold ? 'text-sky-300' : 'text-amber-300'
+  const bar = hold ? 'bg-sky-500' : 'bg-amber-500'
+  const border = hold ? 'border-sky-700/50 bg-sky-900/20' : 'border-amber-700/50 bg-amber-900/20'
+  return (
+    <div className={`mt-2 rounded-lg border px-3 py-2 ${border}`}>
+      <div className="mb-1.5 flex items-center justify-between">
+        <span className="text-xs font-semibold uppercase text-slate-400">
+          {hold ? 'Hold' : 'Rest'}
+        </span>
+        <span className={`font-mono text-lg font-bold ${accent}`}>{fmtClock(timer.remaining)}</span>
+        <div className="flex gap-1">
+          {!hold && (
+            <button className="rounded px-2 py-0.5 text-xs text-slate-300" onClick={onAdd}>
+              +30s
+            </button>
+          )}
+          <button className="rounded px-2 py-0.5 text-xs text-slate-300" onClick={onSkip}>
+            {hold ? 'Stop' : 'Skip'}
+          </button>
+        </div>
+      </div>
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-700">
+        <div className={`h-full ${bar} transition-[width] duration-300`} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  )
+}
+
 // --------------------------------------------------------------------------- //
 function ExerciseBlock({
   session,
   se,
+  timer,
+  timerCtx,
+  runTimer,
+  stopTimer,
   onChanged,
-  onRest,
 }: {
   session: WorkoutSession
   se: SessionExercise
+  timer: ReturnType<typeof useCountdown>
+  timerCtx: { seId: number; kind: TimerKind } | null
+  runTimer: RunTimer
+  stopTimer: () => void
   onChanged: () => void
-  onRest: (secs: number) => void
 }) {
   const settings = useSettings()
   const prev = se.previous_performance
   const restSecs = se.rest_seconds ?? settings.default_rest_seconds
+  const timed = se.exercise.is_timed
+  const holdSecs = se.target_duration_seconds ?? 60
 
   async function addSet() {
     const idx = se.sets.length
     const ghost = prev?.sets[idx] ?? prev?.sets[prev.sets.length - 1]
-    await api.logSet(session.id, se.id, {
-      reps: ghost?.reps ?? se.target_reps ?? null,
-      weight: ghost?.weight ?? null,
-    })
-    onChanged() // rest timer starts when a set is checked off, not on add
+    if (timed) {
+      await api.logSet(session.id, se.id, { duration_seconds: holdSecs })
+    } else {
+      await api.logSet(session.id, se.id, {
+        reps: ghost?.reps ?? se.target_reps ?? null,
+        weight: ghost?.weight ?? se.target_weight ?? null,
+      })
+    }
+    onChanged()
   }
+
+  const showBar = timerCtx?.seId === se.id
 
   return (
     <Card>
@@ -223,25 +282,57 @@ function ExerciseBlock({
       <PrevHint prev={prev} unit={settings.weight_unit} />
 
       <div className="mt-2 space-y-1.5">
-        <div className="grid grid-cols-[2rem_1fr_1fr_2rem_1.75rem] gap-2 px-1 text-xs uppercase text-slate-500">
-          <span>Set</span>
-          <span>{settings.weight_unit}</span>
-          <span>Reps</span>
-          <span className="text-center">✓</span>
-          <span />
-        </div>
-        {se.sets.map((s) => (
-          <SetRow
-            key={s.id}
-            sessionId={session.id}
-            seId={se.id}
-            set={s}
-            restSecs={restSecs}
-            onRest={onRest}
-            onChanged={onChanged}
-          />
-        ))}
+        {timed ? (
+          <div className="grid grid-cols-[2rem_1fr_2rem_2rem_1.5rem] gap-2 px-1 text-xs uppercase text-slate-500">
+            <span>Set</span>
+            <span>Hold (s)</span>
+            <span className="text-center">▶</span>
+            <span className="text-center">✓</span>
+            <span />
+          </div>
+        ) : (
+          <div className="grid grid-cols-[2rem_1fr_1fr_2rem_1.5rem] gap-2 px-1 text-xs uppercase text-slate-500">
+            <span>Set</span>
+            <span>{settings.weight_unit}</span>
+            <span>Reps</span>
+            <span className="text-center">✓</span>
+            <span />
+          </div>
+        )}
+        {se.sets.map((s) =>
+          timed ? (
+            <TimedSetRow
+              key={s.id}
+              sessionId={session.id}
+              seId={se.id}
+              set={s}
+              holdDefault={holdSecs}
+              restSecs={restSecs}
+              runTimer={runTimer}
+              onChanged={onChanged}
+            />
+          ) : (
+            <SetRow
+              key={s.id}
+              sessionId={session.id}
+              seId={se.id}
+              set={s}
+              restSecs={restSecs}
+              runTimer={runTimer}
+              onChanged={onChanged}
+            />
+          ),
+        )}
       </div>
+
+      {showBar && (
+        <InlineTimerBar
+          timer={timer}
+          kind={timerCtx.kind}
+          onAdd={() => timer.addSeconds(30)}
+          onSkip={stopTimer}
+        />
+      )}
 
       <button
         onClick={addSet}
@@ -272,19 +363,70 @@ function PrevHint({
   )
 }
 
+function SetNumButton({
+  sessionId,
+  seId,
+  set,
+  onChanged,
+}: {
+  sessionId: number
+  seId: number
+  set: SetEntry
+  onChanged: () => void
+}) {
+  return (
+    <button
+      onClick={async () => {
+        await api.updateSet(sessionId, seId, set.id, { is_warmup: !set.is_warmup })
+        onChanged()
+      }}
+      className={`h-7 w-7 rounded-md text-xs font-bold ${
+        set.is_warmup ? 'bg-amber-600/40 text-amber-200' : 'bg-slate-700 text-slate-300'
+      }`}
+      title="Toggle warm-up"
+    >
+      {set.is_warmup ? 'W' : set.set_number}
+    </button>
+  )
+}
+
+function DeleteSetButton({
+  sessionId,
+  seId,
+  setId,
+  onChanged,
+}: {
+  sessionId: number
+  seId: number
+  setId: number
+  onChanged: () => void
+}) {
+  return (
+    <button
+      className="text-slate-600 hover:text-red-400"
+      onClick={async () => {
+        await api.deleteSet(sessionId, seId, setId)
+        onChanged()
+      }}
+    >
+      ✕
+    </button>
+  )
+}
+
 function SetRow({
   sessionId,
   seId,
   set,
   restSecs,
-  onRest,
+  runTimer,
   onChanged,
 }: {
   sessionId: number
   seId: number
   set: SetEntry
   restSecs: number
-  onRest: (secs: number) => void
+  runTimer: RunTimer
   onChanged: () => void
 }) {
   const [weight, setWeight] = useState(set.weight?.toString() ?? '')
@@ -296,13 +438,12 @@ function SetRow({
 
   async function toggleDone() {
     const nowDone = !done
-    // Persist the current entries when checking off, then mark done/undone.
     await api.updateSet(sessionId, seId, set.id, {
       done: nowDone,
       weight: weight === '' ? undefined : Number(weight),
       reps: reps === '' ? undefined : Number(reps),
     })
-    if (nowDone) onRest(restSecs)
+    if (nowDone) runTimer('rest', seId, restSecs)
     onChanged()
   }
 
@@ -312,22 +453,11 @@ function SetRow({
 
   return (
     <div
-      className={`grid grid-cols-[2rem_1fr_1fr_2rem_1.75rem] items-center gap-2 rounded-lg ${
+      className={`grid grid-cols-[2rem_1fr_1fr_2rem_1.5rem] items-center gap-2 rounded-lg ${
         done ? 'bg-emerald-900/10' : ''
       }`}
     >
-      <button
-        onClick={async () => {
-          await api.updateSet(sessionId, seId, set.id, { is_warmup: !set.is_warmup })
-          onChanged()
-        }}
-        className={`h-7 w-7 rounded-md text-xs font-bold ${
-          set.is_warmup ? 'bg-amber-600/40 text-amber-200' : 'bg-slate-700 text-slate-300'
-        }`}
-        title="Toggle warm-up"
-      >
-        {set.is_warmup ? 'W' : set.set_number}
-      </button>
+      <SetNumButton sessionId={sessionId} seId={seId} set={set} onChanged={onChanged} />
       <input
         type="number"
         inputMode="decimal"
@@ -353,15 +483,82 @@ function SetRow({
       >
         ✓
       </button>
+      <DeleteSetButton sessionId={sessionId} seId={seId} setId={set.id} onChanged={onChanged} />
+    </div>
+  )
+}
+
+// Timed (isometric / hold) exercise row: a duration + a ▶ hold countdown that
+// logs the hold and then auto-starts rest.
+function TimedSetRow({
+  sessionId,
+  seId,
+  set,
+  holdDefault,
+  restSecs,
+  runTimer,
+  onChanged,
+}: {
+  sessionId: number
+  seId: number
+  set: SetEntry
+  holdDefault: number
+  restSecs: number
+  runTimer: RunTimer
+  onChanged: () => void
+}) {
+  const [dur, setDur] = useState((set.duration_seconds ?? holdDefault).toString())
+  const done = !!set.completed_at
+  const seconds = () => (dur === '' ? holdDefault : Number(dur))
+
+  async function complete() {
+    await api.updateSet(sessionId, seId, set.id, { done: true, duration_seconds: seconds() })
+    onChanged()
+    runTimer('rest', seId, restSecs)
+  }
+
+  function startHold() {
+    runTimer('hold', seId, seconds(), () => {
+      complete()
+    })
+  }
+
+  const cell = `rounded-lg px-3 py-2 text-center outline-none focus:ring-1 focus:ring-amber-500 ${
+    done ? 'bg-emerald-900/30 text-slate-300' : 'bg-slate-800'
+  }`
+
+  return (
+    <div
+      className={`grid grid-cols-[2rem_1fr_2rem_2rem_1.5rem] items-center gap-2 rounded-lg ${
+        done ? 'bg-emerald-900/10' : ''
+      }`}
+    >
+      <SetNumButton sessionId={sessionId} seId={seId} set={set} onChanged={onChanged} />
+      <input
+        type="number"
+        inputMode="numeric"
+        value={dur}
+        onChange={(e) => setDur(e.target.value)}
+        onBlur={() => api.updateSet(sessionId, seId, set.id, { duration_seconds: seconds() })}
+        className={cell}
+      />
       <button
-        className="text-slate-600 hover:text-red-400"
-        onClick={async () => {
-          await api.deleteSet(sessionId, seId, set.id)
-          onChanged()
-        }}
+        onClick={startHold}
+        title="Start hold"
+        className="h-7 w-7 rounded-md bg-sky-600 text-sm font-bold text-slate-950"
       >
-        ✕
+        ▶
       </button>
+      <button
+        onClick={complete}
+        title="Mark done"
+        className={`h-7 w-7 rounded-md text-sm font-bold ${
+          done ? 'bg-emerald-500 text-slate-950' : 'bg-slate-700 text-slate-400'
+        }`}
+      >
+        ✓
+      </button>
+      <DeleteSetButton sessionId={sessionId} seId={seId} setId={set.id} onChanged={onChanged} />
     </div>
   )
 }

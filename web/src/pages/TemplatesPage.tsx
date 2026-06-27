@@ -7,6 +7,7 @@ import { useSettings } from '../lib/useSettings'
 
 interface DraftRow extends TemplateExerciseInput {
   name: string
+  is_timed: boolean
 }
 
 export default function TemplatesPage() {
@@ -80,9 +81,11 @@ function TemplateEditor({
     initial?.exercises.map((te) => ({
       exercise_id: te.exercise.id,
       name: te.exercise.name,
+      is_timed: te.exercise.is_timed,
       target_sets: te.target_sets,
       target_reps: te.target_reps,
       target_weight: te.target_weight,
+      target_duration_seconds: te.target_duration_seconds,
       rest_seconds: te.rest_seconds,
     })) ?? [],
   )
@@ -96,6 +99,7 @@ function TemplateEditor({
         target_sets: r.target_sets,
         target_reps: r.target_reps,
         target_weight: r.target_weight,
+        target_duration_seconds: r.target_duration_seconds,
         rest_seconds: r.rest_seconds,
       }))
       return initial
@@ -111,9 +115,11 @@ function TemplateEditor({
       {
         exercise_id: ex.id,
         name: ex.name,
+        is_timed: ex.is_timed,
         target_sets: settings.default_sets,
-        target_reps: settings.default_reps,
-        target_weight: defaultWeight(ex.equipment),
+        target_reps: ex.is_timed ? null : settings.default_reps,
+        target_weight: ex.is_timed ? null : defaultWeight(ex.equipment),
+        target_duration_seconds: ex.is_timed ? 60 : null,
         rest_seconds: settings.default_rest_seconds,
       },
     ])
@@ -145,12 +151,23 @@ function TemplateEditor({
               <Field label="Sets">
                 <NumInput value={r.target_sets} onChange={(v) => patch(i, { target_sets: numOrNull(v) })} />
               </Field>
-              <Field label="Reps">
-                <NumInput value={r.target_reps} onChange={(v) => patch(i, { target_reps: numOrNull(v) })} />
-              </Field>
-              <Field label={settings.weight_unit}>
-                <NumInput value={r.target_weight} onChange={(v) => patch(i, { target_weight: numOrNull(v) })} />
-              </Field>
+              {r.is_timed ? (
+                <Field label="Hold (s)">
+                  <NumInput
+                    value={r.target_duration_seconds}
+                    onChange={(v) => patch(i, { target_duration_seconds: numOrNull(v) })}
+                  />
+                </Field>
+              ) : (
+                <>
+                  <Field label="Reps">
+                    <NumInput value={r.target_reps} onChange={(v) => patch(i, { target_reps: numOrNull(v) })} />
+                  </Field>
+                  <Field label={settings.weight_unit}>
+                    <NumInput value={r.target_weight} onChange={(v) => patch(i, { target_weight: numOrNull(v) })} />
+                  </Field>
+                </>
+              )}
               <Field label="Rest (s)">
                 <NumInput value={r.rest_seconds} onChange={(v) => patch(i, { rest_seconds: numOrNull(v) })} />
               </Field>
