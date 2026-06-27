@@ -83,6 +83,7 @@ export interface SessionExercise {
   exercise: ExerciseBrief
   target_sets: number | null
   target_reps: number | null
+  target_weight: number | null
   rest_seconds: number | null
   notes: string | null
   sets: SetEntry[]
@@ -115,6 +116,7 @@ export interface TemplateExercise {
   exercise: ExerciseBrief
   target_sets: number | null
   target_reps: number | null
+  target_weight: number | null
   rest_seconds: number | null
   notes: string | null
 }
@@ -140,6 +142,7 @@ export interface TemplateExerciseInput {
   exercise_id: number
   target_sets?: number | null
   target_reps?: number | null
+  target_weight?: number | null
   rest_seconds?: number | null
   notes?: string | null
 }

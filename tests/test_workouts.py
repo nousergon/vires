@@ -65,6 +65,24 @@ def test_start_from_template_seeds_planned_sets(client):
     assert se["sets"][0]["completed_at"] is None  # not done yet
 
 
+def test_template_target_weight_seeds_set_weight(client):
+    e1 = _ex_id(client, "bench press")
+    tpl = client.post(
+        "/api/templates",
+        json={
+            "name": "Weighted",
+            "exercises": [
+                {"exercise_id": e1, "target_sets": 2, "target_reps": 5, "target_weight": 135}
+            ],
+        },
+    ).json()
+    assert tpl["exercises"][0]["target_weight"] == 135
+    ws = client.post("/api/workouts", json={"template_id": tpl["id"]}).json()
+    se = ws["exercises"][0]
+    assert se["target_weight"] == 135
+    assert all(s["weight"] == 135 for s in se["sets"])  # planned sets seeded with it
+
+
 def test_mark_set_done_toggles_completed_at(client):
     ex = _ex_id(client, "barbell deadlift")
     ws = client.post("/api/workouts", json={}).json()

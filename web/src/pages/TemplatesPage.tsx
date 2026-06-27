@@ -82,6 +82,7 @@ function TemplateEditor({
       name: te.exercise.name,
       target_sets: te.target_sets,
       target_reps: te.target_reps,
+      target_weight: te.target_weight,
       rest_seconds: te.rest_seconds,
     })) ?? [],
   )
@@ -94,6 +95,7 @@ function TemplateEditor({
         exercise_id: r.exercise_id,
         target_sets: r.target_sets,
         target_reps: r.target_reps,
+        target_weight: r.target_weight,
         rest_seconds: r.rest_seconds,
       }))
       return initial
@@ -111,6 +113,7 @@ function TemplateEditor({
         name: ex.name,
         target_sets: settings.default_sets,
         target_reps: settings.default_reps,
+        target_weight: defaultWeight(ex.equipment),
         rest_seconds: settings.default_rest_seconds,
       },
     ])
@@ -138,12 +141,15 @@ function TemplateEditor({
                 remove
               </button>
             </div>
-            <div className="grid grid-cols-3 gap-2 text-xs">
+            <div className="grid grid-cols-4 gap-2 text-xs">
               <Field label="Sets">
                 <NumInput value={r.target_sets} onChange={(v) => patch(i, { target_sets: numOrNull(v) })} />
               </Field>
               <Field label="Reps">
                 <NumInput value={r.target_reps} onChange={(v) => patch(i, { target_reps: numOrNull(v) })} />
+              </Field>
+              <Field label={settings.weight_unit}>
+                <NumInput value={r.target_weight} onChange={(v) => patch(i, { target_weight: numOrNull(v) })} />
               </Field>
               <Field label="Rest (s)">
                 <NumInput value={r.rest_seconds} onChange={(v) => patch(i, { rest_seconds: numOrNull(v) })} />
@@ -189,4 +195,19 @@ function NumInput({ value, onChange }: { value: number | null | undefined; onCha
       className="w-full rounded-lg bg-slate-800 px-2 py-2 text-center text-sm outline-none focus:ring-1 focus:ring-amber-500"
     />
   )
+}
+
+// Placeholder starting weight by equipment (lb). Just a sensible default to
+// pre-fill — the user edits it, and the AI coach will propose it properly later.
+// Bodyweight movements default to 0; unknown/user-created exercises stay blank.
+function defaultWeight(equipment: string | null): number | null {
+  const e = (equipment ?? '').toLowerCase()
+  if (e === '') return null
+  if (e.includes('body')) return 0
+  if (e.includes('barbell')) return 45
+  if (e.includes('kettlebell')) return 25
+  if (e.includes('dumbbell')) return 15
+  if (e.includes('plate') || e.includes('weight')) return 25
+  if (e.includes('cable') || e.includes('machine')) return 30
+  return null
 }
