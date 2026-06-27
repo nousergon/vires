@@ -33,7 +33,7 @@ fi
 # rolldown native binding is fragile to install cross-platform, and disk is tight.
 # CI (deploy.yml) builds the bundle on a clean linux runner and uploads it here;
 # the box just fetches + serves it. Keeps the box node-free and the deploy fast.
-DIST_S3="s3://alpha-engine-research/infrastructure/vires/web-dist.tgz"
+DIST_S3="${VIRES_DIST_S3:?VIRES_DIST_S3 not set (passed by the deploy workflow)}"
 echo "fetching web bundle: ${DIST_S3}"
 aws s3 cp "$DIST_S3" /tmp/vires-dist.tgz --quiet || { echo "web bundle fetch FAILED"; exit 1; }
 rm -rf "$REPO/web/dist" && mkdir -p "$REPO/web/dist"
