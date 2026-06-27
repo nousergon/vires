@@ -1,9 +1,11 @@
 name: Deploy Vires via SSM
 
-# Push to main (or manual) → assume the shared OIDC role → SSM to the shared
-# *.nousergon.ai EC2 box → pull this repo to the commit + run the box deploy
-# script (deps, migrate, build, nginx/systemd sync, restart, health-check).
-# Mirrors Metron's deploy. Set the instance id once: gh variable set VIRES_INSTANCE_ID.
+# Two stages: (1) build the React PWA on a clean linux runner and upload the
+# bundle to S3; (2) SSM to the shared *.nousergon.ai box, which pulls this repo
+# + fetches the prebuilt bundle + runs deploy-on-merge.sh (deps, migrate, seed,
+# nginx/systemd, restart, health). The box never builds the frontend (Node 18,
+# tight disk) — CI owns the build. Mirrors Metron's OIDC→SSM deploy otherwise.
+# One-time: gh variable set VIRES_INSTANCE_ID --body i-09b539c844515d549
 
 on:
   push:
@@ -18,14 +20,41 @@ permissions:
   id-token: write
   contents: read
 
+env:
+  DIST_S3: s3://alpha-engine-research/infrastructure/vires/web-dist.tgz
+
 jobs:
+  build-web:
+    name: Build PWA + upload bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Build
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+      - name: Package bundle
+        run: tar -czf web-dist.tgz -C web/dist .
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::711398986525:role/github-actions-lambda-deploy
+          aws-region: us-east-1
+      - name: Upload bundle to S3
+        run: aws s3 cp web-dist.tgz "${DIST_S3}"
+
   deploy:
     name: Deploy Vires via SSM
+    needs: build-web
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
       VIRES_INSTANCE_ID: ${{ vars.VIRES_INSTANCE_ID }}
-
     steps:
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
@@ -37,7 +66,7 @@ jobs:
         id: send
         run: |
           set -euo pipefail
-          CMD_BODY="flock -w 600 /tmp/vires-deploy.lock -c 'set -e; sudo -u ec2-user git -C /home/ec2-user/vires fetch origin --quiet && sudo -u ec2-user git -C /home/ec2-user/vires reset --hard ${GITHUB_SHA} --quiet && sudo -u ec2-user bash /home/ec2-user/vires/infrastructure/deploy-on-merge.sh'"
+          CMD_BODY="flock -w 600 /tmp/vires-deploy.lock -c 'set -e; sudo -u ec2-user -H git -C /home/ec2-user/vires fetch origin --quiet && sudo -u ec2-user -H git -C /home/ec2-user/vires reset --hard ${GITHUB_SHA} --quiet && sudo -u ec2-user -H bash /home/ec2-user/vires/infrastructure/deploy-on-merge.sh'"
           CMD_ID=$(aws ssm send-command \
             --instance-ids "${VIRES_INSTANCE_ID}" \
             --document-name AWS-RunShellScript \

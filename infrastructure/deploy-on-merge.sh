@@ -28,29 +28,17 @@ if [ ! -f data/exercises.npz ]; then
   .venv/bin/python -m api.services.search || { echo "reindex FAILED"; exit 1; }
 fi
 
-# --- Vendored Node 20 -------------------------------------------------------- #
-# The shared box ships Node 18, but Vite 8 / Tailwind 4 need Node 20+. We vendor
-# a pinned Node locally (under the repo) rather than mutating the box's system
-# node, which Metron's Next.js build depends on. Downloaded once, then cached.
-NODE_VER=v20.18.1
-NODE_DIR="$REPO/.node"
-if [ ! -x "$NODE_DIR/bin/node" ]; then
-  echo "fetching Node ${NODE_VER} (linux-x64) -> .node"
-  rm -rf "$NODE_DIR" && mkdir -p "$NODE_DIR"
-  curl -fsSL "https://nodejs.org/dist/${NODE_VER}/node-${NODE_VER}-linux-x64.tar.xz" \
-    | tar -xJ -C "$NODE_DIR" --strip-components=1 || { echo "node fetch FAILED"; exit 1; }
-fi
-export PATH="$NODE_DIR/bin:$PATH"
-echo "using node $(node --version)"
-
-# --- Web build (capped Node heap so a build spike can't OOM co-resident svcs) - #
-# `npm ci` (not install): clean, lockfile-exact install — guarantees the correct
-# platform-native build binaries (Vite/rolldown ship per-OS bindings; a plain
-# `npm install` against a lockfile generated on another OS can miss the linux one).
-cd "$REPO/web"
-npm ci --no-audit --no-fund --silent || { echo "npm ci FAILED"; exit 1; }
-NODE_OPTIONS=--max-old-space-size=700 npm run build || { echo "web build FAILED"; exit 1; }
-cd "$REPO"
+# --- Web bundle: fetch the prebuilt artifact built in CI ---------------------- #
+# The box does NOT build the frontend: it has Node 18 (Vite 8 needs 20+), the
+# rolldown native binding is fragile to install cross-platform, and disk is tight.
+# CI (deploy.yml) builds the bundle on a clean linux runner and uploads it here;
+# the box just fetches + serves it. Keeps the box node-free and the deploy fast.
+DIST_S3="s3://alpha-engine-research/infrastructure/vires/web-dist.tgz"
+echo "fetching web bundle: ${DIST_S3}"
+aws s3 cp "$DIST_S3" /tmp/vires-dist.tgz --quiet || { echo "web bundle fetch FAILED"; exit 1; }
+rm -rf "$REPO/web/dist" && mkdir -p "$REPO/web/dist"
+tar -xzf /tmp/vires-dist.tgz -C "$REPO/web/dist" || { echo "web bundle extract FAILED"; exit 1; }
+rm -f /tmp/vires-dist.tgz
 
 # --- nginx site: install/refresh our own conf file when it changed ----------- #
 NGINX_SRC="$REPO/infrastructure/nginx.conf"
