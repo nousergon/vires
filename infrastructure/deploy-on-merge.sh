@@ -44,8 +44,11 @@ export PATH="$NODE_DIR/bin:$PATH"
 echo "using node $(node --version)"
 
 # --- Web build (capped Node heap so a build spike can't OOM co-resident svcs) - #
+# `npm ci` (not install): clean, lockfile-exact install — guarantees the correct
+# platform-native build binaries (Vite/rolldown ship per-OS bindings; a plain
+# `npm install` against a lockfile generated on another OS can miss the linux one).
 cd "$REPO/web"
-npm install --no-audit --no-fund --silent || { echo "npm install FAILED"; exit 1; }
+npm ci --no-audit --no-fund --silent || { echo "npm ci FAILED"; exit 1; }
 NODE_OPTIONS=--max-old-space-size=700 npm run build || { echo "web build FAILED"; exit 1; }
 cd "$REPO"
 
