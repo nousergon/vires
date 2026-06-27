@@ -160,6 +160,8 @@ class TemplateExercise(Base):
     order_index: Mapped[int] = mapped_column(Integer, default=0)
     target_sets: Mapped[int | None] = mapped_column(Integer, nullable=True)
     target_reps: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Placeholder starting weight (user-set; the AI coach will propose it later).
+    target_weight: Mapped[float | None] = mapped_column(Float, nullable=True)
     rest_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -207,6 +209,7 @@ class SessionExercise(Base):
     order_index: Mapped[int] = mapped_column(Integer, default=0)
     target_sets: Mapped[int | None] = mapped_column(Integer, nullable=True)
     target_reps: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    target_weight: Mapped[float | None] = mapped_column(Float, nullable=True)
     rest_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 

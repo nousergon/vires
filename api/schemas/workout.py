@@ -48,6 +48,7 @@ class SessionExerciseIn(BaseModel):
     exercise_id: int
     target_sets: int | None = None
     target_reps: int | None = None
+    target_weight: float | None = None
     rest_seconds: int | None = None
     notes: str | None = None
 
@@ -58,6 +59,7 @@ class SessionExerciseOut(BaseModel):
     exercise: ExerciseBrief
     target_sets: int | None = None
     target_reps: int | None = None
+    target_weight: float | None = None
     rest_seconds: int | None = None
     notes: str | None = None
     sets: list[SetOut]

@@ -94,6 +94,7 @@ def _se_out(db: Session, ident: Identity, se: SessionExercise) -> SessionExercis
         exercise=to_exercise_brief(se.exercise),
         target_sets=se.target_sets,
         target_reps=se.target_reps,
+        target_weight=se.target_weight,
         rest_seconds=se.rest_seconds,
         notes=se.notes,
         sets=[_set_out(s) for s in se.sets],
@@ -152,6 +153,7 @@ def start_workout(
                 order_index=te.order_index,
                 target_sets=te.target_sets,
                 target_reps=te.target_reps,
+                target_weight=te.target_weight,
                 rest_seconds=te.rest_seconds,
                 notes=te.notes,
             )
@@ -190,7 +192,9 @@ def _seed_planned_sets(db: Session, ident: Identity, se: SessionExercise) -> Non
                 session_exercise_id=se.id,
                 set_number=i + 1,
                 reps=(ghost.reps if ghost else None) or se.target_reps,
-                weight=ghost.weight if ghost else None,
+                # last time's weight if we have history, else the routine's
+                # placeholder target weight (until the AI coach proposes one).
+                weight=ghost.weight if ghost else se.target_weight,
                 completed_at=None,
             )
         )
@@ -290,6 +294,7 @@ def add_session_exercise(
         order_index=next_order,
         target_sets=body.target_sets,
         target_reps=body.target_reps,
+        target_weight=body.target_weight,
         rest_seconds=body.rest_seconds,
         notes=body.notes,
     )
