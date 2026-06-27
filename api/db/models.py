@@ -59,6 +59,22 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
+class UserSettings(Base):
+    """Per-user preferences (one row per user). Drives logging defaults + units."""
+
+    __tablename__ = "user_settings"
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
+    weight_unit: Mapped[str] = mapped_column(String, default="lb")  # 'lb' | 'kg'
+    default_rest_seconds: Mapped[int] = mapped_column(Integer, default=90)
+    default_sets: Mapped[int] = mapped_column(Integer, default=3)
+    default_reps: Mapped[int] = mapped_column(Integer, default=8)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Exercise catalog
 # --------------------------------------------------------------------------- #

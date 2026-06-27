@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from sqlalchemy.orm import Session
 
 from api.config import get_settings
-from api.db.models import Tenant, User
+from api.db.models import Tenant, User, UserSettings
 
 
 @dataclass(frozen=True)
@@ -38,3 +38,14 @@ def ensure_dev_identity(session: Session) -> Identity:
         )
     session.commit()
     return ident
+
+
+def get_or_create_settings(session: Session, ident: Identity) -> UserSettings:
+    """Return the user's settings row, creating it with defaults on first access."""
+    s = session.get(UserSettings, ident.user_id)
+    if s is None:
+        s = UserSettings(user_id=ident.user_id, tenant_id=ident.tenant_id)
+        session.add(s)
+        session.commit()
+        session.refresh(s)
+    return s

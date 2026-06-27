@@ -144,6 +144,15 @@ export interface TemplateExerciseInput {
   notes?: string | null
 }
 
+export type WeightUnit = 'lb' | 'kg'
+
+export interface Settings {
+  weight_unit: WeightUnit
+  default_rest_seconds: number
+  default_sets: number
+  default_reps: number
+}
+
 // ---- endpoints ------------------------------------------------------------ //
 export const api = {
   // exercises
@@ -203,4 +212,9 @@ export const api = {
     }),
   deleteSet: (sessionId: number, seId: number, setId: number) =>
     req<void>(`/workouts/${sessionId}/exercises/${seId}/sets/${setId}`, { method: 'DELETE' }),
+
+  // settings
+  getSettings: () => req<Settings>('/settings'),
+  updateSettings: (body: Partial<Settings>) =>
+    req<Settings>('/settings', { method: 'PUT', body: JSON.stringify(body) }),
 }

@@ -35,6 +35,7 @@ _USER_TABLES = [
     "program_slots",
     "program_weeks",
     "programs",
+    "user_settings",
 ]
 
 

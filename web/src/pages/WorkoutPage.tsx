@@ -3,11 +3,11 @@ import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type SessionExercise, type SetEntry, type WorkoutSession } from '../lib/api'
 import { useCountdown, fmtClock } from '../lib/timer'
+import { useSettings } from '../lib/useSettings'
 import { Button, Card, EmptyState, PageTitle, Spinner } from '../components/ui'
 import ExercisePicker from '../components/ExercisePicker'
 
 const ACTIVE_KEY = 'vires.activeWorkout'
-const DEFAULT_REST = 90
 
 function useActiveId(): [number | null, (id: number | null) => void] {
   const [id, setId] = useState<number | null>(() => {
@@ -191,8 +191,9 @@ function ExerciseBlock({
   onChanged: () => void
   onRest: (secs: number) => void
 }) {
+  const settings = useSettings()
   const prev = se.previous_performance
-  const restSecs = se.rest_seconds ?? DEFAULT_REST
+  const restSecs = se.rest_seconds ?? settings.default_rest_seconds
 
   async function addSet() {
     const idx = se.sets.length
@@ -220,12 +221,12 @@ function ExerciseBlock({
         </button>
       </div>
 
-      <PrevHint prev={prev} />
+      <PrevHint prev={prev} unit={settings.weight_unit} />
 
       <div className="mt-2 space-y-1.5">
         <div className="grid grid-cols-[2rem_1fr_1fr_2rem] gap-2 px-1 text-xs uppercase text-slate-500">
           <span>Set</span>
-          <span>kg / lb</span>
+          <span>{settings.weight_unit}</span>
           <span>Reps</span>
           <span />
         </div>
@@ -244,11 +245,17 @@ function ExerciseBlock({
   )
 }
 
-function PrevHint({ prev }: { prev: SessionExercise['previous_performance'] }) {
+function PrevHint({
+  prev,
+  unit,
+}: {
+  prev: SessionExercise['previous_performance']
+  unit: string
+}) {
   if (!prev || prev.sets.length === 0) return null
   const summary = prev.sets
     .filter((s) => !s.is_warmup)
-    .map((s) => `${s.weight ?? '—'}×${s.reps ?? '—'}`)
+    .map((s) => `${s.weight ?? '—'}${unit}×${s.reps ?? '—'}`)
     .join(', ')
   return (
     <p className="text-xs text-slate-400">
