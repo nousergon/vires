@@ -28,13 +28,17 @@ sudo -u ec2-user git clone https://github.com/nousergon/vires.git /home/ec2-user
 cd /home/ec2-user/vires && sudo -u ec2-user python3.11 -m venv .venv
 ```
 
-## 4. First deploy (installs deps, migrates, seeds, builds web, nginx + systemd, starts)
+## 4. First deploy (installs deps, migrates, seeds, fetches web bundle, nginx + systemd, starts)
+The box does NOT build the frontend — CI builds the PWA and uploads it to
+`s3://alpha-engine-research/infrastructure/vires/web-dist.tgz`; the box fetches it.
+So either run the deploy workflow once first (it builds + uploads the bundle), or
+seed the bundle manually: `tar -czf - -C web/dist . | aws s3 cp - $DIST_S3`.
+Then on the box:
 ```
 sudo -u ec2-user bash /home/ec2-user/vires/infrastructure/deploy-on-merge.sh
 ```
-This is idempotent and is exactly what CI runs on every merge. First run downloads the
-embedding model (~13 MB) + Node 20 (~30 MB) + builds the vector index. Health check hits
-`http://127.0.0.1:8530/health`.
+Idempotent; exactly what CI runs each merge. First run downloads the embedding model
+(~13 MB) + builds the vector index. Health check hits `http://127.0.0.1:8530/health`.
 
 ## 5. Wire CI auto-deploy
 ```
