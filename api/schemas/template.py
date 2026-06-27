@@ -14,6 +14,7 @@ class TemplateExerciseIn(BaseModel):
     target_sets: int | None = None
     target_reps: int | None = None
     target_weight: float | None = None
+    target_duration_seconds: int | None = None
     rest_seconds: int | None = None
     notes: str | None = None
 
@@ -25,6 +26,7 @@ class TemplateExerciseOut(BaseModel):
     target_sets: int | None = None
     target_reps: int | None = None
     target_weight: float | None = None
+    target_duration_seconds: int | None = None
     rest_seconds: int | None = None
     notes: str | None = None
 

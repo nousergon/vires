@@ -30,8 +30,9 @@ function vibrate() {
 
 export interface Countdown {
   remaining: number // seconds remaining (0 when idle/done)
+  total: number // seconds the current countdown was started with (for a progress bar)
   running: boolean
-  start: (seconds: number) => void
+  start: (seconds: number, onFinish?: () => void) => void
   stop: () => void
   addSeconds: (delta: number) => void
 }
@@ -43,9 +44,11 @@ export interface Countdown {
  */
 export function useCountdown(): Countdown {
   const [remaining, setRemaining] = useState(0)
+  const [total, setTotal] = useState(0)
   const [running, setRunning] = useState(false)
   const endRef = useRef<number | null>(null)
   const firedRef = useRef(false)
+  const onFinishRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
     if (!running) return
@@ -58,21 +61,27 @@ export function useCountdown(): Countdown {
         beep()
         vibrate()
         setRunning(false)
+        const cb = onFinishRef.current
+        onFinishRef.current = null
+        cb?.()
       }
     }, 250)
     return () => clearInterval(id)
   }, [running])
 
-  const start = useCallback((seconds: number) => {
+  const start = useCallback((seconds: number, onFinish?: () => void) => {
     if (seconds <= 0) return
     endRef.current = Date.now() + seconds * 1000
     firedRef.current = false
+    onFinishRef.current = onFinish ?? null
+    setTotal(seconds)
     setRemaining(seconds)
     setRunning(true)
   }, [])
 
   const stop = useCallback(() => {
     endRef.current = null
+    onFinishRef.current = null
     setRunning(false)
     setRemaining(0)
   }, [])
@@ -86,7 +95,7 @@ export function useCountdown(): Countdown {
     [],
   )
 
-  return { remaining, running, start, stop, addSeconds }
+  return { remaining, total, running, start, stop, addSeconds }
 }
 
 export function fmtClock(totalSeconds: number): string {

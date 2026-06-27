@@ -17,6 +17,7 @@ class ExerciseOut(BaseModel):
     category: str | None = None
     description: str | None = None
     provenance: str
+    is_timed: bool = False
     aliases: list[str] = []
 
 
@@ -27,6 +28,7 @@ class ExerciseBrief(BaseModel):
     name: str
     primary_muscles: list[str] = []
     equipment: str | None = None
+    is_timed: bool = False
 
 
 class ExerciseSearchOut(BaseModel):

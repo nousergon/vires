@@ -103,6 +103,28 @@ def test_target_weight_used_despite_blank_prior_history(client):
     assert ws["exercises"][0]["sets"][0]["weight"] == 135
 
 
+def test_timed_exercise_seeds_duration_and_flags(client):
+    hits = client.get("/api/exercises/search", params={"q": "plank"}).json()
+    plank = next(h["exercise"] for h in hits if h["exercise"]["name"].lower() == "plank")
+    assert plank["is_timed"] is True
+    tpl = client.post(
+        "/api/templates",
+        json={
+            "name": "Core",
+            "exercises": [
+                {"exercise_id": plank["id"], "target_sets": 2, "target_duration_seconds": 60}
+            ],
+        },
+    ).json()
+    assert tpl["exercises"][0]["target_duration_seconds"] == 60
+    ws = client.post("/api/workouts", json={"template_id": tpl["id"]}).json()
+    se = ws["exercises"][0]
+    assert se["exercise"]["is_timed"] is True
+    assert se["target_duration_seconds"] == 60
+    assert [s["duration_seconds"] for s in se["sets"]] == [60, 60]
+    assert all(s["reps"] is None for s in se["sets"])  # timed: no reps
+
+
 def test_mark_set_done_toggles_completed_at(client):
     ex = _ex_id(client, "barbell deadlift")
     ws = client.post("/api/workouts", json={}).json()

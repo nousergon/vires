@@ -17,6 +17,7 @@ def to_exercise_out(ex: Exercise) -> ExerciseOut:
         category=ex.category,
         description=ex.description,
         provenance=ex.provenance,
+        is_timed=ex.is_timed,
         aliases=[a.alias_text for a in ex.aliases],
     )
 
@@ -27,4 +28,5 @@ def to_exercise_brief(ex: Exercise) -> ExerciseBrief:
         name=ex.name,
         primary_muscles=ex.primary_muscles or [],
         equipment=ex.equipment,
+        is_timed=ex.is_timed,
     )

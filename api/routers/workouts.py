@@ -95,6 +95,7 @@ def _se_out(db: Session, ident: Identity, se: SessionExercise) -> SessionExercis
         target_sets=se.target_sets,
         target_reps=se.target_reps,
         target_weight=se.target_weight,
+        target_duration_seconds=se.target_duration_seconds,
         rest_seconds=se.rest_seconds,
         notes=se.notes,
         sets=[_set_out(s) for s in se.sets],
@@ -154,6 +155,7 @@ def start_workout(
                 target_sets=te.target_sets,
                 target_reps=te.target_reps,
                 target_weight=te.target_weight,
+                target_duration_seconds=te.target_duration_seconds,
                 rest_seconds=te.rest_seconds,
                 notes=te.notes,
             )
@@ -191,12 +193,15 @@ def _seed_planned_sets(db: Session, ident: Identity, se: SessionExercise) -> Non
         # target weight when there's no history or the prior weight was blank
         # (e.g. earlier planned sets that were never filled in).
         last_weight = ghost.weight if ghost else None
+        timed = se.exercise.is_timed
         db.add(
             SetEntry(
                 session_exercise_id=se.id,
                 set_number=i + 1,
-                reps=(ghost.reps if ghost else None) or se.target_reps,
+                reps=None if timed else ((ghost.reps if ghost else None) or se.target_reps),
                 weight=last_weight if last_weight is not None else se.target_weight,
+                # timed exercises seed the target hold; actual is logged on completion
+                duration_seconds=se.target_duration_seconds if timed else None,
                 completed_at=None,
             )
         )
@@ -297,6 +302,7 @@ def add_session_exercise(
         target_sets=body.target_sets,
         target_reps=body.target_reps,
         target_weight=body.target_weight,
+        target_duration_seconds=body.target_duration_seconds,
         rest_seconds=body.rest_seconds,
         notes=body.notes,
     )
