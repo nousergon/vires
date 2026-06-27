@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type ExerciseBrief, type Template, type TemplateExerciseInput } from '../lib/api'
 import { Button, Card, EmptyState, PageTitle, Sheet, Spinner } from '../components/ui'
 import ExercisePicker from '../components/ExercisePicker'
+import { useSettings } from '../lib/useSettings'
 
 interface DraftRow extends TemplateExerciseInput {
   name: string
@@ -85,6 +86,7 @@ function TemplateEditor({
     })) ?? [],
   )
   const [pickerOpen, setPickerOpen] = useState(false)
+  const settings = useSettings()
 
   const save = useMutation({
     mutationFn: () => {
@@ -104,7 +106,13 @@ function TemplateEditor({
   const addRow = (ex: ExerciseBrief) =>
     setRows((r) => [
       ...r,
-      { exercise_id: ex.id, name: ex.name, target_sets: 3, target_reps: 8, rest_seconds: 90 },
+      {
+        exercise_id: ex.id,
+        name: ex.name,
+        target_sets: settings.default_sets,
+        target_reps: settings.default_reps,
+        rest_seconds: settings.default_rest_seconds,
+      },
     ])
   const patch = (i: number, p: Partial<DraftRow>) =>
     setRows((r) => r.map((row, idx) => (idx === i ? { ...row, ...p } : row)))
