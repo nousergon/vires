@@ -1,0 +1,76 @@
+name: Deploy Vires via SSM
+
+# Push to main (or manual) → assume the shared OIDC role → SSM to the shared
+# *.nousergon.ai EC2 box → pull this repo to the commit + run the box deploy
+# script (deps, migrate, build, nginx/systemd sync, restart, health-check).
+# Mirrors Metron's deploy. Set the instance id once: gh variable set VIRES_INSTANCE_ID.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: vires-deploy
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy Vires via SSM
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      VIRES_INSTANCE_ID: ${{ vars.VIRES_INSTANCE_ID }}
+
+    steps:
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::711398986525:role/github-actions-lambda-deploy
+          aws-region: us-east-1
+
+      - name: Send SSM deploy command
+        id: send
+        run: |
+          set -euo pipefail
+          CMD_BODY="flock -w 600 /tmp/vires-deploy.lock -c 'set -e; sudo -u ec2-user git -C /home/ec2-user/vires fetch origin --quiet && sudo -u ec2-user git -C /home/ec2-user/vires reset --hard ${GITHUB_SHA} --quiet && sudo -u ec2-user bash /home/ec2-user/vires/infrastructure/deploy-on-merge.sh'"
+          CMD_ID=$(aws ssm send-command \
+            --instance-ids "${VIRES_INSTANCE_ID}" \
+            --document-name AWS-RunShellScript \
+            --comment "vires deploy ${GITHUB_SHA}" \
+            --parameters "commands=[\"${CMD_BODY}\"]" \
+            --query 'Command.CommandId' \
+            --output text)
+          echo "command_id=${CMD_ID}" >> "$GITHUB_OUTPUT"
+          echo "Sent SSM command: ${CMD_ID}"
+
+      - name: Wait for SSM command to finish
+        run: |
+          aws ssm wait command-executed \
+            --instance-id "${VIRES_INSTANCE_ID}" \
+            --command-id "${{ steps.send.outputs.command_id }}" || true
+
+      - name: Fetch deploy output
+        if: always()
+        run: |
+          set +e
+          STATUS=$(aws ssm get-command-invocation \
+            --instance-id "${VIRES_INSTANCE_ID}" \
+            --command-id "${{ steps.send.outputs.command_id }}" \
+            --query '[Status,ResponseCode]' --output text)
+          echo "Status: ${STATUS}"
+          echo "── stdout ──"
+          aws ssm get-command-invocation \
+            --instance-id "${VIRES_INSTANCE_ID}" \
+            --command-id "${{ steps.send.outputs.command_id }}" \
+            --query 'StandardOutputContent' --output text
+          echo "── stderr ──"
+          aws ssm get-command-invocation \
+            --instance-id "${VIRES_INSTANCE_ID}" \
+            --command-id "${{ steps.send.outputs.command_id }}" \
+            --query 'StandardErrorContent' --output text
+          echo "${STATUS}" | grep -q "^Success" || exit 1

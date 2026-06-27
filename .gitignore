@@ -25,6 +25,7 @@ data/exercises.npz
 web/node_modules/
 web/dist/
 node_modules/
+.node/        # vendored Node runtime on the deploy box
 
 # OS / editor
 .DS_Store

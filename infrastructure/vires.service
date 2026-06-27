@@ -1,0 +1,17 @@
+[Unit]
+Description=Vires — strength-training tracker (FastAPI + built PWA)
+After=network.target
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/home/ec2-user/vires
+EnvironmentFile=-/home/ec2-user/vires/.env
+# FastAPI serves the API (/api, /health) AND the built React PWA (web/dist).
+# Bound to localhost; nginx terminates TLS and reverse-proxies vires.nousergon.ai.
+ExecStart=/home/ec2-user/vires/.venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8530 --log-level info
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

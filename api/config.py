@@ -24,7 +24,10 @@ class Settings(BaseSettings):
     fastembed_cache_dir: str = ".fastembed_cache"
     vector_store_path: str = "data/exercises.npz"
     rrf_k: int = 60
-    dedup_threshold: float = 0.85  # cosine >= this => candidate duplicate/alias
+    # cosine >= this => advisory "did you mean?" on add-exercise (name+keywords
+    # embeddings cluster name-variants ~0.8+, so this is a suggestion, not a
+    # hard block; exact normalized-name matches are caught lexically first).
+    dedup_threshold: float = 0.82
     search_limit: int = 25
 
     # Single-user MVP identity (schema-ready multitenancy).

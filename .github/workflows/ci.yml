@@ -50,6 +50,10 @@ jobs:
         if: steps.guard.outputs.present == 'true'
         run: npm ci
 
+      - name: Lint
+        if: steps.guard.outputs.present == 'true'
+        run: npm run lint
+
       - name: Typecheck + build
         if: steps.guard.outputs.present == 'true'
         run: npm run build
