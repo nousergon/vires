@@ -1,11 +1,14 @@
 name: Deploy Vires via SSM
 
 # Two stages: (1) build the React PWA on a clean linux runner and upload the
-# bundle to S3; (2) SSM to the shared *.nousergon.ai box, which pulls this repo
-# + fetches the prebuilt bundle + runs deploy-on-merge.sh (deps, migrate, seed,
-# nginx/systemd, restart, health). The box never builds the frontend (Node 18,
-# tight disk) — CI owns the build. Mirrors Metron's OIDC→SSM deploy otherwise.
-# One-time: gh variable set VIRES_INSTANCE_ID --body i-09b539c844515d549
+# bundle to S3; (2) SSM to the host, which pulls this repo, fetches the prebuilt
+# bundle, and runs deploy-on-merge.sh (deps, migrate, seed, nginx/systemd,
+# restart, health). The host never builds the frontend — CI owns the build.
+#
+# Configure once (repo Settings → Secrets and variables → Actions → Variables):
+#   AWS_DEPLOY_ROLE_ARN  – IAM role to assume via OIDC
+#   VIRES_INSTANCE_ID    – EC2 instance id to deploy to
+#   VIRES_DIST_S3        – s3:// path for the built web bundle
 
 on:
   push:
@@ -19,9 +22,6 @@ concurrency:
 permissions:
   id-token: write
   contents: read
-
-env:
-  DIST_S3: s3://alpha-engine-research/infrastructure/vires/web-dist.tgz
 
 jobs:
   build-web:
@@ -43,10 +43,10 @@ jobs:
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::711398986525:role/github-actions-lambda-deploy
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: us-east-1
       - name: Upload bundle to S3
-        run: aws s3 cp web-dist.tgz "${DIST_S3}"
+        run: aws s3 cp web-dist.tgz "${{ vars.VIRES_DIST_S3 }}"
 
   deploy:
     name: Deploy Vires via SSM
@@ -55,18 +55,20 @@ jobs:
     timeout-minutes: 15
     env:
       VIRES_INSTANCE_ID: ${{ vars.VIRES_INSTANCE_ID }}
+      VIRES_DIST_S3: ${{ vars.VIRES_DIST_S3 }}
     steps:
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::711398986525:role/github-actions-lambda-deploy
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: us-east-1
 
       - name: Send SSM deploy command
         id: send
         run: |
           set -euo pipefail
-          CMD_BODY="flock -w 600 /tmp/vires-deploy.lock -c 'set -e; sudo -u ec2-user -H git -C /home/ec2-user/vires fetch origin --quiet && sudo -u ec2-user -H git -C /home/ec2-user/vires reset --hard ${GITHUB_SHA} --quiet && sudo -u ec2-user -H bash /home/ec2-user/vires/infrastructure/deploy-on-merge.sh'"
+          # Pass the bundle location to the host script via env (kept out of source).
+          CMD_BODY="flock -w 600 /tmp/vires-deploy.lock -c 'set -e; sudo -u ec2-user -H git -C /home/ec2-user/vires fetch origin --quiet && sudo -u ec2-user -H git -C /home/ec2-user/vires reset --hard ${GITHUB_SHA} --quiet && sudo -u ec2-user -H VIRES_DIST_S3=${VIRES_DIST_S3} bash /home/ec2-user/vires/infrastructure/deploy-on-merge.sh'"
           CMD_ID=$(aws ssm send-command \
             --instance-ids "${VIRES_INSTANCE_ID}" \
             --document-name AWS-RunShellScript \
