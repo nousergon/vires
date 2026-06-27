@@ -20,24 +20,10 @@ from api.schemas.exercise import (
     ExerciseSearchOut,
     PerformedSet,
 )
+from api.serializers import to_exercise_out as to_out
 from api.services.search import get_search_service
 
 router = APIRouter(prefix="/exercises", tags=["exercises"])
-
-
-def to_out(ex: Exercise) -> ExerciseOut:
-    return ExerciseOut(
-        id=ex.id,
-        name=ex.name,
-        primary_muscles=ex.primary_muscles or [],
-        secondary_muscles=ex.secondary_muscles or [],
-        equipment=ex.equipment,
-        mechanic=ex.mechanic,
-        category=ex.category,
-        description=ex.description,
-        provenance=ex.provenance,
-        aliases=[a.alias_text for a in ex.aliases],
-    )
 
 
 def _visible(ex: Exercise | None, ident: Identity) -> bool:

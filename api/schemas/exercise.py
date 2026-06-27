@@ -20,6 +20,15 @@ class ExerciseOut(BaseModel):
     aliases: list[str] = []
 
 
+class ExerciseBrief(BaseModel):
+    """Lightweight exercise reference embedded in templates / sessions / history."""
+
+    id: int
+    name: str
+    primary_muscles: list[str] = []
+    equipment: str | None = None
+
+
 class ExerciseSearchOut(BaseModel):
     exercise: ExerciseOut
     score: float

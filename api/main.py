@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from api.config import get_settings
-from api.routers import exercises, health
+from api.routers import exercises, health, templates
 
 settings = get_settings()
 
@@ -32,7 +32,8 @@ app.add_middleware(
 
 app.include_router(health.router)
 app.include_router(exercises.router)
-# Feature routers mounted as phases land: templates, workouts
+app.include_router(templates.router)
+# Feature routers mounted as phases land: workouts
 
 
 def _mount_spa() -> None:
