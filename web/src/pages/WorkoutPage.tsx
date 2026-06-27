@@ -202,8 +202,7 @@ function ExerciseBlock({
       reps: ghost?.reps ?? se.target_reps ?? null,
       weight: ghost?.weight ?? null,
     })
-    onRest(restSecs)
-    onChanged()
+    onChanged() // rest timer starts when a set is checked off, not on add
   }
 
   return (
@@ -224,14 +223,23 @@ function ExerciseBlock({
       <PrevHint prev={prev} unit={settings.weight_unit} />
 
       <div className="mt-2 space-y-1.5">
-        <div className="grid grid-cols-[2rem_1fr_1fr_2rem] gap-2 px-1 text-xs uppercase text-slate-500">
+        <div className="grid grid-cols-[2rem_1fr_1fr_2rem_1.75rem] gap-2 px-1 text-xs uppercase text-slate-500">
           <span>Set</span>
           <span>{settings.weight_unit}</span>
           <span>Reps</span>
+          <span className="text-center">✓</span>
           <span />
         </div>
         {se.sets.map((s) => (
-          <SetRow key={s.id} sessionId={session.id} seId={se.id} set={s} onChanged={onChanged} />
+          <SetRow
+            key={s.id}
+            sessionId={session.id}
+            seId={se.id}
+            set={s}
+            restSecs={restSecs}
+            onRest={onRest}
+            onChanged={onChanged}
+          />
         ))}
       </div>
 
@@ -268,21 +276,46 @@ function SetRow({
   sessionId,
   seId,
   set,
+  restSecs,
+  onRest,
   onChanged,
 }: {
   sessionId: number
   seId: number
   set: SetEntry
+  restSecs: number
+  onRest: (secs: number) => void
   onChanged: () => void
 }) {
   const [weight, setWeight] = useState(set.weight?.toString() ?? '')
   const [reps, setReps] = useState(set.reps?.toString() ?? '')
+  const done = !!set.completed_at
 
   const save = (patch: { weight?: number; reps?: number }) =>
     api.updateSet(sessionId, seId, set.id, patch)
 
+  async function toggleDone() {
+    const nowDone = !done
+    // Persist the current entries when checking off, then mark done/undone.
+    await api.updateSet(sessionId, seId, set.id, {
+      done: nowDone,
+      weight: weight === '' ? undefined : Number(weight),
+      reps: reps === '' ? undefined : Number(reps),
+    })
+    if (nowDone) onRest(restSecs)
+    onChanged()
+  }
+
+  const cell = `rounded-lg px-3 py-2 text-center outline-none focus:ring-1 focus:ring-amber-500 ${
+    done ? 'bg-emerald-900/30 text-slate-300' : 'bg-slate-800'
+  }`
+
   return (
-    <div className="grid grid-cols-[2rem_1fr_1fr_2rem] items-center gap-2">
+    <div
+      className={`grid grid-cols-[2rem_1fr_1fr_2rem_1.75rem] items-center gap-2 rounded-lg ${
+        done ? 'bg-emerald-900/10' : ''
+      }`}
+    >
       <button
         onClick={async () => {
           await api.updateSet(sessionId, seId, set.id, { is_warmup: !set.is_warmup })
@@ -301,7 +334,7 @@ function SetRow({
         value={weight}
         onChange={(e) => setWeight(e.target.value)}
         onBlur={() => save({ weight: weight === '' ? undefined : Number(weight) })}
-        className="rounded-lg bg-slate-800 px-3 py-2 text-center outline-none focus:ring-1 focus:ring-amber-500"
+        className={cell}
       />
       <input
         type="number"
@@ -309,8 +342,17 @@ function SetRow({
         value={reps}
         onChange={(e) => setReps(e.target.value)}
         onBlur={() => save({ reps: reps === '' ? undefined : Number(reps) })}
-        className="rounded-lg bg-slate-800 px-3 py-2 text-center outline-none focus:ring-1 focus:ring-amber-500"
+        className={cell}
       />
+      <button
+        onClick={toggleDone}
+        title="Mark set done"
+        className={`h-7 w-7 rounded-md text-sm font-bold ${
+          done ? 'bg-emerald-500 text-slate-950' : 'bg-slate-700 text-slate-400'
+        }`}
+      >
+        ✓
+      </button>
       <button
         className="text-slate-600 hover:text-red-400"
         onClick={async () => {

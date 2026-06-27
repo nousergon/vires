@@ -204,7 +204,7 @@ export const api = {
     sessionId: number,
     seId: number,
     setId: number,
-    body: Partial<{ reps: number; weight: number; rpe: number; is_warmup: boolean }>,
+    body: Partial<{ reps: number; weight: number; rpe: number; is_warmup: boolean; done: boolean }>,
   ) =>
     req<SetEntry>(`/workouts/${sessionId}/exercises/${seId}/sets/${setId}`, {
       method: 'PATCH',

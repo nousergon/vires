@@ -22,7 +22,6 @@ from datetime import UTC, datetime
 from sqlalchemy import (
     JSON,
     Boolean,
-    DateTime,
     Float,
     ForeignKey,
     Integer,
@@ -32,6 +31,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from api.db.base import Base
+from api.db.types import UTCDateTime
 
 
 def _utcnow() -> datetime:
@@ -46,7 +46,7 @@ class Tenant(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
 
 
 class User(Base):
@@ -56,7 +56,7 @@ class User(Base):
     tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
     email: Mapped[str | None] = mapped_column(String, nullable=True)
     display_name: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
 
 
 class UserSettings(Base):
@@ -71,7 +71,7 @@ class UserSettings(Base):
     default_sets: Mapped[int] = mapped_column(Integer, default=3)
     default_reps: Mapped[int] = mapped_column(Integer, default=8)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+        UTCDateTime(), default=_utcnow, onupdate=_utcnow
     )
 
 
@@ -103,7 +103,7 @@ class Exercise(Base):
     created_by_user_id: Mapped[str | None] = mapped_column(
         ForeignKey("users.id"), nullable=True
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
 
     aliases: Mapped[list[ExerciseAlias]] = relationship(
         back_populates="exercise",
@@ -137,9 +137,9 @@ class WorkoutTemplate(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+        UTCDateTime(), default=_utcnow, onupdate=_utcnow
     )
 
     exercises: Mapped[list[TemplateExercise]] = relationship(
@@ -177,8 +177,8 @@ class WorkoutSession(Base):
     tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     name: Mapped[str | None] = mapped_column(String, nullable=True)
-    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
-    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
+    ended_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Which routine this session was started from (nullable => empty/ad-hoc workout).
     template_id: Mapped[int | None] = mapped_column(
@@ -232,8 +232,8 @@ class SetEntry(Base):
     rpe: Mapped[float | None] = mapped_column(Float, nullable=True)
     duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_warmup: Mapped[bool] = mapped_column(Boolean, default=False)
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
 
     session_exercise: Mapped[SessionExercise] = relationship(back_populates="sets")
 
@@ -250,7 +250,7 @@ class Program(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
 
     weeks: Mapped[list[ProgramWeek]] = relationship(
         back_populates="program",
