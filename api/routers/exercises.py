@@ -50,8 +50,13 @@ def create_exercise(
     name = body.name.strip()
     cn = normalize_name(name)
 
+    # Only block on an EXACT normalized-name match (precise, prevents literal
+    # re-adds). The semantic "did you mean?" check was removed: with the
+    # keyword-diluted embeddings it produced confident false positives (e.g.
+    # "lunge dumbbell overhead" -> "Incline Dumbbell Flyes" @ 0.85), blocking
+    # legitimate on-the-spot additions. Users see real matches via the typeahead
+    # before choosing "add new"; collapsing true synonyms is handled by aliases.
     if not body.force:
-        # 1) exact normalized-name match (definite duplicate)
         exact = db.scalar(
             select(Exercise).where(
                 Exercise.canonical_name == cn,
@@ -63,17 +68,6 @@ def create_exercise(
             return ExerciseCreateResult(
                 created=False, reason="exact", duplicate_of=to_out(exact)
             )
-        # 2) advisory semantic near-duplicate
-        dup = get_search_service().find_duplicate(name)
-        if dup is not None:
-            cand = db.get(Exercise, dup[0])
-            if _visible(cand, ident) and cand.canonical_exercise_id is None:
-                return ExerciseCreateResult(
-                    created=False,
-                    reason="similar",
-                    duplicate_of=to_out(cand),
-                    similarity=round(dup[1], 4),
-                )
 
     ex = Exercise(
         tenant_id=ident.tenant_id,

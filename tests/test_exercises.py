@@ -30,6 +30,22 @@ def test_create_exact_duplicate_blocked(client):
     assert body["duplicate_of"]["name"] == "Barbell Deadlift"
 
 
+def test_create_novel_multiword_exercise_not_blocked(client):
+    # A novel name with only loosely-similar catalog entries must save on the
+    # spot (no false-positive "did you mean?" block). Regression for the
+    # "lunge dumbbell overhead" case.
+    r = client.post("/api/exercises", json={"name": "lunge dumbbell overhead"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["created"] is True, body
+    assert body["reason"] == "created"
+    new_id = body["exercise"]["id"]
+
+    # and it persists / is findable
+    hits = client.get("/api/exercises/search", params={"q": "lunge dumbbell overhead"}).json()
+    assert new_id in [h["exercise"]["id"] for h in hits]
+
+
 def test_create_new_exercise_then_searchable(client):
     r = client.post(
         "/api/exercises",
