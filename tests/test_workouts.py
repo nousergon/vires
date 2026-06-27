@@ -75,7 +75,9 @@ def test_history_list_and_volume(client):
     ex = _ex_id(client, "barbell deadlift")
     ws = client.post("/api/workouts", json={"name": "Vol"}).json()
     se = client.post(f"/api/workouts/{ws['id']}/exercises", json={"exercise_id": ex}).json()
-    client.post(f"/api/workouts/{ws['id']}/exercises/{se['id']}/sets", json={"reps": 5, "weight": 100})
+    client.post(
+        f"/api/workouts/{ws['id']}/exercises/{se['id']}/sets", json={"reps": 5, "weight": 100}
+    )
     client.post(
         f"/api/workouts/{ws['id']}/exercises/{se['id']}/sets",
         json={"reps": 10, "weight": 0, "is_warmup": True},
