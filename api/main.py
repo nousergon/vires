@@ -30,10 +30,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Health stays at root (deploy/nginx healthcheck); feature APIs live under /api
+# so they never collide with the SPA's client-side routes served at root.
 app.include_router(health.router)
-app.include_router(exercises.router)
-app.include_router(templates.router)
-app.include_router(workouts.router)
+app.include_router(exercises.router, prefix="/api")
+app.include_router(templates.router, prefix="/api")
+app.include_router(workouts.router, prefix="/api")
 
 
 def _mount_spa() -> None:
