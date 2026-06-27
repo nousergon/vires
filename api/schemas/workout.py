@@ -29,6 +29,8 @@ class SetUpdate(BaseModel):
     rpe: float | None = None
     duration_seconds: int | None = None
     is_warmup: bool | None = None
+    # Mark the set done/undone — stamps (or clears) completed_at server-side.
+    done: bool | None = None
 
 
 class SetOut(BaseModel):

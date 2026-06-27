@@ -168,7 +168,32 @@ def start_workout(
     db.add(ws)
     db.commit()
     db.refresh(ws)
+    # Pre-create the planned set rows for template exercises (Strong-style: you
+    # see N empty sets ready to fill, prefilled from last time / target reps).
+    for se in ws.exercises:
+        _seed_planned_sets(db, ident, se)
+    db.commit()
+    db.refresh(ws)
     return _session_out(db, ident, ws)
+
+
+def _seed_planned_sets(db: Session, ident: Identity, se: SessionExercise) -> None:
+    n = se.target_sets or 0
+    if n <= 0 or se.sets:
+        return
+    prev = _last_performance(db, ident, se.exercise_id, se.session_id)
+    prev_sets = prev.sets if prev else []
+    for i in range(n):
+        ghost = prev_sets[i] if i < len(prev_sets) else (prev_sets[-1] if prev_sets else None)
+        db.add(
+            SetEntry(
+                session_exercise_id=se.id,
+                set_number=i + 1,
+                reps=(ghost.reps if ghost else None) or se.target_reps,
+                weight=ghost.weight if ghost else None,
+                completed_at=None,
+            )
+        )
 
 
 @router.get("", response_model=list[WorkoutSummary])
@@ -328,7 +353,11 @@ def update_set(
     s = db.get(SetEntry, set_id)
     if s is None or s.session_exercise_id != se.id:
         raise HTTPException(404, "Set not found")
-    for field, value in body.model_dump(exclude_unset=True).items():
+    fields = body.model_dump(exclude_unset=True)
+    done = fields.pop("done", None)
+    if done is not None:
+        s.completed_at = _now() if done else None
+    for field, value in fields.items():
         setattr(s, field, value)
     db.commit()
     db.refresh(s)

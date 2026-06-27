@@ -49,6 +49,49 @@ def test_start_from_template_clones_exercises(client):
     assert ws["exercises"][0]["rest_seconds"] == 120
 
 
+def test_start_from_template_seeds_planned_sets(client):
+    e1 = _ex_id(client, "bench press")
+    tpl = client.post(
+        "/api/templates",
+        json={
+            "name": "Seeded",
+            "exercises": [{"exercise_id": e1, "target_sets": 3, "target_reps": 8}],
+        },
+    ).json()
+    ws = client.post("/api/workouts", json={"template_id": tpl["id"]}).json()
+    se = ws["exercises"][0]
+    assert len(se["sets"]) == 3  # planned rows pre-created
+    assert se["sets"][0]["reps"] == 8  # prefilled from target reps
+    assert se["sets"][0]["completed_at"] is None  # not done yet
+
+
+def test_mark_set_done_toggles_completed_at(client):
+    ex = _ex_id(client, "barbell deadlift")
+    ws = client.post("/api/workouts", json={}).json()
+    se = client.post(f"/api/workouts/{ws['id']}/exercises", json={"exercise_id": ex}).json()
+    s = client.post(
+        f"/api/workouts/{ws['id']}/exercises/{se['id']}/sets", json={"reps": 5, "weight": 100}
+    ).json()
+
+    done = client.patch(
+        f"/api/workouts/{ws['id']}/exercises/{se['id']}/sets/{s['id']}",
+        json={"done": True, "weight": 105},
+    ).json()
+    assert done["completed_at"] is not None
+    assert done["weight"] == 105
+
+    undone = client.patch(
+        f"/api/workouts/{ws['id']}/exercises/{se['id']}/sets/{s['id']}", json={"done": False}
+    ).json()
+    assert undone["completed_at"] is None
+
+
+def test_started_at_is_timezone_aware(client):
+    ws = client.post("/api/workouts", json={}).json()
+    # tz-aware ISO so clients don't misread UTC as local (elapsed-timer fix)
+    assert ws["started_at"].endswith("+00:00") or ws["started_at"].endswith("Z")
+
+
 def test_previous_performance_hint(client):
     ex = _ex_id(client, "barbell curl")
     # First session: log 3x10@50, finish.
