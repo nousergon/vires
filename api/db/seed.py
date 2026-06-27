@@ -18,12 +18,51 @@ import sys
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
-from api.db.fts import build_keywords, fts_upsert
+from api.db.fts import build_keywords, fts_sync_exercise, fts_upsert
 from api.db.identity import ensure_dev_identity
-from api.db.models import Exercise
+from api.db.models import Exercise, ExerciseAlias
 from api.db.session import SessionLocal
 
 SEED_PATH = pathlib.Path(__file__).resolve().parent / "seed_data" / "exercises.json"
+
+# Curated gym abbreviations / common names -> canonical catalog entry. Applied
+# only when the target exists. These ride the FTS keywords so BM25 resolves
+# "RDL", "OHP", "pull up" to the right exercise (free-exercise-db has no
+# abbreviations of its own). The alias *mechanism* (also exposed via the API)
+# is the durable piece; this is a high-confidence starter set.
+ALIAS_SEED: dict[str, list[str]] = {
+    "Romanian Deadlift": ["RDL"],
+    "Barbell Squat": ["back squat"],
+    "Barbell Full Squat": ["squat"],
+    "Standing Military Press": ["OHP", "overhead press", "military press"],
+    "Pullups": ["pull up", "pull-up", "pullup"],
+    "Chin-Up": ["chin up", "chinup"],
+    "Wide-Grip Lat Pulldown": ["lat pulldown", "pulldown"],
+    "Dumbbell Bench Press": ["db bench press"],
+    "Barbell Bench Press - Medium Grip": ["bench press", "flat bench press", "bb bench"],
+    "Barbell Curl": ["bicep curl", "biceps curl"],
+    "Standing Barbell Calf Raise": ["calf raise"],
+}
+
+
+def apply_alias_seed(session: Session) -> int:
+    added = 0
+    for target_name, aliases in ALIAS_SEED.items():
+        ex = session.scalar(
+            select(Exercise).where(Exercise.canonical_name == normalize_name(target_name))
+        )
+        if ex is None:
+            continue
+        existing = {a.alias_text.lower() for a in ex.aliases}
+        for alias in aliases:
+            if alias.lower() in existing:
+                continue
+            ex.aliases.append(ExerciseAlias(alias_text=alias))  # keeps collection fresh
+            added += 1
+        session.flush()
+        fts_sync_exercise(session, ex)  # fold aliases into BM25 keywords
+    session.commit()
+    return added
 
 
 def normalize_name(name: str) -> str:
@@ -81,7 +120,8 @@ def seed(session: Session, reset: bool = False) -> int:
         count += 1
 
     session.commit()
-    print(f"Seeded {count} canonical exercises.")
+    n_aliases = apply_alias_seed(session)
+    print(f"Seeded {count} canonical exercises (+{n_aliases} curated aliases).")
     return count
 
 

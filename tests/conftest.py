@@ -46,6 +46,9 @@ def _schema():
     with SessionLocal() as s:
         ensure_dev_identity(s)
         seed(s)
+        from api.services.search import get_search_service
+
+        get_search_service().reindex(s)
     yield
 
 
@@ -55,13 +58,18 @@ def db():
     try:
         yield session
     finally:
-        # remove provisional/user exercises created during the test + their FTS rows
+        # remove provisional/user exercises created during the test + their FTS
+        # rows + their vectors, so each test sees the pristine canonical catalog
         session.rollback()
+        from api.services.search import get_search_service
+
+        svc = get_search_service()
         rows = session.execute(
             text("SELECT id FROM exercises WHERE provenance != 'canonical'")
         ).fetchall()
         for (rid,) in rows:
             session.execute(text("DELETE FROM exercises_fts WHERE rowid = :r"), {"r": rid})
+            svc.remove_exercise(rid)
         session.execute(text("DELETE FROM exercises WHERE provenance != 'canonical'"))
         for table in _USER_TABLES:
             session.execute(text(f"DELETE FROM {table}"))

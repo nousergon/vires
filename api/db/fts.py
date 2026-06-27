@@ -54,3 +54,16 @@ def fts_upsert(session: Session, rowid: int, name: str, keywords: str) -> None:
 
 def fts_delete(session: Session, rowid: int) -> None:
     session.execute(text("DELETE FROM exercises_fts WHERE rowid = :rid"), {"rid": rowid})
+
+
+def fts_sync_exercise(session: Session, exercise) -> None:  # noqa: ANN001 (duck-typed ORM row)
+    """Rebuild the FTS row for an exercise from its current fields + aliases."""
+    keywords = build_keywords(
+        aliases=[a.alias_text for a in exercise.aliases],
+        primary_muscles=exercise.primary_muscles or [],
+        secondary_muscles=exercise.secondary_muscles or [],
+        equipment=exercise.equipment,
+        category=exercise.category,
+        mechanic=exercise.mechanic,
+    )
+    fts_upsert(session, exercise.id, exercise.name, keywords)
