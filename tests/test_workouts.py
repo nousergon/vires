@@ -83,6 +83,26 @@ def test_template_target_weight_seeds_set_weight(client):
     assert all(s["weight"] == 135 for s in se["sets"])  # planned sets seeded with it
 
 
+def test_target_weight_used_despite_blank_prior_history(client):
+    e1 = _ex_id(client, "bench press")
+    # Prior session where the exercise was logged with NO weight (e.g. an
+    # earlier planned set left blank) — must not suppress the routine's weight.
+    w0 = client.post("/api/workouts", json={}).json()
+    se0 = client.post(f"/api/workouts/{w0['id']}/exercises", json={"exercise_id": e1}).json()
+    client.post(f"/api/workouts/{w0['id']}/exercises/{se0['id']}/sets", json={"reps": 5})
+    client.post(f"/api/workouts/{w0['id']}/finish")
+
+    tpl = client.post(
+        "/api/templates",
+        json={
+            "name": "W",
+            "exercises": [{"exercise_id": e1, "target_sets": 1, "target_weight": 135}],
+        },
+    ).json()
+    ws = client.post("/api/workouts", json={"template_id": tpl["id"]}).json()
+    assert ws["exercises"][0]["sets"][0]["weight"] == 135
+
+
 def test_mark_set_done_toggles_completed_at(client):
     ex = _ex_id(client, "barbell deadlift")
     ws = client.post("/api/workouts", json={}).json()

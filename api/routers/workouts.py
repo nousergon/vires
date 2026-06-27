@@ -187,14 +187,16 @@ def _seed_planned_sets(db: Session, ident: Identity, se: SessionExercise) -> Non
     prev_sets = prev.sets if prev else []
     for i in range(n):
         ghost = prev_sets[i] if i < len(prev_sets) else (prev_sets[-1] if prev_sets else None)
+        # Prefer last time's ACTUAL logged weight; fall back to the routine's
+        # target weight when there's no history or the prior weight was blank
+        # (e.g. earlier planned sets that were never filled in).
+        last_weight = ghost.weight if ghost else None
         db.add(
             SetEntry(
                 session_exercise_id=se.id,
                 set_number=i + 1,
                 reps=(ghost.reps if ghost else None) or se.target_reps,
-                # last time's weight if we have history, else the routine's
-                # placeholder target weight (until the AI coach proposes one).
-                weight=ghost.weight if ghost else se.target_weight,
+                weight=last_weight if last_weight is not None else se.target_weight,
                 completed_at=None,
             )
         )
