@@ -32,9 +32,11 @@ export default function ExercisePicker({
     }
   }, [open])
 
+  // Just the closest few: a short list makes "nothing matches → add new" obvious.
+  const LIMIT = 6
   const { data: hits = [], isFetching } = useQuery({
-    queryKey: ['exerciseSearch', debounced],
-    queryFn: () => api.searchExercises(debounced, 30),
+    queryKey: ['exerciseSearch', debounced, LIMIT],
+    queryFn: () => api.searchExercises(debounced, LIMIT),
     enabled: open && debounced.length > 0,
   })
 

@@ -15,7 +15,7 @@ export default function ExercisesPage() {
   }, [q])
 
   const { data: hits = [], isFetching } = useQuery({
-    queryKey: ['exerciseSearch', debounced],
+    queryKey: ['exerciseSearch', debounced, 40],
     queryFn: () => api.searchExercises(debounced, 40),
     enabled: debounced.length > 0,
   })
