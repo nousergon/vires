@@ -24,16 +24,15 @@ jobs:
       - name: Lint
         run: uv run ruff check .
 
-      - name: Test
+      - name: Test (with coverage gate, fail_under in pyproject)
         run: uv run pytest --cov=api --cov-report=xml --cov-report=term
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+      - name: Upload backend coverage
+        uses: actions/upload-artifact@v4
         with:
-          files: ./coverage.xml
-          flags: backend
-          token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: false
+          name: coverage-backend
+          path: coverage.xml
+          retention-days: 1
 
   frontend:
     runs-on: ubuntu-latest
@@ -62,19 +61,62 @@ jobs:
         if: steps.guard.outputs.present == 'true'
         run: npm run lint
 
-      - name: Test
+      - name: Test (with coverage gate, thresholds in vitest.config)
         if: steps.guard.outputs.present == 'true'
         run: npm run test -- --coverage
 
-      - name: Upload coverage to Codecov
+      - name: Upload frontend coverage
         if: steps.guard.outputs.present == 'true'
-        uses: codecov/codecov-action@v5
+        uses: actions/upload-artifact@v4
         with:
-          files: ./web/coverage/lcov.info
-          flags: frontend
-          token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: false
+          name: coverage-frontend
+          path: web/coverage/cobertura-coverage.xml
+          retention-days: 1
 
       - name: Typecheck + build
         if: steps.guard.outputs.present == 'true'
         run: npm run build
+
+  # Self-hosted coverage badges: generate SVGs from the coverage reports and
+  # commit them to the `badges` branch (served via raw.githubusercontent in the
+  # README). No third-party coverage service. Only on push to main.
+  badges:
+    needs: [backend, frontend]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: coverage-backend
+      - uses: actions/download-artifact@v4
+        with:
+          name: coverage-frontend
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Generate badge SVGs
+        run: |
+          pip install "genbadge[coverage]"
+          genbadge coverage -i coverage.xml -o coverage-backend.svg -n "backend coverage"
+          genbadge coverage -i cobertura-coverage.xml -o coverage-frontend.svg -n "frontend coverage"
+      - name: Publish to the badges branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin badges --depth=1 2>/dev/null || true
+          back=$(git hash-object -w coverage-backend.svg)
+          front=$(git hash-object -w coverage-frontend.svg)
+          tree=$(printf '100644 blob %s\tcoverage-backend.svg\n100644 blob %s\tcoverage-frontend.svg\n' "$back" "$front" | git mktree)
+          parent=$(git rev-parse --verify -q origin/badges || true)
+          if [ -n "$parent" ] && [ "$(git rev-parse "origin/badges^{tree}")" = "$tree" ]; then
+            echo "coverage badges unchanged"; exit 0
+          fi
+          if [ -n "$parent" ]; then
+            commit=$(git commit-tree "$tree" -p "$parent" -m "ci: update coverage badges [skip ci]")
+          else
+            commit=$(git commit-tree "$tree" -m "ci: seed coverage badges [skip ci]")
+          fi
+          git push origin "$commit:refs/heads/badges"

@@ -24,6 +24,7 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5",
+    "genbadge[coverage]>=1.1",
     "ruff>=0.6",
 ]
 
@@ -46,3 +47,12 @@ ignore = ["B008"]  # FastAPI Depends()/Query() in defaults is the intended idiom
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["api"]
+omit = ["api/db/seed.py"]  # one-shot catalog seeding, not unit-tested
+
+[tool.coverage.report]
+# Native coverage GATE: CI fails if backend coverage drops below this floor.
+# Ratchet — raise as coverage improves (currently ~92%).
+fail_under = 85
