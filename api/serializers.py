@@ -66,12 +66,22 @@ def to_planned_workout_out(pw: PlannedWorkout) -> PlannedWorkoutOut:
     )
 
 
+def program_coach_summary(program: Program) -> str | None:
+    """The coach's strategy narrative, lifted from the stored spec."""
+    if isinstance(program.spec, dict):
+        text = program.spec.get("coach_summary")
+        return text or None
+    return None
+
+
 def to_program_out(program: Program) -> ProgramOut:
     return ProgramOut(
         id=program.id,
         name=program.name,
         notes=program.notes,
         goal_text=program.goal_text,
+        coach_summary=program_coach_summary(program),
+        objective_id=program.objective_id,
         start_date=program.start_date,
         end_date=program.end_date,
         status=program.status,

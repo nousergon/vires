@@ -121,6 +121,7 @@ describe('CoachSheet', () => {
           updated_at: '',
         },
       ],
+      active_program: null,
     })
     renderWithProviders(<CoachSheet open onClose={() => {}} onSaved={() => {}} />)
     expect(await screen.findByText(/Building toward: Climb Baker/)).toBeInTheDocument()
@@ -141,6 +142,7 @@ describe('CoachSheet', () => {
       updated_at: '',
     },
     constraints: [],
+    active_program: null,
   }
 
   it('auto-generates on open when launched with autoStart + an active objective', async () => {

@@ -37,7 +37,7 @@ from api.schemas.plan import (
     ProgramSummary,
 )
 from api.schemas.workout import WorkoutSessionOut
-from api.serializers import to_planned_workout_out
+from api.serializers import program_coach_summary, to_planned_workout_out
 from api.services.ics import IcsEvent, build_calendar
 
 router = APIRouter(prefix="/plan", tags=["plan"])
@@ -334,6 +334,8 @@ def list_programs(
                 id=p.id,
                 name=p.name,
                 goal_text=p.goal_text,
+                coach_summary=program_coach_summary(p),
+                objective_id=p.objective_id,
                 start_date=p.start_date,
                 end_date=p.end_date,
                 status=p.status,

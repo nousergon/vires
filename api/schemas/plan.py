@@ -87,6 +87,8 @@ class ProgramSummary(BaseModel):
     id: int
     name: str
     goal_text: str | None = None
+    coach_summary: str | None = None  # the coach's strategy (from spec)
+    objective_id: int | None = None
     start_date: date | None = None
     end_date: date | None = None
     status: str
@@ -99,6 +101,8 @@ class ProgramOut(BaseModel):
     name: str
     notes: str | None = None
     goal_text: str | None = None
+    coach_summary: str | None = None  # the coach's strategy (from spec)
+    objective_id: int | None = None
     start_date: date | None = None
     end_date: date | None = None
     status: str

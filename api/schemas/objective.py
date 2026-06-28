@@ -99,9 +99,19 @@ class ConstraintOut(BaseModel):
 # --------------------------------------------------------------------------- #
 # Active context (drives the coach + the frontend banner)
 # --------------------------------------------------------------------------- #
+class ProgramStrategy(BaseModel):
+    """The active plan trained toward the objective + the coach's strategy."""
+
+    program_id: int
+    name: str
+    coach_summary: str | None
+
+
 class ActiveObjectiveOut(BaseModel):
     """The active primary objective (if any) + the active constraints — the
-    context objective-driven generation runs against."""
+    context objective-driven generation runs against — plus the active plan's
+    strategy, when one has been generated for this objective."""
 
     objective: ObjectiveOut | None
     constraints: list[ConstraintOut]
+    active_program: ProgramStrategy | None = None
