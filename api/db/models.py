@@ -71,6 +71,12 @@ class UserSettings(Base):
     default_rest_seconds: Mapped[int] = mapped_column(Integer, default=90)
     default_sets: Mapped[int] = mapped_column(Integer, default=3)
     default_reps: Mapped[int] = mapped_column(Integer, default=8)
+    # Unguessable token for the public (unauthenticated) ICS calendar feed —
+    # Google/Apple Calendar fetch the feed anonymously, so the token IS the auth.
+    # Lazily minted on first feed-url access; rotatable.
+    feed_token: Mapped[str | None] = mapped_column(
+        String, nullable=True, unique=True, index=True
+    )
     updated_at: Mapped[datetime] = mapped_column(
         UTCDateTime(), default=_utcnow, onupdate=_utcnow
     )
