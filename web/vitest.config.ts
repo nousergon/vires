@@ -12,7 +12,8 @@ export default defineConfig({
     include: ['src/**/*.test.{ts,tsx}'],
     coverage: {
       provider: 'v8',
-      reporter: ['text-summary', 'lcov'],
+      // cobertura → genbadge can read it for the self-hosted badge.
+      reporter: ['text-summary', 'lcov', 'cobertura'],
       include: ['src/**/*.ts', 'src/**/*.tsx'],
       // Entry/bootstrap, test scaffolding + type-only files aren't unit targets.
       exclude: [
@@ -21,6 +22,14 @@ export default defineConfig({
         'src/main.tsx',
         'src/vite-env.d.ts',
       ],
+      // Native coverage GATE: CI fails if frontend coverage drops below these
+      // floors. Ratchet — raise as component coverage grows (currently ~26%).
+      thresholds: {
+        statements: 20,
+        branches: 20,
+        functions: 20,
+        lines: 20,
+      },
     },
   },
 })
