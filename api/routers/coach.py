@@ -15,9 +15,16 @@ from sqlalchemy.orm import Session
 
 from api.config import get_settings
 from api.db.identity import Identity, current_identity
-from api.db.models import PlannedExercise, PlannedWorkout, Program
+from api.db.models import (
+    PlannedExercise,
+    PlannedWorkout,
+    Program,
+    TemplateExercise,
+    WorkoutTemplate,
+)
 from api.db.session import get_db
 from api.schemas.coach import (
+    CreatedRoutinePreview,
     GenerateRequest,
     ModifyRequest,
     PlannedExercisePreview,
@@ -34,11 +41,15 @@ from api.services.coach.agent import CoachError, CoachUnavailable, generate_spec
 from api.services.coach.context import (
     build_coach_objective_context,
     build_materialize_context,
+    exercise_meta_for_ids,
 )
 from api.services.coach.materialize import (
+    ExerciseMeta,
     MaterializeContext,
     end_date,
     materialize,
+    rewrite_routine_refs,
+    synthesize_routines,
 )
 from api.services.stt import STTError, transcribe_audio
 
@@ -47,8 +58,29 @@ MAX_AUDIO_BYTES = 25 * 1024 * 1024  # 25 MB — the Whisper API per-file limit
 router = APIRouter(prefix="/coach", tags=["coach"])
 
 
-def _build_preview(spec: ProgramSpec, ctx: MaterializeContext) -> ProgramPreview:
-    workouts = materialize(spec, ctx)
+def _spec_exercise_meta(db: Session, spec: ProgramSpec) -> ExerciseMeta:
+    """name + is_timed for every exercise the spec's authored routines reference."""
+    ids = {e.exercise_id for r in spec.new_routines for e in r.exercises}
+    return exercise_meta_for_ids(db, ids)
+
+
+def _build_preview(spec: ProgramSpec, ctx: MaterializeContext, db: Session) -> ProgramPreview:
+    # Authored routines are folded in as synthetic templates so the preview
+    # materializes them without persisting anything (save creates them for real).
+    meta = _spec_exercise_meta(db, spec)
+    mat_spec, mat_ctx = synthesize_routines(spec, ctx, meta)
+    workouts = materialize(mat_spec, mat_ctx)
+    created = [
+        CreatedRoutinePreview(
+            key=r.key,
+            name=r.name,
+            exercise_names=[
+                meta.get(e.exercise_id, (f"#{e.exercise_id}", False))[0]
+                for e in r.exercises
+            ],
+        )
+        for r in spec.new_routines
+    ]
     return ProgramPreview(
         name=spec.name,
         coach_summary=spec.coach_summary,
@@ -56,6 +88,7 @@ def _build_preview(spec: ProgramSpec, ctx: MaterializeContext) -> ProgramPreview
         end_date=end_date(spec),
         weight_unit=ctx.weight_unit,
         spec=spec,
+        created_routines=created,
         planned_workouts=[
             PlannedWorkoutPreview(
                 template_id=pw.template_id,
@@ -89,16 +122,20 @@ def generate(
     ident: Identity = Depends(current_identity),
 ) -> ProgramPreview:
     ctx = build_materialize_context(db, ident)
-    if not ctx.templates:
-        raise HTTPException(400, "Create at least one routine before asking the coach.")
     obj_ctx = build_coach_objective_context(db, ident)
+    # The coach needs SOMETHING to work with: existing routines, or an objective
+    # whose catalog candidates let it author new routines.
+    if not ctx.templates and not obj_ctx.candidates:
+        raise HTTPException(
+            400, "Create a routine or set an objective before asking the coach."
+        )
     try:
         spec = generate_spec(body.message, ctx, date.today(), body.prior_spec, obj_ctx)
     except CoachUnavailable as e:
         raise HTTPException(503, str(e)) from e
     except CoachError as e:
         raise HTTPException(502, f"Coach could not build a plan: {e}") from e
-    return _build_preview(spec, ctx)
+    return _build_preview(spec, ctx, db)
 
 
 @router.post("/transcribe", response_model=TranscribeOut)
@@ -126,14 +163,54 @@ async def transcribe(
     return TranscribeOut(text=text)
 
 
+def _persist_new_routines(db: Session, ident: Identity, spec: ProgramSpec) -> ProgramSpec:
+    """Persist the coach's authored routines as reusable WorkoutTemplates and
+    return the spec with ``routine_key`` refs rewritten to the new real ids
+    (``new_routines`` cleared). No-op when the spec authored none."""
+    if not spec.new_routines:
+        return spec
+    # Validate every authored exercise id exists before creating anything.
+    ref_ids = {e.exercise_id for r in spec.new_routines for e in r.exercises}
+    known = exercise_meta_for_ids(db, ref_ids)
+    missing = ref_ids - known.keys()
+    if missing:
+        raise HTTPException(400, f"Unknown exercise_id(s) in routine: {sorted(missing)}")
+
+    key_to_id: dict[str, int] = {}
+    for r in spec.new_routines:
+        tpl = WorkoutTemplate(
+            tenant_id=ident.tenant_id,
+            user_id=ident.user_id,
+            name=r.name.strip(),
+            exercises=[
+                TemplateExercise(
+                    exercise_id=e.exercise_id,
+                    order_index=i,
+                    target_sets=e.sets,
+                    target_reps=e.reps,
+                    target_weight=e.weight,
+                    target_duration_seconds=e.duration_seconds,
+                    rest_seconds=e.rest_seconds,
+                )
+                for i, e in enumerate(r.exercises)
+            ],
+        )
+        db.add(tpl)
+        db.flush()  # assign tpl.id
+        key_to_id[r.key] = tpl.id
+    return rewrite_routine_refs(spec, key_to_id)
+
+
 @router.post("/programs", response_model=ProgramOut, status_code=201)
 def save_program(
     body: SaveProgramRequest,
     db: Session = Depends(get_db),
     ident: Identity = Depends(current_identity),
 ) -> ProgramOut:
+    # Create any authored routines first, then materialize against a context that
+    # now includes them (so their schedule entries resolve to real templates).
+    spec = _persist_new_routines(db, ident, body.spec)
     ctx = build_materialize_context(db, ident)
-    spec = body.spec
     rows = _materialize_rows(spec, ctx, ident)
     if not rows:
         raise HTTPException(400, "Spec produced no workouts (unknown templates?).")
@@ -242,10 +319,12 @@ def modify_program(
 
     cutover = _cutover(program, date.today())
     completed = sum(1 for pw in program.planned_workouts if pw.status == "completed")
-    future = sum(1 for pw in materialize(new_spec, ctx) if pw.scheduled_date >= cutover)
+    # Count future days against the synthesized spec so authored routines expand.
+    mat_spec, mat_ctx = synthesize_routines(new_spec, ctx, _spec_exercise_meta(db, new_spec))
+    future = sum(1 for pw in materialize(mat_spec, mat_ctx) if pw.scheduled_date >= cutover)
     return ProgramModifyPreview(
         program_id=program.id,
-        preview=_build_preview(new_spec, ctx),
+        preview=_build_preview(new_spec, ctx, db),
         completed_preserved=completed,
         future_count=future,
     )
@@ -261,8 +340,10 @@ def apply_program(
     """Apply a (modified) spec: freeze completed workouts, replace every future
     (not-yet-done) one with the new materialization from today onward."""
     program = _get_owned_program(db, program_id, ident)
+    # Persist any newly-authored routines, then materialize against a context
+    # that includes them.
+    spec = _persist_new_routines(db, ident, body.spec)
     ctx = build_materialize_context(db, ident)
-    spec = body.spec
     cutover = _cutover(program, date.today())
 
     # Keep completed history; everything else (planned/skipped) is replaced from

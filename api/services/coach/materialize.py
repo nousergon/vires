@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
-from api.schemas.coach import ExerciseProgression, ProgramSpec
+from api.schemas.coach import ExerciseProgression, ProgramSpec, ScheduleEntry
 
 # Smallest weight change we'll prescribe, by unit (a standard plate pair step).
 PLATE_INCREMENT = {"lb": 2.5, "kg": 1.25}
@@ -55,6 +55,82 @@ class TemplateCtx:
 class MaterializeContext:
     templates: dict[int, TemplateCtx]
     weight_unit: str = "lb"
+
+
+# --------------------------------------------------------------------------- #
+# New-routine resolution
+#
+# The coach may AUTHOR routines (``spec.new_routines``) so a plan can train an
+# objective the user has no existing routine for. Schedule/progression entries
+# reference these by ``routine_key``. Two resolution paths share one rewrite:
+#  * PREVIEW (pure, here): synthesize each new routine as a negative-id template,
+#    rewrite routine_key -> that id, so the existing materializer expands it with
+#    no DB write.
+#  * SAVE (router, with DB): persist each new routine as a real WorkoutTemplate,
+#    then ``rewrite_routine_refs`` with the real ids.
+# --------------------------------------------------------------------------- #
+ExerciseMeta = dict[int, tuple[str, bool]]  # exercise_id -> (name, is_timed)
+
+
+def rewrite_routine_refs(spec: ProgramSpec, key_to_id: dict[str, int]) -> ProgramSpec:
+    """Return a spec with every ``routine_key`` reference rewritten to a concrete
+    ``template_id`` and ``new_routines`` cleared (the routines now exist)."""
+
+    def _entry(e: ScheduleEntry) -> ScheduleEntry:
+        if e.routine_key is None:
+            return e
+        return e.model_copy(
+            update={"template_id": key_to_id[e.routine_key], "routine_key": None}
+        )
+
+    def _prog(p: ExerciseProgression) -> ExerciseProgression:
+        if p.routine_key is None:
+            return p
+        return p.model_copy(
+            update={"template_id": key_to_id[p.routine_key], "routine_key": None}
+        )
+
+    return spec.model_copy(
+        update={
+            "schedule": [_entry(e) for e in spec.schedule],
+            "progressions": [_prog(p) for p in spec.progressions],
+            "new_routines": [],
+        }
+    )
+
+
+def synthesize_routines(
+    spec: ProgramSpec, ctx: MaterializeContext, exercise_meta: ExerciseMeta
+) -> tuple[ProgramSpec, MaterializeContext]:
+    """PREVIEW resolution: fold ``new_routines`` into the context as synthetic
+    (negative-id) templates and rewrite refs, so ``materialize`` can expand them
+    with no DB write. ``exercise_meta`` supplies each exercise's name + is_timed.
+    Returns the (spec, ctx) unchanged when there are no new routines."""
+    if not spec.new_routines:
+        return spec, ctx
+    key_to_id = {r.key: -(i + 1) for i, r in enumerate(spec.new_routines)}
+    templates = dict(ctx.templates)
+    for r in spec.new_routines:
+        sid = key_to_id[r.key]
+        templates[sid] = TemplateCtx(
+            template_id=sid,
+            name=r.name,
+            exercises=[
+                TemplateExerciseCtx(
+                    exercise_id=e.exercise_id,
+                    name=exercise_meta.get(e.exercise_id, (f"#{e.exercise_id}", False))[0],
+                    is_timed=exercise_meta.get(e.exercise_id, ("", False))[1],
+                    target_sets=e.sets,
+                    target_reps=e.reps,
+                    target_weight=e.weight,
+                    target_duration_seconds=e.duration_seconds,
+                    rest_seconds=e.rest_seconds,
+                )
+                for e in r.exercises
+            ],
+        )
+    resolved = rewrite_routine_refs(spec, key_to_id)
+    return resolved, MaterializeContext(templates=templates, weight_unit=ctx.weight_unit)
 
 
 # --------------------------------------------------------------------------- #

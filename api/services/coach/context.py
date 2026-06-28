@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from api.db.identity import Identity, get_or_create_settings
 from api.db.models import (
     Constraint,
+    Exercise,
     Objective,
     SessionExercise,
     SetEntry,
@@ -20,6 +21,7 @@ from api.db.models import (
     WorkoutTemplate,
 )
 from api.services.coach.materialize import (
+    ExerciseMeta,
     MaterializeContext,
     TemplateCtx,
     TemplateExerciseCtx,
@@ -27,8 +29,14 @@ from api.services.coach.materialize import (
 from api.services.coach.objective_context import (
     CoachObjectiveContext,
     ConstraintCtx,
+    ExerciseCandidate,
     ObjectiveCtx,
 )
+from api.services.search import get_search_service
+
+# Cap the candidate pool so the grounding context stays compact.
+_MAX_CANDIDATES = 60
+_HITS_PER_TERM = 4
 
 
 def _last_logged_weights(db: Session, ident: Identity) -> dict[int, float]:
@@ -130,4 +138,45 @@ def build_coach_objective_context(
         )
         for c in constraints
     ]
-    return CoachObjectiveContext(objective=obj_ctx, constraints=con_ctxs)
+    candidates = _build_exercise_candidates(db, ident, obj_ctx)
+    return CoachObjectiveContext(
+        objective=obj_ctx, constraints=con_ctxs, candidates=candidates
+    )
+
+
+def _build_exercise_candidates(
+    db: Session, ident: Identity, obj_ctx: ObjectiveCtx | None
+) -> list[ExerciseCandidate]:
+    """Assemble the catalog exercise pool the coach may AUTHOR routines from,
+    driven by the objective's needs-analysis ``search_terms``. Empty when there
+    is no objective profile (then the coach only schedules existing routines)."""
+    if obj_ctx is None or not obj_ctx.demands_profile:
+        return []
+    terms = obj_ctx.demands_profile.get("search_terms") or []
+    if not terms:
+        return []
+    svc = get_search_service()
+    out: dict[int, ExerciseCandidate] = {}
+    for term in terms:
+        for hit in svc.search(db, term, tenant_id=ident.tenant_id, limit=_HITS_PER_TERM):
+            ex = hit.exercise
+            if ex.id in out:
+                continue
+            out[ex.id] = ExerciseCandidate(
+                exercise_id=ex.id,
+                name=ex.name,
+                is_timed=ex.is_timed,
+                primary_muscles=list(ex.primary_muscles or []),
+                equipment=ex.equipment,
+            )
+            if len(out) >= _MAX_CANDIDATES:
+                return list(out.values())
+    return list(out.values())
+
+
+def exercise_meta_for_ids(db: Session, ids: set[int]) -> ExerciseMeta:
+    """name + is_timed for each exercise id (for materializing authored routines)."""
+    if not ids:
+        return {}
+    rows = db.scalars(select(Exercise).where(Exercise.id.in_(ids))).all()
+    return {ex.id: (ex.name, ex.is_timed) for ex in rows}

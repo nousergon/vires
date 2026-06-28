@@ -63,6 +63,25 @@ ALPINE_DEMANDS_PROFILE: dict[str, Any] = {
         "objective",
     ],
     "taper": "Arrive fresh on the summit date — the final week(s) shed fatigue.",
+    # Catalog search terms used to assemble the candidate exercise pool the coach
+    # AUTHORS routines from — the movements this objective actually demands.
+    "search_terms": [
+        "step up",
+        "step down",
+        "bulgarian split squat",
+        "goblet squat",
+        "romanian deadlift",
+        "hip thrust",
+        "back extension",
+        "farmers walk",
+        "suitcase carry",
+        "pallof press",
+        "calf raise",
+        "hanging leg raise",
+        "pull up",
+        "plank",
+        "lunge",
+    ],
 }
 
 

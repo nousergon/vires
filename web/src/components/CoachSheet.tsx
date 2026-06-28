@@ -186,6 +186,22 @@ export default function CoachSheet({
             {modifyInfo && ` · ${modifyInfo.kept} completed kept`}
           </p>
 
+          {preview.created_routines.length > 0 && (
+            <div className="rounded-xl border border-emerald-700/40 bg-emerald-900/15 px-3 py-2.5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">
+                New routines the coach will create
+              </p>
+              <div className="mt-1.5 space-y-1.5">
+                {preview.created_routines.map((r) => (
+                  <div key={r.key}>
+                    <div className="text-sm font-medium text-slate-100">{r.name}</div>
+                    <div className="text-xs text-slate-400">{r.exercise_names.join(' · ')}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="space-y-3">
             {[...byWeek.entries()]
               .sort((a, b) => a[0] - b[0])

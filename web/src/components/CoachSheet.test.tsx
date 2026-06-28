@@ -16,11 +16,13 @@ const PREVIEW: ProgramPreview = {
     name: 'Test Block',
     start_date: '2026-06-29',
     duration_weeks: 4,
+    new_routines: [],
     schedule: [{ template_id: 1, weekday: 'monday' }],
     progressions: [],
     deload_weeks: [],
     coach_summary: 'A 4-week ramp from 10 to 4 reps.',
   },
+  created_routines: [],
   planned_workouts: [
     {
       template_id: 1,
@@ -124,5 +126,22 @@ describe('CoachSheet', () => {
     expect(await screen.findByText(/Building toward: Climb Baker/)).toBeInTheDocument()
     expect(screen.getByText(/recovering L4-L5 disc/)).toBeInTheDocument()
     expect(screen.getByText(/defer to PT/)).toBeInTheDocument()
+  })
+
+  it('shows the routines the coach will create in the preview', async () => {
+    vi.spyOn(api, 'coachGenerate').mockResolvedValue({
+      ...PREVIEW,
+      created_routines: [
+        { key: 'lower', name: 'Lower + Carry', exercise_names: ['Step-up', 'Farmers Walk'] },
+      ],
+    })
+    renderWithProviders(<CoachSheet open onClose={() => {}} onSaved={() => {}} />)
+    fireEvent.change(screen.getByPlaceholderText(/Run both my routines/i), {
+      target: { value: 'train me for Baker' },
+    })
+    fireEvent.click(screen.getByText('Generate plan'))
+    expect(await screen.findByText('New routines the coach will create')).toBeInTheDocument()
+    expect(screen.getByText('Lower + Carry')).toBeInTheDocument()
+    expect(screen.getByText(/Step-up · Farmers Walk/)).toBeInTheDocument()
   })
 })
