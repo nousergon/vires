@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { api, type ProgramPreview, type PlannedWorkoutPreview } from '../lib/api'
+import { useVoiceInput } from '../lib/recorder'
 import { Button, Sheet } from './ui'
 
 const CREATE_PLACEHOLDER =
@@ -49,6 +50,7 @@ export default function CoachSheet({
   const [modifyInfo, setModifyInfo] = useState<{ kept: number; future: number } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const voice = useVoiceInput((t) => setMessage((m) => (m ? m.trimEnd() + ' ' : '') + t))
 
   function close() {
     setMessage('')
@@ -126,13 +128,34 @@ export default function CoachSheet({
               ? 'Describe the change. Completed workouts stay; future days are replanned.'
               : 'Describe the program you want. The coach reads your routines and recent performance, then lays workouts onto your calendar with progression.'}
           </p>
-          <textarea
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            rows={5}
-            placeholder={isModify ? MODIFY_PLACEHOLDER : CREATE_PLACEHOLDER}
-            className="w-full rounded-xl bg-slate-800 p-3 text-sm outline-none focus:ring-1 focus:ring-amber-500"
-          />
+          <div className="relative">
+            <textarea
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              rows={5}
+              placeholder={isModify ? MODIFY_PLACEHOLDER : CREATE_PLACEHOLDER}
+              className="w-full rounded-xl bg-slate-800 p-3 pr-14 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+            />
+            {voice.supported && (
+              <button
+                type="button"
+                onClick={voice.toggle}
+                disabled={busy || voice.state === 'transcribing'}
+                aria-label={voice.state === 'recording' ? 'Stop recording' : 'Speak'}
+                className={`absolute bottom-2 right-2 flex h-10 w-10 items-center justify-center rounded-full text-lg disabled:opacity-50 ${
+                  voice.state === 'recording'
+                    ? 'animate-pulse bg-red-600 text-white'
+                    : 'bg-slate-700 text-slate-200 hover:bg-slate-600'
+                }`}
+              >
+                {voice.state === 'transcribing' ? '…' : voice.state === 'recording' ? '⏹' : '🎤'}
+              </button>
+            )}
+          </div>
+          {voice.state === 'recording' && (
+            <p className="text-xs text-red-300">Listening… tap the square to stop.</p>
+          )}
+          {voice.error && <ErrBanner error={voice.error} />}
           {error && <ErrBanner error={error} />}
           <Button className="w-full" onClick={() => runInitial(message)} disabled={busy || !message.trim()}>
             {busy ? 'Thinking…' : isModify ? 'Preview changes' : 'Generate plan'}

@@ -416,4 +416,22 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ spec, name: name ?? null }),
     }),
+  // Speech-to-text: POST the raw audio blob (not JSON), get back transcribed text.
+  transcribe: async (blob: Blob): Promise<string> => {
+    const res = await fetch(`${BASE}/coach/transcribe`, {
+      method: 'POST',
+      headers: { 'Content-Type': blob.type || 'audio/webm' },
+      body: blob,
+    })
+    if (!res.ok) {
+      let detail = res.statusText
+      try {
+        detail = (await res.json()).detail ?? detail
+      } catch {
+        /* non-JSON error body */
+      }
+      throw new Error(`${res.status}: ${detail}`)
+    }
+    return ((await res.json()).text as string) ?? ''
+  },
 }

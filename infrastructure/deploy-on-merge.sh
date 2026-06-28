@@ -98,6 +98,22 @@ else
   echo "coach: no tuned prompt at ${PROMPT_PARAM} — using public baseline (non-fatal)"
 fi
 
+# --- Speech-to-text: hydrate the STT key from SSM into .env ------------------ #
+# NON-FATAL: missing key => /coach/transcribe 503s and the mic is hidden client-side.
+STT_PARAM="${VIRES_STT_SSM_PARAM:-/vires/stt_api_key}"
+if STTKEY=$(aws ssm get-parameter --name "$STT_PARAM" --with-decryption \
+              --query Parameter.Value --output text 2>/dev/null) \
+   && [ -n "$STTKEY" ] && [ "$STTKEY" != "None" ]; then
+  grep -v '^VIRES_STT_API_KEY=' "$ENV_FILE" > "$ENV_FILE.tmp" || true
+  mv "$ENV_FILE.tmp" "$ENV_FILE"
+  printf 'VIRES_STT_API_KEY=%s\n' "$STTKEY" >> "$ENV_FILE"   # value not traced (no set -x)
+  chmod 600 "$ENV_FILE"
+  unset STTKEY
+  echo "stt: hydrated key from ${STT_PARAM}"
+else
+  echo "stt: no key at ${STT_PARAM} — voice input unavailable (non-fatal)"
+fi
+
 # --- restart + health check ------------------------------------------------- #
 sudo systemctl restart vires
 sleep 4

@@ -74,6 +74,17 @@ Grant the instance role `ssm:GetParameter` on that parameter; override the path 
 `VIRES_COACH_PROMPT_SSM_PARAM`. **Non-fatal:** with no SSM prompt the deploy succeeds and the
 baseline is used. The canonical tuned prompt lives in the private `nousergon/vires-ops` repo.
 
+### 7b. Speech-to-text (optional — enables the coach mic)
+The coach can take voice input via an OpenAI-compatible Whisper endpoint. `deploy-on-merge.sh`
+hydrates the key from SSM (quietly):
+```
+aws ssm put-parameter --name /vires/stt_api_key --type SecureString --value sk-...
+```
+Grant the instance role `ssm:GetParameter` on it; override the path with `VIRES_STT_SSM_PARAM`.
+Set `VIRES_STT_MODEL` (default `whisper-1`) and `VIRES_STT_BASE_URL` (default OpenAI; point at
+Groq for cheaper/faster). **Non-fatal:** with no key the deploy succeeds, `/coach/transcribe`
+returns 503, and the mic button is hidden client-side.
+
 ## Notes
 - App secrets (all optional, SSM-hydrated into the box, never committed): the AI-coach
   Anthropic key (§7) and the tuned coach prompt (§7a). The MVP otherwise runs as one

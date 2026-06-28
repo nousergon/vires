@@ -141,3 +141,7 @@ class ProgramModifyPreview(BaseModel):
     preview: ProgramPreview
     completed_preserved: int  # completed workouts that stay frozen
     future_count: int  # new future workouts that will be scheduled (>= today)
+
+
+class TranscribeOut(BaseModel):
+    text: str
