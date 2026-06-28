@@ -1,6 +1,7 @@
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
 import WorkoutPage from './pages/WorkoutPage'
 import TemplatesPage from './pages/TemplatesPage'
+import PlanPage from './pages/PlanPage'
 import HistoryPage from './pages/HistoryPage'
 import ExercisesPage from './pages/ExercisesPage'
 import SettingsPage from './pages/SettingsPage'
@@ -8,6 +9,7 @@ import SettingsPage from './pages/SettingsPage'
 const tabs = [
   { to: '/train', label: 'Train', icon: '🏋️' },
   { to: '/routines', label: 'Routines', icon: '📋' },
+  { to: '/plan', label: 'Plan', icon: '📅' },
   { to: '/history', label: 'History', icon: '📈' },
   { to: '/library', label: 'Library', icon: '🔍' },
   { to: '/settings', label: 'Settings', icon: '⚙️' },
@@ -21,6 +23,7 @@ export default function App() {
           <Route path="/" element={<Navigate to="/train" replace />} />
           <Route path="/train" element={<WorkoutPage />} />
           <Route path="/routines" element={<TemplatesPage />} />
+          <Route path="/plan" element={<PlanPage />} />
           <Route path="/history" element={<HistoryPage />} />
           <Route path="/library" element={<ExercisesPage />} />
           <Route path="/settings" element={<SettingsPage />} />
