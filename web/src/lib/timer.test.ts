@@ -16,7 +16,8 @@ describe('fireTimerAlert', () => {
 
   it('vibrates only when timer_vibration is on', () => {
     const vibe = vi.fn()
-    vi.stubGlobal('navigator', { ...navigator, vibrate: vibe })
+    // Stub without spreading the global navigator — it's undefined in CI's Node env.
+    vi.stubGlobal('navigator', { vibrate: vibe })
 
     fireTimerAlert({ timer_sound: false, timer_vibration: true, timer_notification: false })
     expect(vibe).toHaveBeenCalledTimes(1)
