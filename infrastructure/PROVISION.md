@@ -49,7 +49,20 @@ Set the Actions Variables above (`AWS_DEPLOY_ROLE_ARN`, `VIRES_INSTANCE_ID`,
 `curl https://<your-domain>/health` → 200, then open on your phone and
 **Add to Home Screen**.
 
+## 7. AI coach key (optional — enables the ✨ Coach)
+The AI coach calls Anthropic. `deploy-on-merge.sh` hydrates the key from SSM into
+`.env` on every deploy (quietly; the value is never logged). To enable it:
+```
+aws ssm put-parameter --name /vires/anthropic_api_key --type SecureString --value sk-ant-... 
+```
+and grant the instance role `ssm:GetParameter` on `arn:aws:ssm:<region>:<acct>:parameter/vires/anthropic_api_key`.
+Override the path with the `VIRES_ANTHROPIC_SSM_PARAM` env var if you reuse an existing
+parameter. **It's non-fatal:** with no key the deploy still succeeds and the coach
+endpoints return 503 (the calendar/view/start/manual-schedule features keep working).
+The model is set by `VIRES_COACH_MODEL` (default `claude-haiku-4-5`; bump to
+`claude-sonnet-4-6` for stronger plans).
+
 ## Notes
-- No app secrets in the MVP (single hardcoded dev user). When auth lands, hydrate
-  secrets from SSM Parameter Store into `.env` in `deploy-on-merge.sh`.
+- The only app secret is the optional AI-coach Anthropic key (§7), SSM-hydrated into
+  `.env`. The MVP otherwise runs as one hardcoded dev user with no secrets.
 - The SQLite DB lives at `/home/ec2-user/vires/vires.db` (not in git) — back it up.

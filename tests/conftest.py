@@ -26,14 +26,17 @@ from api.db.seed import seed  # noqa: E402
 from api.db.session import SessionLocal, engine  # noqa: E402
 
 # Tables holding user data (cleaned between tests); the canonical catalog stays.
+# Ordered children-before-parents for FK-on deletion. workout_sessions and
+# planned_workouts reference each other (circular FK) — both link columns are
+# nulled before the loop (see the db fixture) so neither delete is blocked.
 _USER_TABLES = [
     "set_entries",
     "session_exercises",
+    "planned_exercises",
+    "planned_workouts",
     "workout_sessions",
     "template_exercises",
     "workout_templates",
-    "program_slots",
-    "program_weeks",
     "programs",
     "user_settings",
 ]
@@ -72,6 +75,9 @@ def db():
             session.execute(text("DELETE FROM exercises_fts WHERE rowid = :r"), {"r": rid})
             svc.remove_exercise(rid)
         session.execute(text("DELETE FROM exercises WHERE provenance != 'canonical'"))
+        # Break the workout_sessions <-> planned_workouts FK cycle before deleting.
+        session.execute(text("UPDATE workout_sessions SET planned_workout_id = NULL"))
+        session.execute(text("UPDATE planned_workouts SET session_id = NULL"))
         for table in _USER_TABLES:
             session.execute(text(f"DELETE FROM {table}"))
         session.commit()

@@ -7,7 +7,7 @@ import { useSettings } from '../lib/useSettings'
 import { Button, Card, EmptyState, PageTitle, Spinner } from '../components/ui'
 import ExercisePicker from '../components/ExercisePicker'
 
-const ACTIVE_KEY = 'vires.activeWorkout'
+export const ACTIVE_KEY = 'vires.activeWorkout'
 
 function useActiveId(): [number | null, (id: number | null) => void] {
   const [id, setId] = useState<number | null>(() => {

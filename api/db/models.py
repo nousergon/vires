@@ -17,11 +17,12 @@ Design notes
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from sqlalchemy import (
     JSON,
     Boolean,
+    Date,
     Float,
     ForeignKey,
     Integer,
@@ -191,9 +192,9 @@ class WorkoutSession(Base):
     template_id: Mapped[int | None] = mapped_column(
         ForeignKey("workout_templates.id"), nullable=True
     )
-    # Seam for the deferred AI coach: which program slot generated this session.
-    program_slot_id: Mapped[int | None] = mapped_column(
-        ForeignKey("program_slots.id"), nullable=True
+    # Which planned (AI-coach or manually-scheduled) workout this session fulfilled.
+    planned_workout_id: Mapped[int | None] = mapped_column(
+        ForeignKey("planned_workouts.id"), nullable=True
     )
 
     exercises: Mapped[list[SessionExercise]] = relationship(
@@ -248,8 +249,17 @@ class SetEntry(Base):
 
 
 # --------------------------------------------------------------------------- #
-# Deferred AI-coach layer (schema-ready, unused by MVP UI — brief §4.2/§5a)
-# Sequences and progresses WorkoutTemplates across weeks.
+# AI-coach layer — date-bearing program + calendar (brief §4.2/§5a)
+#
+# A ``Program`` is the coach's output: a named multi-week plan whose declarative
+# ``spec`` (the validated ``ProgramSpec``) is materialized deterministically into
+# concrete dated ``PlannedWorkout`` rows. The calendar's "future" is the set of
+# ``PlannedWorkout``s (by ``scheduled_date``); the "past" is ``WorkoutSession``s
+# (by ``started_at``). Starting a planned workout creates a session linked back
+# via ``WorkoutSession.planned_workout_id``.
+#
+# (Replaces the earlier unused relative-grid Program→Week→Slot seam, which had no
+# absolute dates and so couldn't drive a calendar — see git history.)
 # --------------------------------------------------------------------------- #
 class Program(Base):
     __tablename__ = "programs"
@@ -259,43 +269,87 @@ class Program(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The natural-language request the user gave the coach (for display / refine).
+    goal_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The validated ProgramSpec the coach produced — kept so the plan can be
+    # explained, refined, or re-materialized later.
+    spec: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    status: Mapped[str] = mapped_column(String, default="active", index=True)  # active|archived
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
 
-    weeks: Mapped[list[ProgramWeek]] = relationship(
+    planned_workouts: Mapped[list[PlannedWorkout]] = relationship(
         back_populates="program",
         cascade="all, delete-orphan",
-        order_by="ProgramWeek.week_index",
+        order_by="PlannedWorkout.scheduled_date",
     )
 
 
-class ProgramWeek(Base):
-    __tablename__ = "program_weeks"
+class PlannedWorkout(Base):
+    """A workout scheduled on a specific calendar day — the calendar's future unit.
+
+    ``scheduled_date`` is a pure ``Date`` (a plan belongs to a *day*, not an
+    instant), which also sidesteps the SQLite tz-stripping pitfall that
+    ``UTCDateTime`` exists to solve. ``program_id`` is nullable so a one-off day
+    can be scheduled without a coach program.
+    """
+
+    __tablename__ = "planned_workouts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    program_id: Mapped[int] = mapped_column(
-        ForeignKey("programs.id", ondelete="CASCADE"), index=True
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    program_id: Mapped[int | None] = mapped_column(
+        ForeignKey("programs.id", ondelete="CASCADE"), nullable=True, index=True
     )
-    week_index: Mapped[int] = mapped_column(Integer, default=0)
-
-    program: Mapped[Program] = relationship(back_populates="weeks")
-    slots: Mapped[list[ProgramSlot]] = relationship(
-        back_populates="week",
-        cascade="all, delete-orphan",
-        order_by="ProgramSlot.day_index",
-    )
-
-
-class ProgramSlot(Base):
-    __tablename__ = "program_slots"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    program_week_id: Mapped[int] = mapped_column(
-        ForeignKey("program_weeks.id", ondelete="CASCADE"), index=True
-    )
+    # Which routine this day was derived from (provenance / "start from template").
     template_id: Mapped[int | None] = mapped_column(
         ForeignKey("workout_templates.id"), nullable=True
     )
-    day_index: Mapped[int] = mapped_column(Integer, default=0)
-    progression_rule: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    scheduled_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    week_index: Mapped[int | None] = mapped_column(Integer, nullable=True)  # display grouping
+    status: Mapped[str] = mapped_column(
+        String, default="planned", index=True
+    )  # planned|completed|skipped
+    created_by: Mapped[str] = mapped_column(String, default="coach")  # coach|user
+    # The session that fulfilled this planned day (set when the user starts it).
+    session_id: Mapped[int | None] = mapped_column(
+        ForeignKey("workout_sessions.id"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
 
-    week: Mapped[ProgramWeek] = relationship(back_populates="slots")
+    program: Mapped[Program | None] = relationship(back_populates="planned_workouts")
+    exercises: Mapped[list[PlannedExercise]] = relationship(
+        back_populates="planned_workout",
+        cascade="all, delete-orphan",
+        order_by="PlannedExercise.order_index",
+    )
+
+
+class PlannedExercise(Base):
+    """The concrete prescription for one exercise on one planned day.
+
+    Mirrors ``TemplateExercise`` / ``SessionExercise``; this is where the coach's
+    progression curve is materialized into a specific sets×reps×weight target.
+    """
+
+    __tablename__ = "planned_exercises"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    planned_workout_id: Mapped[int] = mapped_column(
+        ForeignKey("planned_workouts.id", ondelete="CASCADE"), index=True
+    )
+    exercise_id: Mapped[int] = mapped_column(ForeignKey("exercises.id"), index=True)
+    order_index: Mapped[int] = mapped_column(Integer, default=0)
+    target_sets: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    target_reps: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    target_weight: Mapped[float | None] = mapped_column(Float, nullable=True)
+    target_duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rest_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    planned_workout: Mapped[PlannedWorkout] = relationship(back_populates="exercises")
+    exercise: Mapped[Exercise] = relationship()

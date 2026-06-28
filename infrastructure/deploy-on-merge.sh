@@ -60,6 +60,26 @@ if ! sudo cmp -s "$UNIT_SRC" "$UNIT_LIVE" 2>/dev/null; then
   sudo systemctl enable vires >/dev/null 2>&1 || true
 fi
 
+# --- AI coach secret: hydrate the Anthropic key from SSM into .env ---------- #
+# Single source of truth is SSM Parameter Store; rotation = update the param +
+# redeploy. The key value is NEVER echoed (CLI-output-safety rule). Missing key
+# is NON-FATAL: the coach endpoints 503 and the rest of the app keeps working.
+SSM_PARAM="${VIRES_ANTHROPIC_SSM_PARAM:-/vires/anthropic_api_key}"
+ENV_FILE="$REPO/.env"
+touch "$ENV_FILE"
+if KEY=$(aws ssm get-parameter --name "$SSM_PARAM" --with-decryption \
+           --query Parameter.Value --output text 2>/dev/null) \
+   && [ -n "$KEY" ] && [ "$KEY" != "None" ]; then
+  grep -v '^VIRES_ANTHROPIC_API_KEY=' "$ENV_FILE" > "$ENV_FILE.tmp" || true
+  mv "$ENV_FILE.tmp" "$ENV_FILE"
+  printf 'VIRES_ANTHROPIC_API_KEY=%s\n' "$KEY" >> "$ENV_FILE"   # value not traced (no set -x)
+  chmod 600 "$ENV_FILE"
+  unset KEY
+  echo "coach: hydrated Anthropic key from ${SSM_PARAM}"
+else
+  echo "coach: no key at ${SSM_PARAM} — AI coach unavailable (non-fatal)"
+fi
+
 # --- restart + health check ------------------------------------------------- #
 sudo systemctl restart vires
 sleep 4

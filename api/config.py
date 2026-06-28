@@ -34,6 +34,14 @@ class Settings(BaseSettings):
     dev_tenant_id: str = "dev-tenant"
     dev_user_id: str = "dev-user"
 
+    # AI coach (Anthropic). The key is hydrated onto the box from SSM at deploy
+    # time (see infrastructure/deploy-on-merge.sh); absent => the coach endpoints
+    # 503 and the rest of the app keeps working. Start on the cheapest model to
+    # shake out bugs; bumping to claude-sonnet-4-6 is a one-line config flip.
+    anthropic_api_key: str | None = None
+    coach_model: str = "claude-haiku-4-5"
+    coach_max_tokens: int = 4096
+
     # CORS — the Vite dev server during local development.
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
 

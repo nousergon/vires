@@ -160,6 +160,113 @@ export interface Settings {
   default_reps: number
 }
 
+// ---- plan / calendar / coach ---------------------------------------------- //
+export interface CalendarEntry {
+  kind: 'session' | 'planned'
+  date: string // YYYY-MM-DD
+  id: number
+  name: string | null
+  status: string
+  program_id: number | null
+  template_id: number | null
+  exercise_count: number
+  session_id: number | null
+}
+
+export interface PlannedExercise {
+  id: number
+  order_index: number
+  exercise: ExerciseBrief
+  target_sets: number | null
+  target_reps: number | null
+  target_weight: number | null
+  target_duration_seconds: number | null
+  rest_seconds: number | null
+  notes: string | null
+}
+
+export interface PlannedWorkout {
+  id: number
+  program_id: number | null
+  template_id: number | null
+  scheduled_date: string
+  name: string
+  notes: string | null
+  week_index: number | null
+  status: string
+  created_by: string
+  session_id: number | null
+  exercises: PlannedExercise[]
+}
+
+// The coach's declarative spec — resent verbatim for a refine turn.
+export interface ProgressionCurve {
+  mode: string
+  start: number
+  end: number
+  steps?: number | null
+}
+export interface ExerciseProgression {
+  template_id: number
+  exercise_id?: number | null
+  sets?: number | null
+  reps?: ProgressionCurve | null
+  weight?: ProgressionCurve | null
+  seed_weight?: number | null
+}
+export interface ScheduleEntry {
+  template_id: number
+  weekday: number
+}
+export interface ProgramSpec {
+  name: string
+  start_date: string
+  duration_weeks: number
+  schedule: ScheduleEntry[]
+  progressions: ExerciseProgression[]
+  deload_weeks: number[]
+  coach_summary: string
+}
+
+export interface PlannedExercisePreview {
+  exercise_id: number
+  exercise_name: string
+  order_index: number
+  target_sets: number | null
+  target_reps: number | null
+  target_weight: number | null
+  target_duration_seconds: number | null
+  rest_seconds: number | null
+  notes: string | null
+}
+export interface PlannedWorkoutPreview {
+  template_id: number | null
+  scheduled_date: string
+  name: string
+  week_index: number | null
+  exercises: PlannedExercisePreview[]
+}
+export interface ProgramPreview {
+  name: string
+  coach_summary: string
+  start_date: string
+  end_date: string
+  weight_unit: string
+  spec: ProgramSpec
+  planned_workouts: PlannedWorkoutPreview[]
+}
+
+export interface ProgramSummary {
+  id: number
+  name: string
+  goal_text: string | null
+  start_date: string | null
+  end_date: string | null
+  status: string
+  planned_count: number
+  completed_count: number
+}
+
 // ---- endpoints ------------------------------------------------------------ //
 export const api = {
   // exercises
@@ -237,4 +344,36 @@ export const api = {
   getSettings: () => req<Settings>('/settings'),
   updateSettings: (body: Partial<Settings>) =>
     req<Settings>('/settings', { method: 'PUT', body: JSON.stringify(body) }),
+
+  // plan / calendar
+  calendar: (start: string, end: string) =>
+    req<CalendarEntry[]>(`/plan/calendar?start=${start}&end=${end}`),
+  getPlanned: (id: number) => req<PlannedWorkout>(`/plan/planned/${id}`),
+  createPlanned: (body: {
+    scheduled_date: string
+    template_id?: number | null
+    name?: string | null
+    notes?: string | null
+  }) => req<PlannedWorkout>('/plan/planned', { method: 'POST', body: JSON.stringify(body) }),
+  updatePlanned: (
+    id: number,
+    body: Partial<{ scheduled_date: string; name: string; notes: string; status: string }>,
+  ) => req<PlannedWorkout>(`/plan/planned/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  deletePlanned: (id: number) => req<void>(`/plan/planned/${id}`, { method: 'DELETE' }),
+  startPlanned: (id: number) =>
+    req<WorkoutSession>(`/plan/planned/${id}/start`, { method: 'POST' }),
+  listPrograms: () => req<ProgramSummary[]>('/plan/programs'),
+  deleteProgram: (id: number) => req<void>(`/plan/programs/${id}`, { method: 'DELETE' }),
+
+  // coach
+  coachGenerate: (message: string, priorSpec?: ProgramSpec) =>
+    req<ProgramPreview>('/coach/generate', {
+      method: 'POST',
+      body: JSON.stringify({ message, prior_spec: priorSpec ?? null }),
+    }),
+  coachSaveProgram: (spec: ProgramSpec, name?: string, goalText?: string) =>
+    req<{ id: number; name: string }>('/coach/programs', {
+      method: 'POST',
+      body: JSON.stringify({ spec, name: name ?? null, goal_text: goalText ?? null }),
+    }),
 }
