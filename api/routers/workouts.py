@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from api.db.identity import Identity, current_identity
 from api.db.models import (
+    PlannedWorkout,
     SessionExercise,
     SetEntry,
     WorkoutSession,
@@ -276,7 +277,19 @@ def delete_workout(
     db: Session = Depends(get_db),
     ident: Identity = Depends(current_identity),
 ) -> Response:
-    db.delete(_get_session(db, session_id, ident))
+    ws = _get_session(db, session_id, ident)
+    # A planned workout that this session fulfilled points back at it via
+    # ``session_id`` (FK enforced). Detach the link and revert the planned day to
+    # 'planned' before deleting — otherwise the delete violates the FK (500), and
+    # the calendar should show the day as un-done once its log is gone.
+    fulfilled = db.scalars(
+        select(PlannedWorkout).where(PlannedWorkout.session_id == ws.id)
+    ).all()
+    for pw in fulfilled:
+        pw.session_id = None
+        if pw.status == "completed":
+            pw.status = "planned"
+    db.delete(ws)
     db.commit()
     return Response(status_code=204)
 
