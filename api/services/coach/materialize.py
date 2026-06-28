@@ -17,6 +17,16 @@ from api.schemas.coach import ExerciseProgression, ProgramSpec
 PLATE_INCREMENT = {"lb": 2.5, "kg": 1.25}
 DELOAD_LOAD_FACTOR = 0.9  # deload weeks prescribe ~10% lighter
 
+# Canonical day name -> Python weekday index (Monday=0 … Sunday=6).
+_WEEKDAY_INDEX = {
+    "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+    "friday": 4, "saturday": 5, "sunday": 6,
+}
+
+
+def _weekday_index(weekday: str) -> int:
+    return _WEEKDAY_INDEX.get(str(weekday).strip().lower(), 0)
+
 
 # --------------------------------------------------------------------------- #
 # Context the router assembles from the DB (kept DB-free here for testability)
@@ -144,7 +154,7 @@ def materialize(spec: ProgramSpec, ctx: MaterializeContext) -> list[PlannedWorko
         tpl = ctx.templates.get(entry.template_id)
         if tpl is None:
             continue  # unknown template (grounding should prevent this) — skip, don't guess
-        first_date = _first_on_or_after(spec.start_date, entry.weekday)
+        first_date = _first_on_or_after(spec.start_date, _weekday_index(entry.weekday))
 
         for w in range(1, dw + 1):
             f = 0.0 if dw == 1 else (w - 1) / (dw - 1)
@@ -233,7 +243,7 @@ def end_date(spec: ProgramSpec) -> date:
     """Last scheduled date across all schedule entries (for Program.end_date)."""
     last = spec.start_date
     for entry in spec.schedule:
-        first = _first_on_or_after(spec.start_date, entry.weekday)
+        first = _first_on_or_after(spec.start_date, _weekday_index(entry.weekday))
         d = first + timedelta(days=(spec.duration_weeks - 1) * 7)
         last = max(last, d)
     return last

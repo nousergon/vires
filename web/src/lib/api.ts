@@ -240,7 +240,7 @@ export interface ExerciseProgression {
 }
 export interface ScheduleEntry {
   template_id: number
-  weekday: number
+  weekday: string // lowercase day name, e.g. 'monday'
 }
 export interface ProgramSpec {
   name: string

@@ -11,8 +11,19 @@ forced to emit (see ``api.services.coach.agent``).
 from __future__ import annotations
 
 from datetime import date
+from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+Weekday = Literal[
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"
+]
+_DAY_NAMES: tuple[str, ...] = (
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"
+)
+# Accept full + 3-letter names (any case) and map to canonical lowercase.
+_DAY_ALIASES = {name: name for name in _DAY_NAMES}
+_DAY_ALIASES.update({name[:3]: name for name in _DAY_NAMES})
 
 # --------------------------------------------------------------------------- #
 # Declarative spec (the coach's forced tool-use output)
@@ -57,10 +68,27 @@ class ExerciseProgression(BaseModel):
 
 
 class ScheduleEntry(BaseModel):
-    """Run ``template_id`` once per week on ``weekday`` (0=Mon … 6=Sun)."""
+    """Run ``template_id`` once per week on ``weekday`` (a lowercase day name).
+
+    The model emits a NAME ('monday') rather than an index — having the LLM do
+    0-vs-1 weekday math was unreliable (it used ISO Monday=1, shifting every
+    workout +1 day). The validator also coerces a legacy int (0=Mon … 6=Sun) from
+    older stored specs so they still load.
+    """
 
     template_id: int
-    weekday: int = Field(ge=0, le=6)
+    weekday: Weekday
+
+    @field_validator("weekday", mode="before")
+    @classmethod
+    def _normalize_weekday(cls, v: object) -> object:
+        if isinstance(v, bool):  # guard: bool is an int subclass
+            return v
+        if isinstance(v, int):
+            return _DAY_NAMES[v % 7]
+        if isinstance(v, str):
+            return _DAY_ALIASES.get(v.strip().lower(), v.strip().lower())
+        return v
 
 
 class ProgramSpec(BaseModel):
