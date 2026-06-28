@@ -18,6 +18,7 @@ from pydantic import ValidationError
 from api.config import get_settings
 from api.schemas.coach import ProgramSpec
 from api.services.coach.materialize import MaterializeContext
+from api.services.coach.objective_context import CoachObjectiveContext
 from api.services.coach.prompt_loader import load_system_prompt
 
 TOOL_NAME = "emit_program_spec"
@@ -35,8 +36,45 @@ class CoachError(RuntimeError):
     """The model failed to produce a usable spec after retry."""
 
 
-def _context_block(ctx: MaterializeContext, today: date) -> str:
-    """Compact JSON the model is grounded on — real ids, targets, recent weights."""
+def _objective_block(obj_ctx: CoachObjectiveContext | None, today: date) -> dict | None:
+    """The objective + active constraints the program must peak/taper to and
+    train around (None when the user hasn't set an objective or constraints)."""
+    if obj_ctx is None or obj_ctx.is_empty:
+        return None
+    block: dict = {}
+    obj = obj_ctx.objective
+    if obj is not None:
+        weeks_to_target = None
+        if obj.target_date is not None:
+            weeks_to_target = max(0, (obj.target_date - today).days // 7)
+        block["objective"] = {
+            "name": obj.name,
+            "kind": obj.kind,
+            "target_date": obj.target_date.isoformat() if obj.target_date else None,
+            "weeks_until_target": weeks_to_target,
+            "sport": obj.sport,
+            "demands_profile": obj.demands_profile,
+        }
+    if obj_ctx.constraints:
+        block["constraints"] = [
+            {
+                "kind": c.kind,
+                "label": c.label,
+                "directives": c.directives,
+                "defer_to_professional": c.defer_to_professional,
+            }
+            for c in obj_ctx.constraints
+        ]
+    return block
+
+
+def _context_block(
+    ctx: MaterializeContext,
+    today: date,
+    obj_ctx: CoachObjectiveContext | None = None,
+) -> str:
+    """Compact JSON the model is grounded on — real ids, targets, recent weights,
+    and (when set) the objective + constraints to periodize toward / around."""
     templates = []
     for tpl in ctx.templates.values():
         templates.append(
@@ -57,15 +95,16 @@ def _context_block(ctx: MaterializeContext, today: date) -> str:
                 ],
             }
         )
-    return json.dumps(
-        {
-            "today": today.isoformat(),
-            "today_weekday": today.weekday(),  # 0=Mon
-            "weight_unit": ctx.weight_unit,
-            "templates": templates,
-        },
-        indent=2,
-    )
+    payload: dict = {
+        "today": today.isoformat(),
+        "today_weekday": today.weekday(),  # 0=Mon
+        "weight_unit": ctx.weight_unit,
+        "templates": templates,
+    }
+    objective = _objective_block(obj_ctx, today)
+    if objective is not None:
+        payload["goal"] = objective
+    return json.dumps(payload, indent=2)
 
 
 def _known_template_ids(ctx: MaterializeContext) -> set[int]:
@@ -88,8 +127,13 @@ def generate_spec(
     ctx: MaterializeContext,
     today: date,
     prior_spec: ProgramSpec | None = None,
+    obj_ctx: CoachObjectiveContext | None = None,
 ) -> ProgramSpec:
-    """Call the model (forced tool-use) and return a validated, grounded ProgramSpec."""
+    """Call the model (forced tool-use) and return a validated, grounded ProgramSpec.
+
+    When ``obj_ctx`` carries an active objective/constraints, the model is asked
+    to reverse-build the mesocycle to peak/taper to the objective's date and to
+    train around the constraints (see the system prompt)."""
     settings = get_settings()
     if not settings.anthropic_api_key:
         raise CoachUnavailable("AI coach is not configured (no Anthropic API key).")
@@ -104,7 +148,9 @@ def generate_spec(
         "input_schema": ProgramSpec.model_json_schema(),
     }
 
-    user_text = f"CONTEXT:\n{_context_block(ctx, today)}\n\nREQUEST:\n{message.strip()}"
+    user_text = (
+        f"CONTEXT:\n{_context_block(ctx, today, obj_ctx)}\n\nREQUEST:\n{message.strip()}"
+    )
     if prior_spec is not None:
         user_text += (
             "\n\nThis is a REFINEMENT of the existing plan below. Apply the request "

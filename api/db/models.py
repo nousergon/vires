@@ -25,9 +25,11 @@ from sqlalchemy import (
     Date,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -382,3 +384,85 @@ class PlannedExercise(Base):
 
     planned_workout: Mapped[PlannedWorkout] = relationship(back_populates="exercises")
     exercise: Mapped[Exercise] = relationship()
+
+
+# --------------------------------------------------------------------------- #
+# Objective-driven coaching — the goal the program peaks toward + the
+# constraints it must train *around* (build spec: objective-driven coach).
+#
+# An ``Objective`` is a first-class goal (e.g. "Climb Baker") that anchors the
+# coach's periodization: generation reverse-builds a mesocycle that peaks/tapers
+# to ``target_date``. A ``Constraint`` (e.g. a recovering disc) is NOT a goal —
+# it bounds every objective; the coach trains around it and never prescribes to
+# treat it. Both are user-owned (multitenancy-ready like every other row).
+# --------------------------------------------------------------------------- #
+class Objective(Base):
+    """A training goal the coach periodizes toward.
+
+    Exactly one objective per user may be the active *primary* — enforced both
+    in the write path (setting one demotes the others) and by a partial unique
+    index. Only ``kind='dated'`` (with a ``target_date``) drives the P0 peak/
+    taper periodization; ``open_ended`` is stored but not yet date-anchored.
+    """
+
+    __tablename__ = "objectives"
+    __table_args__ = (
+        # At most one primary objective per (tenant, user). Partial unique index
+        # is the structural guarantee behind the app-level demote-on-set logic.
+        Index(
+            "uq_one_primary_objective_per_user",
+            "tenant_id",
+            "user_id",
+            unique=True,
+            sqlite_where=text("is_primary = 1"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    # 'dated' (peaks to target_date) | 'open_ended' (no fixed peak — stored, not
+    # yet periodized).
+    kind: Mapped[str] = mapped_column(String, nullable=False, default="dated")
+    # The peak/summit day. A pure Date (a goal belongs to a *day*), nullable for
+    # open-ended objectives; required for dated ones (enforced in the schema).
+    target_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Sport profile key — 'alpine' is the only authored needs-analysis for now.
+    sport: Mapped[str | None] = mapped_column(String, nullable=True)
+    # The needs-analysis the coach consumes (structured JSON; see
+    # api.services.coach.objective_profiles). This is the data that makes the
+    # coach credible rather than generic.
+    demands_profile: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), default=_utcnow, onupdate=_utcnow
+    )
+
+
+class Constraint(Base):
+    """A bound on training (injury / schedule / equipment) the coach trains around.
+
+    Constraints are NOT goals. For an ``injury`` constraint the coach excludes
+    aggravating patterns and biases toward safe supporting work, but NEVER
+    prescribes loading/rehab to treat the condition (``defer_to_professional``).
+    """
+
+    __tablename__ = "training_constraints"  # 'constraints' brushes a SQL keyword
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    kind: Mapped[str] = mapped_column(String, nullable=False)  # injury|schedule|equipment
+    label: Mapped[str] = mapped_column(String, nullable=False)
+    # What to avoid / bias toward — text the coach must honor.
+    directives: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # True for injuries: the coach defers treatment/rehab to a professional.
+    defer_to_professional: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Active constraints bound generation; deactivate (vs delete) to keep history.
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), default=_utcnow, onupdate=_utcnow
+    )

@@ -1,5 +1,11 @@
 import { useState } from 'react'
-import { api, type ProgramPreview, type PlannedWorkoutPreview } from '../lib/api'
+import { useQuery } from '@tanstack/react-query'
+import {
+  api,
+  type ActiveObjective,
+  type ProgramPreview,
+  type PlannedWorkoutPreview,
+} from '../lib/api'
 import { useVoiceInput } from '../lib/recorder'
 import { Button, Sheet } from './ui'
 
@@ -51,6 +57,14 @@ export default function CoachSheet({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const voice = useVoiceInput((t) => setMessage((m) => (m ? m.trimEnd() + ' ' : '') + t))
+
+  // The active objective (if any) — generation is automatically reverse-built to
+  // peak/taper toward it and to train around the constraints (server-side).
+  const { data: active } = useQuery({
+    queryKey: ['active-objective'],
+    queryFn: api.activeObjective,
+    enabled: open && !isModify,
+  })
 
   function close() {
     setMessage('')
@@ -123,10 +137,13 @@ export default function CoachSheet({
     <Sheet open={open} onClose={close} title={isModify ? `Modify: ${program!.name}` : '✨ AI Coach'}>
       {!preview ? (
         <div className="space-y-3">
+          {!isModify && active?.objective && <ObjectiveBanner active={active} />}
           <p className="text-sm text-slate-400">
             {isModify
               ? 'Describe the change. Completed workouts stay; future days are replanned.'
-              : 'Describe the program you want. The coach reads your routines and recent performance, then lays workouts onto your calendar with progression.'}
+              : active?.objective
+                ? 'The coach reverse-builds a periodized plan toward your objective (peaking and tapering to the date) and trains around your constraints. Add any extra detail below.'
+                : 'Describe the program you want. The coach reads your routines and recent performance, then lays workouts onto your calendar with progression.'}
           </p>
           <div className="relative">
             <textarea
@@ -232,5 +249,39 @@ function ErrBanner({ error }: { error: string }) {
     <p className="rounded-lg border border-red-800/50 bg-red-900/20 px-3 py-2 text-sm text-red-300">
       {error}
     </p>
+  )
+}
+
+function formatTarget(iso: string): string {
+  const d = new Date(iso + 'T00:00:00')
+  const date = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+  const weeks = Math.max(0, Math.round((d.getTime() - Date.now()) / (7 * 864e5)))
+  return `${date} · ~${weeks} wk${weeks === 1 ? '' : 's'} out`
+}
+
+function ObjectiveBanner({ active }: { active: ActiveObjective }) {
+  const o = active.objective!
+  return (
+    <div className="rounded-xl border border-amber-700/40 bg-amber-900/15 px-3 py-2.5">
+      <div className="flex items-center gap-2 text-sm font-semibold text-amber-200">
+        <span>🎯</span>
+        <span className="truncate">Building toward: {o.name}</span>
+      </div>
+      {o.kind === 'dated' && o.target_date && (
+        <p className="mt-0.5 text-xs text-amber-300/80">{formatTarget(o.target_date)}</p>
+      )}
+      {active.constraints.length > 0 && (
+        <p className="mt-1 text-xs text-slate-400">
+          Training around:{' '}
+          {active.constraints.map((c, i) => (
+            <span key={c.id}>
+              {i > 0 && ', '}
+              {c.label}
+              {c.defer_to_professional && <span className="text-slate-500"> (defer to PT)</span>}
+            </span>
+          ))}
+        </p>
+      )}
+    </div>
   )
 }

@@ -12,6 +12,8 @@ from sqlalchemy.orm import Session
 
 from api.db.identity import Identity, get_or_create_settings
 from api.db.models import (
+    Constraint,
+    Objective,
     SessionExercise,
     SetEntry,
     WorkoutSession,
@@ -21,6 +23,11 @@ from api.services.coach.materialize import (
     MaterializeContext,
     TemplateCtx,
     TemplateExerciseCtx,
+)
+from api.services.coach.objective_context import (
+    CoachObjectiveContext,
+    ConstraintCtx,
+    ObjectiveCtx,
 )
 
 
@@ -78,3 +85,49 @@ def build_materialize_context(db: Session, ident: Identity) -> MaterializeContex
         )
     unit = get_or_create_settings(db, ident).weight_unit
     return MaterializeContext(templates=templates, weight_unit=unit)
+
+
+def build_coach_objective_context(
+    db: Session, ident: Identity
+) -> CoachObjectiveContext:
+    """The active primary objective + active constraints generation runs against.
+
+    Empty (no objective, no constraints) for users who haven't set one — the
+    coach then behaves exactly as before (generic routine-driven generation)."""
+    objective = db.scalar(
+        select(Objective).where(
+            Objective.tenant_id == ident.tenant_id,
+            Objective.user_id == ident.user_id,
+            Objective.is_primary.is_(True),
+        )
+    )
+    obj_ctx = (
+        ObjectiveCtx(
+            name=objective.name,
+            kind=objective.kind,
+            target_date=objective.target_date,
+            sport=objective.sport,
+            demands_profile=objective.demands_profile,
+        )
+        if objective is not None
+        else None
+    )
+    constraints = db.scalars(
+        select(Constraint)
+        .where(
+            Constraint.tenant_id == ident.tenant_id,
+            Constraint.user_id == ident.user_id,
+            Constraint.is_active.is_(True),
+        )
+        .order_by(Constraint.created_at)
+    ).all()
+    con_ctxs = [
+        ConstraintCtx(
+            kind=c.kind,
+            label=c.label,
+            directives=c.directives,
+            defer_to_professional=c.defer_to_professional,
+        )
+        for c in constraints
+    ]
+    return CoachObjectiveContext(objective=obj_ctx, constraints=con_ctxs)

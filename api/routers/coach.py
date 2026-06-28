@@ -31,7 +31,10 @@ from api.schemas.coach import (
 from api.schemas.plan import ProgramOut
 from api.serializers import to_program_out
 from api.services.coach.agent import CoachError, CoachUnavailable, generate_spec
-from api.services.coach.context import build_materialize_context
+from api.services.coach.context import (
+    build_coach_objective_context,
+    build_materialize_context,
+)
 from api.services.coach.materialize import (
     MaterializeContext,
     end_date,
@@ -88,8 +91,9 @@ def generate(
     ctx = build_materialize_context(db, ident)
     if not ctx.templates:
         raise HTTPException(400, "Create at least one routine before asking the coach.")
+    obj_ctx = build_coach_objective_context(db, ident)
     try:
-        spec = generate_spec(body.message, ctx, date.today(), body.prior_spec)
+        spec = generate_spec(body.message, ctx, date.today(), body.prior_spec, obj_ctx)
     except CoachUnavailable as e:
         raise HTTPException(503, str(e)) from e
     except CoachError as e:
@@ -226,8 +230,11 @@ def modify_program(
     program = _get_owned_program(db, program_id, ident)
     prior = _program_spec(program)
     ctx = build_materialize_context(db, ident)
+    obj_ctx = build_coach_objective_context(db, ident)
     try:
-        new_spec = generate_spec(body.message, ctx, date.today(), prior_spec=prior)
+        new_spec = generate_spec(
+            body.message, ctx, date.today(), prior_spec=prior, obj_ctx=obj_ctx
+        )
     except CoachUnavailable as e:
         raise HTTPException(503, str(e)) from e
     except CoachError as e:
