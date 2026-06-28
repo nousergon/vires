@@ -216,28 +216,32 @@ function ProgramsSection({
       <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-400">Programs</h2>
       <div className="space-y-2">
         {active.map((p) => (
-          <div
-            key={p.id}
-            className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-800/40 p-3"
-          >
-            <div className="min-w-0">
-              <div className="truncate font-semibold text-slate-100">{p.name}</div>
-              <div className="text-xs text-slate-400">
-                {p.completed_count}/{p.planned_count} done
-                {p.end_date && ` · ends ${p.end_date}`}
+          <div key={p.id} className="rounded-xl border border-slate-800 bg-slate-800/40 p-3">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="truncate font-semibold text-slate-100">{p.name}</div>
+                <div className="text-xs text-slate-400">
+                  {p.completed_count}/{p.planned_count} done
+                  {p.end_date && ` · ends ${p.end_date}`}
+                </div>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <button
+                  className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-amber-300 hover:bg-slate-800"
+                  onClick={() => onModify({ id: p.id, name: p.name })}
+                >
+                  Modify
+                </button>
+                <button className="text-slate-600 hover:text-red-400" onClick={() => remove(p.id)} aria-label="Delete">
+                  ✕
+                </button>
               </div>
             </div>
-            <div className="flex shrink-0 items-center gap-2">
-              <button
-                className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-amber-300 hover:bg-slate-800"
-                onClick={() => onModify({ id: p.id, name: p.name })}
-              >
-                Modify
-              </button>
-              <button className="text-slate-600 hover:text-red-400" onClick={() => remove(p.id)} aria-label="Delete">
-                ✕
-              </button>
-            </div>
+            {p.coach_summary && (
+              <p className="mt-2 border-t border-slate-800 pt-2 text-xs leading-relaxed text-slate-300">
+                {p.coach_summary}
+              </p>
+            )}
           </div>
         ))}
       </div>

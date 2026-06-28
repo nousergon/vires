@@ -41,7 +41,7 @@ describe('PlanPage', () => {
         id: 1,
         name: '8-Week Block',
         goal_text: null,
-        coach_summary: null,
+        coach_summary: 'Ramp from 10 to 4 reps, deload week 4.',
         objective_id: null,
         start_date: '2026-06-29',
         end_date: '2026-08-20',
@@ -54,6 +54,8 @@ describe('PlanPage', () => {
     expect(await screen.findByText('8-Week Block')).toBeInTheDocument()
     expect(screen.getByText(/2\/16 done/)).toBeInTheDocument()
     expect(screen.getByText('Modify')).toBeInTheDocument()
+    // the coach's strategy shows on the program card
+    expect(screen.getByText('Ramp from 10 to 4 reps, deload week 4.')).toBeInTheDocument()
   })
 
   it("shows the coach's strategy on the objective tile", async () => {
