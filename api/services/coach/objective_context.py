@@ -34,11 +34,26 @@ class ConstraintCtx:
 
 
 @dataclass
+class ExerciseCandidate:
+    """A real catalog exercise the coach may use to AUTHOR a new routine. The
+    pool is assembled from the objective's needs-analysis so the right movements
+    are available; grounding still only permits these real ids."""
+
+    exercise_id: int
+    name: str
+    is_timed: bool
+    primary_muscles: list[str]
+    equipment: str | None
+
+
+@dataclass
 class CoachObjectiveContext:
     """The objective + active constraints generation runs against (may be empty)."""
 
     objective: ObjectiveCtx | None = None
     constraints: list[ConstraintCtx] = field(default_factory=list)
+    # Catalog exercises the coach may author new routines from (objective-driven).
+    candidates: list[ExerciseCandidate] = field(default_factory=list)
 
     @property
     def is_empty(self) -> bool:

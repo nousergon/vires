@@ -231,7 +231,8 @@ export interface ProgressionCurve {
   steps?: number | null
 }
 export interface ExerciseProgression {
-  template_id: number
+  template_id?: number | null
+  routine_key?: string | null
   exercise_id?: number | null
   sets?: number | null
   reps?: ProgressionCurve | null
@@ -239,13 +240,29 @@ export interface ExerciseProgression {
   seed_weight?: number | null
 }
 export interface ScheduleEntry {
-  template_id: number
+  template_id?: number | null
+  routine_key?: string | null
   weekday: string // lowercase day name, e.g. 'monday'
+}
+// A routine the coach authors for the objective (persisted on save).
+export interface RoutineExerciseSpec {
+  exercise_id: number
+  sets?: number | null
+  reps?: number | null
+  weight?: number | null
+  duration_seconds?: number | null
+  rest_seconds?: number | null
+}
+export interface RoutineSpec {
+  key: string
+  name: string
+  exercises: RoutineExerciseSpec[]
 }
 export interface ProgramSpec {
   name: string
   start_date: string
   duration_weeks: number
+  new_routines: RoutineSpec[]
   schedule: ScheduleEntry[]
   progressions: ExerciseProgression[]
   deload_weeks: number[]
@@ -270,6 +287,11 @@ export interface PlannedWorkoutPreview {
   week_index: number | null
   exercises: PlannedExercisePreview[]
 }
+export interface CreatedRoutinePreview {
+  key: string
+  name: string
+  exercise_names: string[]
+}
 export interface ProgramPreview {
   name: string
   coach_summary: string
@@ -278,6 +300,7 @@ export interface ProgramPreview {
   weight_unit: string
   spec: ProgramSpec
   planned_workouts: PlannedWorkoutPreview[]
+  created_routines: CreatedRoutinePreview[]
 }
 
 export interface ProgramSummary {

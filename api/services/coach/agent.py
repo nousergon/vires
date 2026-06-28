@@ -104,6 +104,18 @@ def _context_block(
     objective = _objective_block(obj_ctx, today)
     if objective is not None:
         payload["goal"] = objective
+    if obj_ctx is not None and obj_ctx.candidates:
+        # The exercise pool the coach may AUTHOR new routines from (real ids).
+        payload["exercise_catalog"] = [
+            {
+                "exercise_id": c.exercise_id,
+                "name": c.name,
+                "is_timed": c.is_timed,
+                "primary_muscles": c.primary_muscles,
+                "equipment": c.equipment,
+            }
+            for c in obj_ctx.candidates
+        ]
     return json.dumps(payload, indent=2)
 
 
@@ -111,15 +123,58 @@ def _known_template_ids(ctx: MaterializeContext) -> set[int]:
     return set(ctx.templates.keys())
 
 
-def _validate_grounding(spec: ProgramSpec, ctx: MaterializeContext) -> None:
-    """Reject specs that reference templates the user doesn't have (triggers retry)."""
-    known = _known_template_ids(ctx)
-    referenced = {e.template_id for e in spec.schedule}
-    unknown = referenced - known
-    if unknown:
-        raise ValueError(f"schedule references unknown template_id(s): {sorted(unknown)}")
+def _allowed_exercise_ids(
+    ctx: MaterializeContext, obj_ctx: CoachObjectiveContext | None
+) -> set[int]:
+    """Exercise ids the coach may use when authoring routines: every exercise in
+    the user's existing routines + the objective-driven catalog candidates."""
+    ids = {te.exercise_id for tpl in ctx.templates.values() for te in tpl.exercises}
+    if obj_ctx is not None:
+        ids |= {c.exercise_id for c in obj_ctx.candidates}
+    return ids
+
+
+def _validate_grounding(
+    spec: ProgramSpec,
+    ctx: MaterializeContext,
+    obj_ctx: CoachObjectiveContext | None = None,
+) -> None:
+    """Reject specs that reference ids/keys the user doesn't have (triggers retry).
+
+    The coach may either schedule an existing ``template_id`` or author a new
+    routine (``new_routines`` + ``routine_key``) from real catalog exercises."""
+    known_templates = _known_template_ids(ctx)
+    routine_keys = {r.key for r in spec.new_routines}
+    allowed_exercises = _allowed_exercise_ids(ctx, obj_ctx)
+
     if not spec.schedule:
-        raise ValueError("schedule is empty — at least one template must be scheduled")
+        raise ValueError("schedule is empty — at least one routine must be scheduled")
+
+    # Every authored routine must have exercises drawn only from real ids.
+    for r in spec.new_routines:
+        if not r.exercises:
+            raise ValueError(f"new routine '{r.key}' has no exercises")
+        bad = {e.exercise_id for e in r.exercises} - allowed_exercises
+        if bad:
+            raise ValueError(
+                f"routine '{r.key}' references unknown exercise_id(s): {sorted(bad)} "
+                "— use only exercise_id values from templates or exercise_catalog"
+            )
+
+    # Every schedule/progression target must resolve to a known template or a
+    # routine defined in this spec.
+    for e in spec.schedule:
+        if e.template_id is not None and e.template_id not in known_templates:
+            raise ValueError(f"schedule references unknown template_id: {e.template_id}")
+        if e.routine_key is not None and e.routine_key not in routine_keys:
+            raise ValueError(f"schedule references undefined routine_key: '{e.routine_key}'")
+    for p in spec.progressions:
+        if p.template_id is not None and p.template_id not in known_templates:
+            raise ValueError(f"progression references unknown template_id: {p.template_id}")
+        if p.routine_key is not None and p.routine_key not in routine_keys:
+            raise ValueError(
+                f"progression references undefined routine_key: '{p.routine_key}'"
+            )
 
 
 def generate_spec(
@@ -175,7 +230,7 @@ def generate_spec(
             break
         try:
             spec = ProgramSpec.model_validate(tool_input)
-            _validate_grounding(spec, ctx)
+            _validate_grounding(spec, ctx, obj_ctx)
             return spec
         except (ValidationError, ValueError) as e:
             last_err = e
