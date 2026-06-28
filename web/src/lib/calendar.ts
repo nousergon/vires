@@ -1,5 +1,5 @@
 // Pure date math for the month calendar — no deps (the app deliberately avoids
-// a heavy date library). Weeks start on Monday to match the rest of the app.
+// a heavy date library). Weeks start on Sunday (US calendar standard).
 
 /** Local-time YYYY-MM-DD (NOT toISOString, which would shift by timezone). */
 export function isoDate(d: Date): string {
@@ -25,18 +25,13 @@ export function sameDay(a: Date, b: Date): boolean {
   )
 }
 
-/** Monday-aligned weekday index: 0=Mon … 6=Sun. */
-export function mondayIndex(d: Date): number {
-  return (d.getDay() + 6) % 7
-}
-
 /**
- * The calendar grid for a month as full Monday→Sunday weeks. Leading/trailing
+ * The calendar grid for a month as full Sunday→Saturday weeks. Leading/trailing
  * cells spill into the adjacent months so every row has 7 days.
  */
 export function monthMatrix(year: number, month: number): Date[][] {
   const first = new Date(year, month, 1)
-  const lead = mondayIndex(first)
+  const lead = first.getDay() // 0=Sunday … 6=Saturday
   const daysInMonth = new Date(year, month + 1, 0).getDate()
   const cells = Math.ceil((lead + daysInMonth) / 7) * 7
   const gridStart = new Date(year, month, 1 - lead)
@@ -50,7 +45,7 @@ export function monthMatrix(year: number, month: number): Date[][] {
   return weeks
 }
 
-export const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+export const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 export const MONTH_LABELS = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isoDate, mondayIndex, monthMatrix, sameDay, addMonths } from './calendar'
+import { isoDate, monthMatrix, sameDay, addMonths } from './calendar'
 
 describe('isoDate', () => {
   it('formats local date as YYYY-MM-DD (no tz shift)', () => {
@@ -8,30 +8,24 @@ describe('isoDate', () => {
   })
 })
 
-describe('mondayIndex', () => {
-  it('maps Sunday=6, Monday=0', () => {
-    expect(mondayIndex(new Date(2026, 5, 29))).toBe(0) // Mon Jun 29 2026
-    expect(mondayIndex(new Date(2026, 5, 28))).toBe(6) // Sun Jun 28 2026
-  })
-})
-
-describe('monthMatrix', () => {
-  it('returns full Monday-aligned weeks covering the month', () => {
-    const weeks = monthMatrix(2026, 5) // June 2026
+describe('monthMatrix (Sunday-first)', () => {
+  it('returns full Sunday-aligned weeks covering the month', () => {
+    const weeks = monthMatrix(2026, 5) // June 2026 — June 1 is a Monday
     expect(weeks.every((w) => w.length === 7)).toBe(true)
-    // first cell is a Monday
-    expect(mondayIndex(weeks[0][0])).toBe(0)
-    // June 1 2026 is a Monday -> grid starts exactly on June 1
-    expect(isoDate(weeks[0][0])).toBe('2026-06-01')
+    // every row starts on a Sunday
+    expect(weeks.every((w) => w[0].getDay() === 0)).toBe(true)
+    // grid pads back one day to Sunday May 31
+    expect(isoDate(weeks[0][0])).toBe('2026-05-31')
+    expect(isoDate(weeks[0][1])).toBe('2026-06-01') // Monday in the 2nd column
     // the month's days all appear
-    const flat = weeks.flat().map(isoDate)
-    expect(flat).toContain('2026-06-30')
+    expect(weeks.flat().map(isoDate)).toContain('2026-06-30')
   })
 
   it('pads leading days from the previous month', () => {
     const weeks = monthMatrix(2026, 6) // July 2026 — July 1 is a Wednesday
-    expect(isoDate(weeks[0][0])).toBe('2026-06-29') // back to Monday
-    expect(isoDate(weeks[0][2])).toBe('2026-07-01')
+    expect(isoDate(weeks[0][0])).toBe('2026-06-28') // back to Sunday
+    expect(weeks[0][0].getDay()).toBe(0)
+    expect(isoDate(weeks[0][3])).toBe('2026-07-01') // Wednesday = 4th column
   })
 })
 
