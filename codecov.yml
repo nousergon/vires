@@ -1,0 +1,24 @@
+# Codecov config. Coverage is informational (no PR gate) — the CI test jobs are
+# the gate. Two flags so backend (api/) and frontend (web/src/) report separately;
+# the badge shows the combined project number.
+coverage:
+  status:
+    project:
+      default:
+        informational: true
+    patch:
+      default:
+        informational: true
+
+flag_management:
+  individual_flags:
+    - name: backend
+      paths:
+        - api/
+    - name: frontend
+      paths:
+        - web/src/
+
+comment:
+  layout: "reach, flags, files"
+  require_changes: true

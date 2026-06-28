@@ -31,6 +31,12 @@ web/dist/
 node_modules/
 .node/        # vendored Node runtime on the deploy box
 
+# Coverage artifacts
+coverage.xml
+.coverage
+htmlcov/
+web/coverage/
+
 # OS / editor
 .DS_Store
 .idea/
