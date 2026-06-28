@@ -85,6 +85,20 @@ Set `VIRES_STT_MODEL` (default `whisper-1`) and `VIRES_STT_BASE_URL` (default Op
 Groq for cheaper/faster). **Non-fatal:** with no key the deploy succeeds, `/coach/transcribe`
 returns 503, and the mic button is hidden client-side.
 
+### 7c. Web Push (optional — locked-screen timer alerts)
+Generate a VAPID keypair and store it in SSM; `deploy-on-merge.sh` hydrates both on each deploy:
+```
+python scripts/gen_vapid.py
+aws ssm put-parameter --name /vires/vapid_public_key  --type String      --value "<public>"
+aws ssm put-parameter --name /vires/vapid_private_key --type SecureString --value "<private>"
+```
+Grant the instance role `ssm:GetParameter` on both (override paths with
+`VIRES_VAPID_PUBLIC_SSM_PARAM` / `VIRES_VAPID_PRIVATE_SSM_PARAM`). **Non-fatal:** without the
+keypair `/push/*` returns 503 and the app falls back to the foreground beep + wake-lock.
+**iOS:** Web Push only works for an **installed** PWA (Add to Home Screen) on iOS 16.4+, with
+notification permission granted. The scheduler is in-process (single uvicorn proc) — a pending
+alert is lost if the box restarts mid-rest; rare and short-lived.
+
 ## Notes
 - App secrets (all optional, SSM-hydrated into the box, never committed): the AI-coach
   Anthropic key (§7) and the tuned coach prompt (§7a). The MVP otherwise runs as one

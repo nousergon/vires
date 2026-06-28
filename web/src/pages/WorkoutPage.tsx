@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type SessionExercise, type SetEntry, type WorkoutSession } from '../lib/api'
 import { useCountdown, fmtClock, fireTimerAlert } from '../lib/timer'
 import { useWakeLock } from '../lib/wakeLock'
+import { schedulePush, cancelPush } from '../lib/push'
 import { useSettings } from '../lib/useSettings'
 import { Button, Card, EmptyState, PageTitle, Spinner } from '../components/ui'
 import ExercisePicker from '../components/ExercisePicker'
@@ -91,24 +92,61 @@ function ActiveWorkout({ id, onClear }: { id: number; onClear: () => void }) {
   // Keep the screen awake while a timer runs so the end alert reliably fires.
   useWakeLock(timer.running && settings.timer_keep_awake)
 
+  // The running timer (for the locked-screen push fallback). When the app is
+  // backgrounded mid-timer we schedule a server push for the remaining time; on
+  // return to the foreground (or when the timer ends/stops) we cancel it, so the
+  // push only ever fires when the in-app beep can't.
+  const activeTimer = useRef<{ id: string; endAt: number; title: string } | null>(null)
+
+  useEffect(() => {
+    function onVisibility() {
+      const at = activeTimer.current
+      if (!at) return
+      if (document.visibilityState === 'hidden') {
+        if (settings.timer_notification) {
+          const remaining = (at.endAt - Date.now()) / 1000
+          if (remaining > 0) schedulePush(at.id, remaining, at.title)
+        }
+      } else {
+        cancelPush(at.id)
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => document.removeEventListener('visibilitychange', onVisibility)
+  }, [settings.timer_notification])
+
   const { data: ws, isLoading } = useQuery({
     queryKey: ['workout', id],
     queryFn: () => api.getWorkout(id),
   })
   const invalidate = () => qc.invalidateQueries({ queryKey: ['workout', id] })
 
+  function clearActiveTimer() {
+    const at = activeTimer.current
+    if (at) cancelPush(at.id)
+    activeTimer.current = null
+  }
+
   const runTimer: RunTimer = (kind, seId, secs, onFinish) => {
     setTimerCtx({ seId, kind })
+    const title = kind === 'hold' ? 'Hold complete' : 'Rest over'
+    activeTimer.current = {
+      id: `${id}-${seId}-${Date.now()}`,
+      endAt: Date.now() + secs * 1000,
+      title,
+    }
     timer.start(
       secs,
       () => {
+        clearActiveTimer()
         setTimerCtx(null)
         onFinish?.()
       },
-      kind === 'hold' ? 'Hold complete' : 'Rest over',
+      title,
     )
   }
   const stopTimer = () => {
+    clearActiveTimer()
     timer.stop()
     setTimerCtx(null)
   }

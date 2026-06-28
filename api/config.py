@@ -53,6 +53,14 @@ class Settings(BaseSettings):
     stt_model: str = "whisper-1"
     stt_base_url: str = "https://api.openai.com/v1"
 
+    # Web Push (optional) — locked-screen timer alerts. VAPID keypair: the public
+    # key (base64url applicationServerKey) is served to the browser; the private
+    # key (PEM) signs pushes. SSM-hydrated; absent => /push endpoints 503 and the
+    # client falls back to foreground beep/wake-lock only.
+    vapid_public_key: str | None = None
+    vapid_private_key: str | None = None
+    vapid_subject: str = "mailto:brian@nousergon.ai"
+
     # CORS — the Vite dev server during local development.
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
 

@@ -89,6 +89,22 @@ class UserSettings(Base):
     )
 
 
+class PushSubscription(Base):
+    """A browser Web Push subscription (one per device that opted in). The
+    ``endpoint`` is the push service URL; ``p256dh``/``auth`` are the client's
+    encryption keys. Used to deliver locked-screen timer alerts."""
+
+    __tablename__ = "push_subscriptions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    endpoint: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    p256dh: Mapped[str] = mapped_column(String, nullable=False)
+    auth: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
+
+
 # --------------------------------------------------------------------------- #
 # Exercise catalog
 # --------------------------------------------------------------------------- #
