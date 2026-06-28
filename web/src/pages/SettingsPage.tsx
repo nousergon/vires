@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type Settings, type WeightUnit } from '../lib/api'
 import { useSettings } from '../lib/useSettings'
 import { requestNotificationPermission } from '../lib/timer'
+import { ensurePushSubscription, disablePush } from '../lib/push'
 import { Button, Card, PageTitle } from '../components/ui'
 
 export default function SettingsPage() {
@@ -88,9 +89,15 @@ export default function SettingsPage() {
         />
         <Toggle
           label="Notification"
+          hint="Locked-screen alerts (install to home screen on iOS)"
           on={draft.timer_notification}
           onChange={async (v) => {
-            if (v && !(await requestNotificationPermission())) return // blocked → stay off
+            if (v) {
+              if (!(await requestNotificationPermission())) return // blocked → stay off
+              void ensurePushSubscription() // best-effort; falls back to foreground if unconfigured
+            } else {
+              void disablePush()
+            }
             set('timer_notification', v)
           }}
         />

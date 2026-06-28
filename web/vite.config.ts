@@ -32,6 +32,9 @@ export default defineConfig({
         ],
       },
       workbox: {
+        // Layer our push / notificationclick handlers onto the generated SW
+        // (keeps the offline precache; avoids an injectManifest migration).
+        importScripts: ['/push-sw.js'],
         // App shell offline; API GETs cached network-first so history is
         // viewable offline (writes still need connectivity — MVP).
         runtimeCaching: [

@@ -114,6 +114,26 @@ else
   echo "stt: no key at ${STT_PARAM} — voice input unavailable (non-fatal)"
 fi
 
+# --- Web Push: hydrate the VAPID keypair from SSM ---------------------------- #
+# NON-FATAL: without both keys /push 503s and the client falls back to the
+# foreground beep + wake-lock. Private key never echoed; public key is non-secret.
+VAPID_PUB=$(aws ssm get-parameter --name "${VIRES_VAPID_PUBLIC_SSM_PARAM:-/vires/vapid_public_key}" \
+              --query Parameter.Value --output text 2>/dev/null || true)
+VAPID_PRIV=$(aws ssm get-parameter --name "${VIRES_VAPID_PRIVATE_SSM_PARAM:-/vires/vapid_private_key}" \
+               --with-decryption --query Parameter.Value --output text 2>/dev/null || true)
+if [ -n "$VAPID_PUB" ] && [ "$VAPID_PUB" != "None" ] \
+   && [ -n "$VAPID_PRIV" ] && [ "$VAPID_PRIV" != "None" ]; then
+  grep -vE '^VIRES_VAPID_(PUBLIC|PRIVATE)_KEY=' "$ENV_FILE" > "$ENV_FILE.tmp" || true
+  mv "$ENV_FILE.tmp" "$ENV_FILE"
+  printf 'VIRES_VAPID_PUBLIC_KEY=%s\n' "$VAPID_PUB" >> "$ENV_FILE"
+  printf 'VIRES_VAPID_PRIVATE_KEY=%s\n' "$VAPID_PRIV" >> "$ENV_FILE"   # not traced (no set -x)
+  chmod 600 "$ENV_FILE"
+  unset VAPID_PRIV
+  echo "push: hydrated VAPID keypair from SSM"
+else
+  echo "push: no VAPID keypair in SSM — locked-screen push unavailable (non-fatal)"
+fi
+
 # --- restart + health check ------------------------------------------------- #
 sudo systemctl restart vires
 sleep 4

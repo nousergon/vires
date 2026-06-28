@@ -445,4 +445,18 @@ export const api = {
     }
     return ((await res.json()).text as string) ?? ''
   },
+
+  // web push
+  pushPublicKey: () => req<{ key: string }>('/push/public-key'),
+  pushSubscribe: (sub: { endpoint: string; keys: { p256dh: string; auth: string } }) =>
+    req<void>('/push/subscribe', { method: 'POST', body: JSON.stringify(sub) }),
+  pushUnsubscribe: (endpoint: string) =>
+    req<void>('/push/unsubscribe', { method: 'POST', body: JSON.stringify({ endpoint }) }),
+  pushSchedule: (timerId: string, delaySeconds: number, title: string, body = '') =>
+    req<void>('/push/schedule', {
+      method: 'POST',
+      body: JSON.stringify({ timer_id: timerId, delay_seconds: delaySeconds, title, body }),
+    }),
+  pushCancel: (timerId: string) =>
+    req<void>('/push/cancel', { method: 'POST', body: JSON.stringify({ timer_id: timerId }) }),
 }
