@@ -53,6 +53,45 @@ describe('HistoryPage', () => {
     expect(screen.getByText('Quarter')).toBeInTheDocument()
   })
 
+  it('selects workouts and bulk-deletes them', async () => {
+    mockSettings()
+    vi.spyOn(api, 'listWorkouts').mockResolvedValue([
+      { id: 1, name: 'Test A', started_at: '2026-06-28T18:00:00Z', ended_at: '2026-06-28T19:00:00Z', exercise_count: 1, set_count: 3, total_volume: 100 },
+      { id: 2, name: 'Test B', started_at: '2026-06-27T18:00:00Z', ended_at: '2026-06-27T19:00:00Z', exercise_count: 1, set_count: 3, total_volume: 100 },
+    ])
+    vi.spyOn(api, 'records').mockResolvedValue([])
+    const del = vi.spyOn(api, 'deleteWorkout').mockResolvedValue(undefined)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    renderWithProviders(<HistoryPage />)
+    fireEvent.click(await screen.findByText('Select'))
+    fireEvent.click(screen.getByText('Test A')) // select first
+    fireEvent.click(screen.getByText('Delete 1'))
+    await new Promise((r) => setTimeout(r, 0))
+    expect(del).toHaveBeenCalledWith(1)
+    expect(del).toHaveBeenCalledTimes(1)
+  })
+
+  it('deletes a single workout from the detail sheet', async () => {
+    mockSettings()
+    vi.spyOn(api, 'listWorkouts').mockResolvedValue([
+      { id: 9, name: 'Test C', started_at: '2026-06-28T18:00:00Z', ended_at: '2026-06-28T19:00:00Z', exercise_count: 0, set_count: 0, total_volume: 0 },
+    ])
+    vi.spyOn(api, 'records').mockResolvedValue([])
+    vi.spyOn(api, 'getWorkout').mockResolvedValue({
+      id: 9, name: 'Test C', started_at: '2026-06-28T18:00:00Z', ended_at: '2026-06-28T19:00:00Z',
+      notes: null, template_id: null, exercises: [],
+    })
+    const del = vi.spyOn(api, 'deleteWorkout').mockResolvedValue(undefined)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    renderWithProviders(<HistoryPage />)
+    fireEvent.click(await screen.findByText('Test C'))
+    fireEvent.click(await screen.findByText('Delete workout'))
+    await new Promise((r) => setTimeout(r, 0))
+    expect(del).toHaveBeenCalledWith(9)
+  })
+
   it('shows an empty state with no records', async () => {
     mockSettings()
     vi.spyOn(api, 'listWorkouts').mockResolvedValue([])
