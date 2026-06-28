@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type SessionExercise, type SetEntry, type WorkoutSession } from '../lib/api'
-import { useCountdown, fmtClock } from '../lib/timer'
+import { useCountdown, fmtClock, fireTimerAlert } from '../lib/timer'
+import { useWakeLock } from '../lib/wakeLock'
 import { useSettings } from '../lib/useSettings'
 import { Button, Card, EmptyState, PageTitle, Spinner } from '../components/ui'
 import ExercisePicker from '../components/ExercisePicker'
@@ -82,9 +83,13 @@ type RunTimer = (kind: TimerKind, seId: number, secs: number, onFinish?: () => v
 function ActiveWorkout({ id, onClear }: { id: number; onClear: () => void }) {
   const qc = useQueryClient()
   const nav = useNavigate()
-  const timer = useCountdown()
+  const settings = useSettings()
+  const timer = useCountdown((label) => fireTimerAlert(settings, label))
   const [timerCtx, setTimerCtx] = useState<{ seId: number; kind: TimerKind } | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
+
+  // Keep the screen awake while a timer runs so the end alert reliably fires.
+  useWakeLock(timer.running && settings.timer_keep_awake)
 
   const { data: ws, isLoading } = useQuery({
     queryKey: ['workout', id],
@@ -94,10 +99,14 @@ function ActiveWorkout({ id, onClear }: { id: number; onClear: () => void }) {
 
   const runTimer: RunTimer = (kind, seId, secs, onFinish) => {
     setTimerCtx({ seId, kind })
-    timer.start(secs, () => {
-      setTimerCtx(null)
-      onFinish?.()
-    })
+    timer.start(
+      secs,
+      () => {
+        setTimerCtx(null)
+        onFinish?.()
+      },
+      kind === 'hold' ? 'Hold complete' : 'Rest over',
+    )
   }
   const stopTimer = () => {
     timer.stop()

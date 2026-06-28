@@ -158,6 +158,10 @@ export interface Settings {
   default_rest_seconds: number
   default_sets: number
   default_reps: number
+  timer_sound: boolean
+  timer_vibration: boolean
+  timer_notification: boolean
+  timer_keep_awake: boolean
 }
 
 // ---- personal records ----------------------------------------------------- //

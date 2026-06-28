@@ -77,6 +77,13 @@ class UserSettings(Base):
     feed_token: Mapped[str | None] = mapped_column(
         String, nullable=True, unique=True, index=True
     )
+    # Timer-end alert preferences (rest + hold timers). Notification defaults off
+    # since it needs per-device permission; keep-awake on (high-value, screen
+    # stays on so the sound/visual reliably fire mid-rest).
+    timer_sound: Mapped[bool] = mapped_column(Boolean, default=True)
+    timer_vibration: Mapped[bool] = mapped_column(Boolean, default=True)
+    timer_notification: Mapped[bool] = mapped_column(Boolean, default=False)
+    timer_keep_awake: Mapped[bool] = mapped_column(Boolean, default=True)
     updated_at: Mapped[datetime] = mapped_column(
         UTCDateTime(), default=_utcnow, onupdate=_utcnow
     )

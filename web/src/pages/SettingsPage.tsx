@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type Settings, type WeightUnit } from '../lib/api'
 import { useSettings } from '../lib/useSettings'
+import { requestNotificationPermission } from '../lib/timer'
 import { Button, Card, PageTitle } from '../components/ui'
 
 export default function SettingsPage() {
@@ -66,6 +67,38 @@ export default function SettingsPage() {
             onChange={(v) => set('default_reps', v)}
           />
         </div>
+      </Card>
+
+      <Card className="mt-4 space-y-1">
+        <h2 className="mb-1 text-sm font-semibold text-slate-200">Timer alerts</h2>
+        <p className="mb-2 text-xs text-slate-400">
+          When a rest or hold timer ends. Keep-awake stops the screen sleeping mid-rest
+          so the alert actually reaches you.
+        </p>
+        <Toggle
+          label="Sound"
+          on={draft.timer_sound}
+          onChange={(v) => set('timer_sound', v)}
+        />
+        <Toggle
+          label="Vibration"
+          hint="Android only — iOS has no web vibration"
+          on={draft.timer_vibration}
+          onChange={(v) => set('timer_vibration', v)}
+        />
+        <Toggle
+          label="Notification"
+          on={draft.timer_notification}
+          onChange={async (v) => {
+            if (v && !(await requestNotificationPermission())) return // blocked → stay off
+            set('timer_notification', v)
+          }}
+        />
+        <Toggle
+          label="Keep screen awake during timers"
+          on={draft.timer_keep_awake}
+          onChange={(v) => set('timer_keep_awake', v)}
+        />
       </Card>
 
       <Button className="mt-4 w-full" onClick={() => save.mutate()} disabled={save.isPending}>
@@ -135,6 +168,42 @@ function CalendarFeed() {
         </button>
       </div>
     </Card>
+  )
+}
+
+function Toggle({
+  label,
+  hint,
+  on,
+  onChange,
+}: {
+  label: string
+  hint?: string
+  on: boolean
+  onChange: (v: boolean) => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!on)}
+      className="flex w-full items-center justify-between py-2 text-left"
+    >
+      <span>
+        <span className="block text-sm text-slate-200">{label}</span>
+        {hint && <span className="block text-[11px] text-slate-500">{hint}</span>}
+      </span>
+      <span
+        className={`relative h-6 w-11 shrink-0 rounded-full transition ${
+          on ? 'bg-amber-500' : 'bg-slate-700'
+        }`}
+      >
+        <span
+          className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${
+            on ? 'left-[1.375rem]' : 'left-0.5'
+          }`}
+        />
+      </span>
+    </button>
   )
 }
 
