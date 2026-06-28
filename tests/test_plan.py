@@ -82,6 +82,28 @@ def test_start_planned_seeds_session_from_prescription_and_links(client):
     assert got["session_id"] == ses["id"]
 
 
+def test_delete_session_started_from_plan_detaches_and_reverts(client):
+    # Regression: deleting a session that fulfilled a planned workout used to hit
+    # the planned_workouts.session_id FK (500) and silently fail in the UI.
+    tpl = _routine(client)
+    pw = client.post(
+        "/api/plan/planned",
+        json={"scheduled_date": "2026-07-01", "template_id": tpl["id"]},
+    ).json()
+    ses = client.post(f"/api/plan/planned/{pw['id']}/start").json()
+    assert client.get(f"/api/plan/planned/{pw['id']}").json()["status"] == "completed"
+
+    # delete the logged session — must succeed, not 500
+    assert client.delete(f"/api/workouts/{ses['id']}").status_code == 204
+
+    # the planned day is detached + reverted to 'planned' (its log is gone)
+    got = client.get(f"/api/plan/planned/{pw['id']}").json()
+    assert got["status"] == "planned"
+    assert got["session_id"] is None
+    # the session is actually gone
+    assert client.get(f"/api/workouts/{ses['id']}").status_code == 404
+
+
 def test_start_planned_is_idempotent(client):
     tpl = _routine(client)
     pw = client.post(
