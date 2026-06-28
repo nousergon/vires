@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, type CalendarEntry } from '../lib/api'
+import { api, type CalendarEntry, type PlannedExercise } from '../lib/api'
 import { Button, EmptyState, PageTitle, Sheet, Spinner } from '../components/ui'
 import CoachSheet from '../components/CoachSheet'
 import ObjectiveSheet from '../components/ObjectiveSheet'
+import { useSettings } from '../lib/useSettings'
 import { ACTIVE_KEY } from './WorkoutPage'
 import {
   addMonths,
@@ -273,6 +274,7 @@ function CalendarGrid({
             <button
               key={i}
               onClick={() => onPick(d)}
+              aria-label={isoDate(d)}
               className={`flex aspect-square flex-col items-center justify-center rounded-lg text-sm ${
                 inMonth ? 'text-slate-200' : 'text-slate-600'
               } ${isToday ? 'ring-1 ring-amber-500' : ''} ${
@@ -366,31 +368,13 @@ function DaySheet({
         {entries.length === 0 && <EmptyState title="Nothing scheduled" hint="Schedule a routine below or ask the Coach." />}
 
         {planned.map((e) => (
-          <div key={`p${e.id}`} className="rounded-xl border border-slate-800 bg-slate-800/40 p-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="font-semibold text-slate-100">{e.name || 'Workout'}</div>
-                <div className="text-xs text-slate-400">
-                  {e.exercise_count} exercises · {e.status}
-                </div>
-              </div>
-              <button
-                className="text-slate-600 hover:text-red-400"
-                onClick={() => remove(e.id)}
-                disabled={busy}
-                aria-label="Delete"
-              >
-                ✕
-              </button>
-            </div>
-            {e.status !== 'completed' ? (
-              <Button className="mt-2 w-full" onClick={() => start(e.id)} disabled={busy}>
-                Start workout
-              </Button>
-            ) : (
-              <p className="mt-2 text-xs text-emerald-400">Completed ✓</p>
-            )}
-          </div>
+          <PlannedCard
+            key={`p${e.id}`}
+            e={e}
+            busy={busy}
+            onStart={() => start(e.id)}
+            onRemove={() => remove(e.id)}
+          />
         ))}
 
         {sessions.map((e) => (
@@ -429,4 +413,92 @@ function DaySheet({
       </div>
     </Sheet>
   )
+}
+
+// --------------------------------------------------------------------------- //
+// A planned day in the DaySheet: tap the header to review the prescribed routine
+// (exercises + sets×reps×weight) without starting it; "Start workout" is separate.
+function PlannedCard({
+  e,
+  busy,
+  onStart,
+  onRemove,
+}: {
+  e: CalendarEntry
+  busy: boolean
+  onStart: () => void
+  onRemove: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const unit = useSettings().weight_unit
+  const { data: detail, isLoading } = useQuery({
+    queryKey: ['planned', e.id],
+    queryFn: () => api.getPlanned(e.id),
+    enabled: open,
+  })
+  const done = e.status === 'completed'
+
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-800/40 p-3">
+      <div className="flex items-start justify-between gap-2">
+        <button
+          className="min-w-0 flex-1 text-left"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+        >
+          <div className="flex items-center gap-1.5 font-semibold text-slate-100">
+            <span className={`text-slate-500 transition-transform ${open ? 'rotate-90' : ''}`}>›</span>
+            <span className="truncate">{e.name || 'Workout'}</span>
+          </div>
+          <div className="ml-4 text-xs text-slate-400">
+            {e.exercise_count} exercises · {e.status} ·{' '}
+            <span className="text-amber-300">{open ? 'hide' : 'view routine'}</span>
+          </div>
+        </button>
+        <button
+          className="text-slate-600 hover:text-red-400"
+          onClick={onRemove}
+          disabled={busy}
+          aria-label="Delete"
+        >
+          ✕
+        </button>
+      </div>
+
+      {open && (
+        <div className="mt-2 border-t border-slate-800 pt-2">
+          {isLoading || !detail ? (
+            <p className="text-xs text-slate-500">Loading…</p>
+          ) : detail.exercises.length === 0 ? (
+            <p className="text-xs text-slate-500">No exercises in this routine.</p>
+          ) : (
+            <ul className="space-y-1 text-sm">
+              {detail.exercises.map((pe) => (
+                <li key={pe.id} className="flex justify-between gap-3">
+                  <span className="min-w-0 truncate text-slate-200">{pe.exercise.name}</span>
+                  <span className="shrink-0 text-slate-400">{prescriptionLine(pe, unit)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {!done ? (
+        <Button className="mt-3 w-full" onClick={onStart} disabled={busy}>
+          Start workout
+        </Button>
+      ) : (
+        <p className="mt-2 text-xs text-emerald-400">Completed ✓</p>
+      )}
+    </div>
+  )
+}
+
+function prescriptionLine(pe: PlannedExercise, unit: string): string {
+  const sets = pe.target_sets ?? '?'
+  if (pe.target_duration_seconds) return `${sets}×${pe.target_duration_seconds}s`
+  const reps = pe.target_reps ?? '?'
+  const w = pe.target_weight != null ? ` @ ${pe.target_weight}${unit}` : ''
+  return `${sets}×${reps}${w}`
 }
