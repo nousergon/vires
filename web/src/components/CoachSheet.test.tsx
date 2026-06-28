@@ -93,4 +93,36 @@ describe('CoachSheet', () => {
     await waitFor(() => expect(modify).toHaveBeenCalledWith(3, 'move to mondays'))
     expect(await screen.findByText('Apply changes')).toBeInTheDocument()
   })
+
+  it('shows the active objective + constraints banner in create mode', async () => {
+    vi.spyOn(api, 'activeObjective').mockResolvedValue({
+      objective: {
+        id: 1,
+        name: 'Climb Baker',
+        kind: 'dated',
+        target_date: '2026-09-05',
+        sport: 'alpine',
+        demands_profile: null,
+        is_primary: true,
+        created_at: '',
+        updated_at: '',
+      },
+      constraints: [
+        {
+          id: 2,
+          kind: 'injury',
+          label: 'recovering L4-L5 disc',
+          directives: null,
+          defer_to_professional: true,
+          is_active: true,
+          created_at: '',
+          updated_at: '',
+        },
+      ],
+    })
+    renderWithProviders(<CoachSheet open onClose={() => {}} onSaved={() => {}} />)
+    expect(await screen.findByText(/Building toward: Climb Baker/)).toBeInTheDocument()
+    expect(screen.getByText(/recovering L4-L5 disc/)).toBeInTheDocument()
+    expect(screen.getByText(/defer to PT/)).toBeInTheDocument()
+  })
 })

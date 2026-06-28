@@ -303,6 +303,50 @@ export interface ProgramModifyPreview {
   future_count: number
 }
 
+// ---- objectives / constraints --------------------------------------------- //
+export interface Objective {
+  id: number
+  name: string
+  kind: 'dated' | 'open_ended'
+  target_date: string | null
+  sport: string | null
+  demands_profile: Record<string, unknown> | null
+  is_primary: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface Constraint {
+  id: number
+  kind: 'injury' | 'schedule' | 'equipment'
+  label: string
+  directives: string | null
+  defer_to_professional: boolean
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface ActiveObjective {
+  objective: Objective | null
+  constraints: Constraint[]
+}
+
+export interface ObjectiveInput {
+  name: string
+  kind?: 'dated' | 'open_ended'
+  target_date?: string | null
+  sport?: string | null
+  is_primary?: boolean
+}
+
+export interface ConstraintInput {
+  kind: 'injury' | 'schedule' | 'equipment'
+  label: string
+  directives?: string | null
+  defer_to_professional?: boolean | null
+}
+
 // ---- endpoints ------------------------------------------------------------ //
 export const api = {
   // exercises
@@ -445,6 +489,21 @@ export const api = {
     }
     return ((await res.json()).text as string) ?? ''
   },
+
+  // objectives / constraints
+  activeObjective: () => req<ActiveObjective>('/objectives/active'),
+  listObjectives: () => req<Objective[]>('/objectives'),
+  createObjective: (body: ObjectiveInput) =>
+    req<Objective>('/objectives', { method: 'POST', body: JSON.stringify(body) }),
+  updateObjective: (id: number, body: Partial<ObjectiveInput>) =>
+    req<Objective>(`/objectives/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  deleteObjective: (id: number) => req<void>(`/objectives/${id}`, { method: 'DELETE' }),
+  listConstraints: () => req<Constraint[]>('/constraints'),
+  createConstraint: (body: ConstraintInput) =>
+    req<Constraint>('/constraints', { method: 'POST', body: JSON.stringify(body) }),
+  updateConstraint: (id: number, body: Partial<ConstraintInput & { is_active: boolean }>) =>
+    req<Constraint>(`/constraints/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  deleteConstraint: (id: number) => req<void>(`/constraints/${id}`, { method: 'DELETE' }),
 
   // web push
   pushPublicKey: () => req<{ key: string }>('/push/public-key'),

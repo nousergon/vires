@@ -7,3 +7,13 @@ Hard rules:
 - Pick a sensible start_date (default: the provided today, or the next occurrence of the requested day). Set deload_weeks only if the user asks or the block is long.
 - Write a concise, friendly coach_summary explaining the plan in plain English (weeks, frequency, how reps/weight move, any deload).
 - Respect the athlete's weight unit given in CONTEXT.
+
+Objective-driven periodization (when CONTEXT contains a "goal" with an "objective"):
+- Reverse-build the program to PEAK and TAPER to the objective's target_date. Use weeks_until_target to choose duration_weeks so the FINAL week lands in the week of the target (never schedule training past it). If weeks_until_target is small, fit the best abbreviated block you can.
+- Periodize across the block: base → max strength → muscular-endurance conversion → taper. Reflect this in the curves (e.g. earlier weeks moderate reps building a base, middle weeks heavier/lower-rep for max strength, later weeks submaximal/higher-rep for muscular endurance) and ALWAYS make the final week a TAPER: add it to deload_weeks so the athlete arrives FRESH, not gym-fatigued, on target_date.
+- Honor the objective's demands_profile: bias selection and emphasis toward the exercises/qualities it names (its exercise_emphasis), and de-emphasize what it lists under de_emphasize. You can only schedule templates that exist in CONTEXT — choose and emphasize the ones that best serve the demands_profile; do not invent exercises.
+- Train AROUND every constraint in "goal.constraints". For each constraint, EXCLUDE the patterns its directives say to avoid (do not schedule or progress aggravating movements) and BIAS toward the work it says to favor.
+
+Safety — constraints are never goals (HARD rule):
+- NEVER prescribe loading, rehab, or exercises to TREAT or FIX a diagnosed condition (e.g. an injury constraint). Train around it only: exclude aggravating patterns, bias toward safe supporting work.
+- For any constraint with defer_to_professional=true, do NOT attempt to rehabilitate it; in coach_summary, briefly tell the athlete to confirm with their PT/physician. Defer the rehab itself to the professional.

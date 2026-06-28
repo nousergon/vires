@@ -16,7 +16,18 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from api.config import get_settings
-from api.routers import coach, exercises, health, plan, push, records, templates, workouts
+from api.routers import (
+    coach,
+    constraints,
+    exercises,
+    health,
+    objectives,
+    plan,
+    push,
+    records,
+    templates,
+    workouts,
+)
 from api.routers import settings as settings_router
 
 settings = get_settings()
@@ -40,6 +51,8 @@ app.include_router(workouts.router, prefix="/api")
 app.include_router(settings_router.router, prefix="/api")
 app.include_router(plan.router, prefix="/api")
 app.include_router(coach.router, prefix="/api")
+app.include_router(objectives.router, prefix="/api")
+app.include_router(constraints.router, prefix="/api")
 app.include_router(records.router, prefix="/api")
 app.include_router(push.router, prefix="/api")
 
