@@ -124,3 +124,20 @@ class SaveProgramRequest(BaseModel):
     spec: ProgramSpec
     name: str | None = None
     goal_text: str | None = None
+
+
+class ModifyRequest(BaseModel):
+    """A natural-language change to an existing program ('shift a week', 'deload wk4')."""
+
+    message: str = Field(min_length=1)
+
+
+class ProgramModifyPreview(BaseModel):
+    """Non-persisted preview of a modification: the proposed new plan + what it does
+    to the existing program. Completed workouts are always preserved; only future
+    (not-yet-done) workouts are replaced when applied."""
+
+    program_id: int
+    preview: ProgramPreview
+    completed_preserved: int  # completed workouts that stay frozen
+    future_count: int  # new future workouts that will be scheduled (>= today)

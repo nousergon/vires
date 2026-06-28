@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
@@ -308,6 +308,90 @@ def test_save_program_persists_and_materializes(client):
     # reps + weight materialized on the persisted rows
     wk1 = prog["planned_workouts"][0]["exercises"][0]
     assert wk1["target_reps"] == 10 and wk1["target_weight"] == 135.0
+
+
+# --------------------------------------------------------------------------- #
+# program modification (modify preview + apply reconciliation)
+# --------------------------------------------------------------------------- #
+def _future_spec(template_id: int, weeks: int, start: date) -> dict:
+    """A spec whose week-1 lands exactly on `start` (weekday = start's weekday)."""
+    return {
+        "name": "Block",
+        "start_date": start.isoformat(),
+        "duration_weeks": weeks,
+        "schedule": [{"template_id": template_id, "weekday": start.weekday()}],
+        "progressions": [
+            {"template_id": template_id, "reps": {"mode": "linear", "start": 10, "end": 4}}
+        ],
+        "deload_weeks": [],
+        "coach_summary": "block",
+    }
+
+
+def test_modify_preview_does_not_persist(client, monkeypatch):
+    tpl_id, _ = _bench_template(client)
+    start = date.today() + timedelta(days=3)
+    prog = client.post("/api/coach/programs", json={"spec": _future_spec(tpl_id, 4, start)}).json()
+    # the (mocked) coach returns a 6-week version
+    _install_fake(monkeypatch, [_future_spec(tpl_id, 6, start)])
+    resp = client.post(
+        f"/api/coach/programs/{prog['id']}/modify", json={"message": "make it 6 weeks"}
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["program_id"] == prog["id"]
+    assert body["completed_preserved"] == 0
+    assert body["future_count"] == 6  # start is future, nothing completed yet
+    assert len(body["preview"]["planned_workouts"]) == 6
+    # nothing persisted: the program still has its original 4
+    progs = client.get("/api/plan/programs").json()
+    assert next(p for p in progs if p["id"] == prog["id"])["planned_count"] == 4
+
+
+def test_apply_keeps_completed_replaces_future(client):
+    tpl_id, _ = _bench_template(client)
+    start = date.today() + timedelta(days=3)
+    prog = client.post("/api/coach/programs", json={"spec": _future_spec(tpl_id, 4, start)}).json()
+    assert len(prog["planned_workouts"]) == 4
+    # complete week 1 (its date = start)
+    client.post(f"/api/plan/planned/{prog['planned_workouts'][0]['id']}/start")
+
+    applied = client.put(
+        f"/api/coach/programs/{prog['id']}", json={"spec": _future_spec(tpl_id, 6, start)}
+    ).json()
+    statuses = [pw["status"] for pw in applied["planned_workouts"]]
+    assert statuses.count("completed") == 1  # the trained day is preserved
+    # cutover = start+1 → new weeks 2..6 (5) inserted + 1 completed = 6
+    assert len(applied["planned_workouts"]) == 6
+    summary = next(p for p in client.get("/api/plan/programs").json() if p["id"] == prog["id"])
+    assert summary["planned_count"] == 6 and summary["completed_count"] == 1
+
+
+def test_apply_without_completed_fully_replaces(client):
+    tpl_id, _ = _bench_template(client)
+    start = date.today() + timedelta(days=3)
+    prog = client.post("/api/coach/programs", json={"spec": _future_spec(tpl_id, 4, start)}).json()
+    applied = client.put(
+        f"/api/coach/programs/{prog['id']}", json={"spec": _future_spec(tpl_id, 2, start)}
+    ).json()
+    assert len(applied["planned_workouts"]) == 2  # all future → fully replaced
+    assert all(pw["status"] == "planned" for pw in applied["planned_workouts"])
+
+
+def test_modify_503_without_key(client, monkeypatch):
+    tpl_id, _ = _bench_template(client)
+    start = date.today() + timedelta(days=3)
+    prog = client.post("/api/coach/programs", json={"spec": _future_spec(tpl_id, 4, start)}).json()
+    from api.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "anthropic_api_key", None)
+    resp = client.post(f"/api/coach/programs/{prog['id']}/modify", json={"message": "x"})
+    assert resp.status_code == 503
+
+
+def test_modify_404_unknown_program(client):
+    resp = client.post("/api/coach/programs/99999/modify", json={"message": "x"})
+    assert resp.status_code == 404
 
 
 @pytest.mark.parametrize("mode", ["linear", "constant", "step"])
