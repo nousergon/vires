@@ -414,3 +414,49 @@ def test_progression_modes_smoke(mode):
         assert all(p.exercises[0].target_reps == 10 for p in pw)
     else:
         assert pw[-1].exercises[0].target_reps == 4
+
+
+# --------------------------------------------------------------------------- #
+# weekday is a day NAME, not an int index (fixes the Haiku ISO off-by-one where
+# Monday/Thursday materialized as Tuesday/Friday)
+# --------------------------------------------------------------------------- #
+def test_day_name_schedules_correct_weekday():
+    spec = ProgramSpec(
+        name="x",
+        start_date=date(2026, 6, 28),  # a Sunday
+        duration_weeks=3,
+        schedule=[
+            ScheduleEntry(template_id=1, weekday="monday"),
+            ScheduleEntry(template_id=2, weekday="thursday"),
+        ],
+        progressions=[],
+    )
+    pw = materialize(spec, _ctx())
+    upper = [p for p in pw if p.template_id == 1]
+    lower = [p for p in pw if p.template_id == 2]
+    assert upper and lower
+    assert all(p.scheduled_date.weekday() == 0 for p in upper)  # Monday, not Tuesday
+    assert all(p.scheduled_date.weekday() == 3 for p in lower)  # Thursday, not Friday
+
+
+@pytest.mark.parametrize(
+    "raw,canonical",
+    [
+        ("monday", "monday"),
+        ("Monday", "monday"),
+        ("MON", "monday"),
+        ("thursday", "thursday"),
+        (0, "monday"),  # legacy int (Python index) from older stored specs
+        (3, "thursday"),
+        (6, "sunday"),
+    ],
+)
+def test_weekday_validator_normalizes(raw, canonical):
+    assert ScheduleEntry(template_id=1, weekday=raw).weekday == canonical
+
+
+def test_weekday_rejects_unknown():
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        ScheduleEntry(template_id=1, weekday="funday")
