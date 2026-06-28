@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   api,
@@ -15,6 +15,9 @@ const CREATE_PLACEHOLDER =
 const MODIFY_PLACEHOLDER =
   'e.g. Shift everything a week later · make weeks 5–8 heavier · ' +
   'add a third day each week · I missed this week, push it back.'
+// Used when an objective is active and the user generates without typing — the
+// coach reads the objective + constraints server-side, so no detail is required.
+const OBJECTIVE_DEFAULT_PROMPT = 'Build my training plan for this objective.'
 
 function friendlyError(message: string): string {
   if (message.startsWith('503')) return "The AI coach isn't configured yet (no API key)."
@@ -43,11 +46,15 @@ export default function CoachSheet({
   onClose,
   onSaved,
   program,
+  autoStart = false,
 }: {
   open: boolean
   onClose: () => void
   onSaved: () => void
   program?: { id: number; name: string } | null
+  // When opened from the objective tile's "Generate plan" CTA: kick off
+  // generation automatically once the active objective has loaded.
+  autoStart?: boolean
 }) {
   const isModify = !!program
   const [message, setMessage] = useState('')
@@ -75,24 +82,53 @@ export default function CoachSheet({
     onClose()
   }
 
+  const hasObjective = !isModify && !!active?.objective
+
   async function runInitial(text: string) {
-    if (!text.trim()) return
+    const trimmed = text.trim()
+    if (isModify && program) {
+      if (!trimmed) return
+      setBusy(true)
+      setError(null)
+      try {
+        const mp = await api.coachModifyProgram(program.id, trimmed)
+        setPreview(mp.preview)
+        setModifyInfo({ kept: mp.completed_preserved, future: mp.future_count })
+      } catch (e) {
+        setError(friendlyError((e as Error).message))
+      } finally {
+        setBusy(false)
+      }
+      return
+    }
+    // Create: with an active objective, a typed message is optional.
+    const effective = trimmed || (hasObjective ? OBJECTIVE_DEFAULT_PROMPT : '')
+    if (!effective) return
     setBusy(true)
     setError(null)
     try {
-      if (isModify && program) {
-        const mp = await api.coachModifyProgram(program.id, text)
-        setPreview(mp.preview)
-        setModifyInfo({ kept: mp.completed_preserved, future: mp.future_count })
-      } else {
-        setPreview(await api.coachGenerate(text))
-      }
+      setPreview(await api.coachGenerate(effective))
     } catch (e) {
       setError(friendlyError((e as Error).message))
     } finally {
       setBusy(false)
     }
   }
+
+  // One-tap path: when launched from the objective tile, auto-generate as soon
+  // as the active objective is known (fires once per open).
+  const autoStarted = useRef(false)
+  useEffect(() => {
+    if (!open) {
+      autoStarted.current = false
+      return
+    }
+    if (autoStart && hasObjective && !preview && !busy && !autoStarted.current) {
+      autoStarted.current = true
+      void runInitial('')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, autoStart, hasObjective, preview, busy])
 
   async function refineWith(text: string, prior: ProgramPreview) {
     if (!text.trim()) return
@@ -174,7 +210,11 @@ export default function CoachSheet({
           )}
           {voice.error && <ErrBanner error={voice.error} />}
           {error && <ErrBanner error={error} />}
-          <Button className="w-full" onClick={() => runInitial(message)} disabled={busy || !message.trim()}>
+          <Button
+            className="w-full"
+            onClick={() => runInitial(message)}
+            disabled={busy || (!message.trim() && !hasObjective)}
+          >
             {busy ? 'Thinking…' : isModify ? 'Preview changes' : 'Generate plan'}
           </Button>
         </div>

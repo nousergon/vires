@@ -22,8 +22,14 @@ export default function PlanPage() {
   const [month, setMonth] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1))
   const [selected, setSelected] = useState<Date | null>(null)
   const [coachOpen, setCoachOpen] = useState(false)
+  const [coachAutoStart, setCoachAutoStart] = useState(false)
   const [objectiveOpen, setObjectiveOpen] = useState(false)
   const [modifyProgram, setModifyProgram] = useState<{ id: number; name: string } | null>(null)
+
+  const openCoach = (auto: boolean) => {
+    setCoachAutoStart(auto)
+    setCoachOpen(true)
+  }
 
   const weeks = useMemo(() => monthMatrix(month.getFullYear(), month.getMonth()), [month])
   const rangeStart = isoDate(weeks[0][0])
@@ -53,7 +59,7 @@ export default function PlanPage() {
 
   return (
     <div>
-      <PageTitle right={<Button onClick={() => setCoachOpen(true)}>✨ Coach</Button>}>Plan</PageTitle>
+      <PageTitle right={<Button onClick={() => openCoach(false)}>✨ Coach</Button>}>Plan</PageTitle>
 
       <div className="mb-3 flex items-center justify-between">
         <button className="px-2 py-1 text-slate-400" onClick={() => setMonth(addMonths(month, -1))}>
@@ -78,7 +84,10 @@ export default function PlanPage() {
 
       <Legend />
 
-      <ObjectiveSection onEdit={() => setObjectiveOpen(true)} />
+      <ObjectiveSection
+        onEdit={() => setObjectiveOpen(true)}
+        onGenerate={() => openCoach(true)}
+      />
 
       <ProgramsSection onModify={setModifyProgram} onChanged={refresh} />
 
@@ -94,7 +103,12 @@ export default function PlanPage() {
         onClose={() => setObjectiveOpen(false)}
         onSaved={refresh}
       />
-      <CoachSheet open={coachOpen} onClose={() => setCoachOpen(false)} onSaved={refresh} />
+      <CoachSheet
+        open={coachOpen}
+        autoStart={coachAutoStart}
+        onClose={() => setCoachOpen(false)}
+        onSaved={refresh}
+      />
       <CoachSheet
         open={!!modifyProgram}
         program={modifyProgram}
@@ -106,12 +120,14 @@ export default function PlanPage() {
 }
 
 // --------------------------------------------------------------------------- //
-function ObjectiveSection({ onEdit }: { onEdit: () => void }) {
+function ObjectiveSection({ onEdit, onGenerate }: { onEdit: () => void; onGenerate: () => void }) {
   const { data: active } = useQuery({
     queryKey: ['active-objective'],
     queryFn: api.activeObjective,
   })
+  const { data: programs = [] } = useQuery({ queryKey: ['programs'], queryFn: api.listPrograms })
   const o = active?.objective ?? null
+  const hasActivePlan = programs.some((p) => p.status === 'active')
 
   return (
     <div className="mt-6">
@@ -122,24 +138,29 @@ function ObjectiveSection({ onEdit }: { onEdit: () => void }) {
         </button>
       </div>
       {o ? (
-        <button
-          onClick={onEdit}
-          className="block w-full rounded-xl border border-amber-700/40 bg-amber-900/15 p-3 text-left"
-        >
-          <div className="flex items-center gap-2 text-sm font-semibold text-amber-200">
-            <span>🎯</span>
-            <span className="truncate">{o.name}</span>
-          </div>
-          <div className="mt-0.5 text-xs text-amber-300/80">
-            {o.kind === 'dated' && o.target_date ? objectiveDateLabel(o.target_date) : 'open-ended'}
-            {o.sport && ` · ${o.sport}`}
-          </div>
-          {(active?.constraints.length ?? 0) > 0 && (
-            <div className="mt-1 text-xs text-slate-400">
-              Training around: {active!.constraints.map((c) => c.label).join(', ')}
+        <div className="rounded-xl border border-amber-700/40 bg-amber-900/15 p-3">
+          <button onClick={onEdit} className="block w-full text-left">
+            <div className="flex items-center gap-2 text-sm font-semibold text-amber-200">
+              <span>🎯</span>
+              <span className="truncate">{o.name}</span>
             </div>
-          )}
-        </button>
+            <div className="mt-0.5 text-xs text-amber-300/80">
+              {o.kind === 'dated' && o.target_date ? objectiveDateLabel(o.target_date) : 'open-ended'}
+              {o.sport && ` · ${o.sport}`}
+            </div>
+            {(active?.constraints.length ?? 0) > 0 && (
+              <div className="mt-1 text-xs text-slate-400">
+                Training around: {active!.constraints.map((c) => c.label).join(', ')}
+              </div>
+            )}
+          </button>
+          <Button className="mt-3 w-full" onClick={onGenerate}>
+            {hasActivePlan ? '✨ Regenerate plan' : '✨ Generate plan'}
+          </Button>
+          <p className="mt-1.5 text-center text-[11px] text-slate-500">
+            The coach builds &amp; periodizes a plan toward this objective.
+          </p>
+        </div>
       ) : (
         <button
           onClick={onEdit}
