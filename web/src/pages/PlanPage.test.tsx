@@ -41,6 +41,8 @@ describe('PlanPage', () => {
         id: 1,
         name: '8-Week Block',
         goal_text: null,
+        coach_summary: null,
+        objective_id: null,
         start_date: '2026-06-29',
         end_date: '2026-08-20',
         status: 'active',
@@ -52,6 +54,36 @@ describe('PlanPage', () => {
     expect(await screen.findByText('8-Week Block')).toBeInTheDocument()
     expect(screen.getByText(/2\/16 done/)).toBeInTheDocument()
     expect(screen.getByText('Modify')).toBeInTheDocument()
+  })
+
+  it("shows the coach's strategy on the objective tile", async () => {
+    vi.spyOn(api, 'calendar').mockResolvedValue([])
+    vi.spyOn(api, 'listTemplates').mockResolvedValue([])
+    vi.spyOn(api, 'listPrograms').mockResolvedValue([])
+    vi.spyOn(api, 'activeObjective').mockResolvedValue({
+      objective: {
+        id: 1,
+        name: 'Climb Baker',
+        kind: 'dated',
+        target_date: '2026-09-05',
+        sport: 'alpine',
+        demands_profile: null,
+        is_primary: true,
+        created_at: '',
+        updated_at: '',
+      },
+      constraints: [],
+      active_program: {
+        program_id: 7,
+        name: 'Baker Block',
+        coach_summary: 'Base, then peak strength, then taper to the summit.',
+      },
+    })
+    renderWithProviders(<PlanPage />)
+    expect(await screen.findByText("Coach's strategy")).toBeInTheDocument()
+    expect(
+      screen.getByText('Base, then peak strength, then taper to the summit.'),
+    ).toBeInTheDocument()
   })
 
   it('reviews a planned routine without starting it', async () => {

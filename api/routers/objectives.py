@@ -13,7 +13,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from api.db.identity import Identity, current_identity
-from api.db.models import Constraint, Objective
+from api.db.models import Constraint, Objective, Program
 from api.db.session import get_db
 from api.schemas.objective import (
     ActiveObjectiveOut,
@@ -21,7 +21,9 @@ from api.schemas.objective import (
     ObjectiveCreate,
     ObjectiveOut,
     ObjectiveUpdate,
+    ProgramStrategy,
 )
+from api.serializers import program_coach_summary
 from api.services.coach.objective_profiles import demands_profile_for_sport
 
 router = APIRouter(prefix="/objectives", tags=["objectives"])
@@ -91,9 +93,31 @@ def active_objective(
         )
         .order_by(Constraint.created_at)
     ).all()
+
+    # The active plan generated for this objective, with the coach's strategy.
+    strategy: ProgramStrategy | None = None
+    if primary is not None:
+        program = db.scalar(
+            select(Program)
+            .where(
+                Program.tenant_id == ident.tenant_id,
+                Program.user_id == ident.user_id,
+                Program.objective_id == primary.id,
+                Program.status == "active",
+            )
+            .order_by(Program.created_at.desc())
+        )
+        if program is not None:
+            strategy = ProgramStrategy(
+                program_id=program.id,
+                name=program.name,
+                coach_summary=program_coach_summary(program),
+            )
+
     return ActiveObjectiveOut(
         objective=ObjectiveOut.model_validate(primary) if primary else None,
         constraints=[ConstraintOut.model_validate(c) for c in constraints],
+        active_program=strategy,
     )
 
 

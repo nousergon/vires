@@ -155,6 +155,18 @@ function ObjectiveSection({ onEdit, onGenerate }: { onEdit: () => void; onGenera
               </div>
             )}
           </button>
+
+          {active?.active_program?.coach_summary && (
+            <div className="mt-2 rounded-lg border border-slate-700/60 bg-slate-800/40 p-2.5">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                Coach&apos;s strategy
+              </p>
+              <p className="mt-0.5 text-xs leading-relaxed text-slate-300">
+                {active.active_program.coach_summary}
+              </p>
+            </div>
+          )}
+
           <Button className="mt-3 w-full" onClick={onGenerate}>
             {hasActivePlan ? '✨ Regenerate plan' : '✨ Generate plan'}
           </Button>

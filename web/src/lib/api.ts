@@ -307,6 +307,8 @@ export interface ProgramSummary {
   id: number
   name: string
   goal_text: string | null
+  coach_summary: string | null
+  objective_id: number | null
   start_date: string | null
   end_date: string | null
   status: string
@@ -350,9 +352,16 @@ export interface Constraint {
   updated_at: string
 }
 
+export interface ProgramStrategy {
+  program_id: number
+  name: string
+  coach_summary: string | null
+}
+
 export interface ActiveObjective {
   objective: Objective | null
   constraints: Constraint[]
+  active_program: ProgramStrategy | null
 }
 
 export interface ObjectiveInput {

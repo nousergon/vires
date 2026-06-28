@@ -6,7 +6,7 @@ import { api, type ActiveObjective, type Objective } from '../lib/api'
 
 beforeEach(() => vi.restoreAllMocks())
 
-const EMPTY: ActiveObjective = { objective: null, constraints: [] }
+const EMPTY: ActiveObjective = { objective: null, constraints: [], active_program: null }
 
 const OBJECTIVE: Objective = {
   id: 1,
@@ -56,7 +56,7 @@ describe('ObjectiveSheet', () => {
   })
 
   it('updates an existing objective and prefills the form', async () => {
-    vi.spyOn(api, 'activeObjective').mockResolvedValue({ objective: OBJECTIVE, constraints: [] })
+    vi.spyOn(api, 'activeObjective').mockResolvedValue({ objective: OBJECTIVE, constraints: [], active_program: null })
     const update = vi.spyOn(api, 'updateObjective').mockResolvedValue(OBJECTIVE)
     renderWithProviders(<ObjectiveSheet open onClose={() => {}} onSaved={() => {}} />)
 
@@ -67,7 +67,7 @@ describe('ObjectiveSheet', () => {
   })
 
   it('adds a constraint', async () => {
-    vi.spyOn(api, 'activeObjective').mockResolvedValue({ objective: OBJECTIVE, constraints: [] })
+    vi.spyOn(api, 'activeObjective').mockResolvedValue({ objective: OBJECTIVE, constraints: [], active_program: null })
     const addC = vi.spyOn(api, 'createConstraint').mockResolvedValue({
       id: 9,
       kind: 'injury',

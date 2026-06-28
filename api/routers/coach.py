@@ -11,11 +11,13 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from api.config import get_settings
 from api.db.identity import Identity, current_identity
 from api.db.models import (
+    Objective,
     PlannedExercise,
     PlannedWorkout,
     Program,
@@ -201,6 +203,17 @@ def _persist_new_routines(db: Session, ident: Identity, spec: ProgramSpec) -> Pr
     return rewrite_routine_refs(spec, key_to_id)
 
 
+def _active_objective_id(db: Session, ident: Identity) -> int | None:
+    """The active primary objective for this user (the plan trains for it)."""
+    return db.scalar(
+        select(Objective.id).where(
+            Objective.tenant_id == ident.tenant_id,
+            Objective.user_id == ident.user_id,
+            Objective.is_primary.is_(True),
+        )
+    )
+
+
 @router.post("/programs", response_model=ProgramOut, status_code=201)
 def save_program(
     body: SaveProgramRequest,
@@ -219,6 +232,9 @@ def save_program(
         tenant_id=ident.tenant_id,
         user_id=ident.user_id,
         name=(body.name or spec.name).strip(),
+        # Link the plan to the objective it trains for (the coach's strategy is in
+        # spec.coach_summary), so the active strategy can be shown on the objective.
+        objective_id=_active_objective_id(db, ident),
         goal_text=body.goal_text,
         spec=spec.model_dump(mode="json"),
         start_date=spec.start_date,

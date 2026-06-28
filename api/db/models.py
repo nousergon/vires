@@ -300,6 +300,12 @@ class Program(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The objective this plan was built to train for (the coach's strategy lives
+    # in ``spec.coach_summary``). Nullable: a plan can be generated without an
+    # objective; SET NULL on objective delete so the plan + its history survive.
+    objective_id: Mapped[int | None] = mapped_column(
+        ForeignKey("objectives.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     # The natural-language request the user gave the coach (for display / refine).
     goal_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     # The validated ProgramSpec the coach produced — kept so the plan can be
