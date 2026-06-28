@@ -160,6 +160,26 @@ export interface Settings {
   default_reps: number
 }
 
+// ---- personal records ----------------------------------------------------- //
+export type RecordWindow = 'all' | 'year' | 'quarter' | 'month'
+
+export interface RecordMetric {
+  value: number
+  weight: number | null
+  reps: number | null
+  date: string
+}
+
+export interface ExerciseRecords {
+  exercise: ExerciseBrief
+  is_timed: boolean
+  est_1rm: RecordMetric | null
+  heaviest: RecordMetric | null
+  best_set_volume: RecordMetric | null
+  most_reps: RecordMetric | null
+  longest_hold: RecordMetric | null
+}
+
 // ---- plan / calendar / coach ---------------------------------------------- //
 export interface CalendarEntry {
   kind: 'session' | 'planned'
@@ -351,6 +371,9 @@ export const api = {
   getSettings: () => req<Settings>('/settings'),
   updateSettings: (body: Partial<Settings>) =>
     req<Settings>('/settings', { method: 'PUT', body: JSON.stringify(body) }),
+
+  // records
+  records: (window: RecordWindow) => req<ExerciseRecords[]>(`/records?window=${window}`),
 
   // plan / calendar
   calendar: (start: string, end: string) =>

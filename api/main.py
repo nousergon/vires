@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from api.config import get_settings
-from api.routers import coach, exercises, health, plan, templates, workouts
+from api.routers import coach, exercises, health, plan, records, templates, workouts
 from api.routers import settings as settings_router
 
 settings = get_settings()
@@ -40,6 +40,7 @@ app.include_router(workouts.router, prefix="/api")
 app.include_router(settings_router.router, prefix="/api")
 app.include_router(plan.router, prefix="/api")
 app.include_router(coach.router, prefix="/api")
+app.include_router(records.router, prefix="/api")
 
 
 def _mount_spa() -> None:
