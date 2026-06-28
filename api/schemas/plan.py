@@ -78,6 +78,11 @@ class PlannedWorkoutCreate(BaseModel):
     notes: str | None = None
 
 
+class FeedUrl(BaseModel):
+    token: str
+    ics_path: str  # relative; client prepends its origin to build the subscribe URL
+
+
 class ProgramSummary(BaseModel):
     id: int
     name: str

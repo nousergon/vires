@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type Settings, type WeightUnit } from '../lib/api'
 import { useSettings } from '../lib/useSettings'
 import { Button, Card, PageTitle } from '../components/ui'
@@ -72,10 +72,69 @@ export default function SettingsPage() {
         {saved ? 'Saved ✓' : 'Save settings'}
       </Button>
 
+      <CalendarFeed />
+
       <p className="mt-6 text-center text-xs text-slate-500">
         Vires · vires acquirit eundo
       </p>
     </div>
+  )
+}
+
+function CalendarFeed() {
+  const qc = useQueryClient()
+  const [copied, setCopied] = useState(false)
+  const { data: feed } = useQuery({ queryKey: ['feed-url'], queryFn: api.feedUrl })
+  const rotate = useMutation({
+    mutationFn: api.rotateFeedUrl,
+    onSuccess: (f) => qc.setQueryData(['feed-url'], f),
+  })
+
+  if (!feed) return null
+  const httpsUrl = `${window.location.origin}${feed.ics_path}`
+  const webcalUrl = httpsUrl.replace(/^https?:/, 'webcal:')
+
+  async function copy() {
+    await navigator.clipboard.writeText(httpsUrl)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+
+  return (
+    <Card className="mt-6 space-y-3">
+      <div>
+        <h2 className="text-sm font-semibold text-slate-200">Calendar feed</h2>
+        <p className="mt-1 text-xs text-slate-400">
+          Subscribe in Google or Apple Calendar to overlay your planned + completed
+          workouts (read-only; Google refreshes every few hours).
+        </p>
+      </div>
+
+      <div className="flex items-center gap-2 rounded-lg bg-slate-800 px-3 py-2">
+        <span className="flex-1 truncate text-xs text-slate-400">{httpsUrl}</span>
+        <button className="text-xs font-semibold text-amber-400" onClick={copy}>
+          {copied ? 'Copied ✓' : 'Copy'}
+        </button>
+      </div>
+
+      <div className="flex gap-2">
+        <a
+          href={webcalUrl}
+          className="flex-1 rounded-xl bg-slate-800 py-2.5 text-center text-sm font-semibold text-slate-100 hover:bg-slate-700"
+        >
+          Add to calendar
+        </a>
+        <button
+          className="rounded-xl border border-slate-700 px-3 py-2.5 text-sm text-slate-400 hover:bg-slate-800"
+          onClick={() => {
+            if (confirm('Rotate the feed link? Existing subscriptions will stop updating.'))
+              rotate.mutate()
+          }}
+        >
+          Reset link
+        </button>
+      </div>
+    </Card>
   )
 }
 

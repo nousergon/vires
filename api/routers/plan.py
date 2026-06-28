@@ -7,13 +7,14 @@ workout seeds a live session from its prescription and links the two.
 
 from __future__ import annotations
 
+import secrets
 from datetime import UTC, date, datetime, time
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from api.db.identity import Identity, current_identity
+from api.db.identity import Identity, current_identity, get_or_create_settings
 from api.db.models import (
     Exercise,
     PlannedExercise,
@@ -21,6 +22,7 @@ from api.db.models import (
     Program,
     SessionExercise,
     SetEntry,
+    UserSettings,
     WorkoutSession,
     WorkoutTemplate,
 )
@@ -28,6 +30,7 @@ from api.db.session import get_db
 from api.routers.workouts import _session_out  # canonical session serializer
 from api.schemas.plan import (
     CalendarEntry,
+    FeedUrl,
     PlannedWorkoutCreate,
     PlannedWorkoutOut,
     PlannedWorkoutUpdate,
@@ -35,6 +38,7 @@ from api.schemas.plan import (
 )
 from api.schemas.workout import WorkoutSessionOut
 from api.serializers import to_planned_workout_out
+from api.services.ics import IcsEvent, build_calendar
 
 router = APIRouter(prefix="/plan", tags=["plan"])
 
@@ -349,3 +353,118 @@ def delete_program(
     db.delete(_get_program(db, program_id, ident))
     db.commit()
     return Response(status_code=204)
+
+
+# --------------------------------------------------------------------------- #
+# ICS calendar feed (subscribe from Google / Apple Calendar — read-only overlay)
+# --------------------------------------------------------------------------- #
+@router.get("/feed-url", response_model=FeedUrl)
+def feed_url(
+    db: Session = Depends(get_db),
+    ident: Identity = Depends(current_identity),
+) -> FeedUrl:
+    """The user's subscribe URL, minting the unguessable feed token on first use."""
+    us = get_or_create_settings(db, ident)
+    if not us.feed_token:
+        us.feed_token = secrets.token_urlsafe(24)
+        db.commit()
+    return FeedUrl(token=us.feed_token, ics_path=f"/api/plan/feed/{us.feed_token}.ics")
+
+
+@router.post("/feed-url/rotate", response_model=FeedUrl)
+def rotate_feed_url(
+    db: Session = Depends(get_db),
+    ident: Identity = Depends(current_identity),
+) -> FeedUrl:
+    """Rotate the token (invalidates any previously-shared feed URL)."""
+    us = get_or_create_settings(db, ident)
+    us.feed_token = secrets.token_urlsafe(24)
+    db.commit()
+    return FeedUrl(token=us.feed_token, ics_path=f"/api/plan/feed/{us.feed_token}.ics")
+
+
+def _describe_planned(pw: PlannedWorkout, unit: str) -> str:
+    lines: list[str] = []
+    for pe in pw.exercises:
+        name = pe.exercise.name
+        if pe.target_duration_seconds:
+            lines.append(f"{name}: {pe.target_sets or '?'}×{pe.target_duration_seconds}s")
+        else:
+            weight = f" @ {pe.target_weight}{unit}" if pe.target_weight is not None else ""
+            lines.append(f"{name}: {pe.target_sets or '?'}×{pe.target_reps or '?'}{weight}")
+    return "\n".join(lines) or (pw.notes or "")
+
+
+def _describe_session(ws: WorkoutSession) -> str:
+    parts: list[str] = []
+    for se in ws.exercises:
+        working = [s for s in se.sets if not s.is_warmup and s.reps]
+        if working:
+            top = max(working, key=lambda s: (s.weight or 0))
+            suffix = f", top {top.weight}×{top.reps}" if top.weight else ""
+            parts.append(f"{se.exercise.name}: {len(working)} sets{suffix}")
+        else:
+            parts.append(se.exercise.name)
+    return "\n".join(parts)
+
+
+@router.get("/feed/{token}.ics")
+def calendar_feed(
+    token: str,
+    db: Session = Depends(get_db),
+) -> Response:
+    """Public, UNAUTHENTICATED iCalendar feed (the token is the credential).
+
+    Calendar apps fetch this anonymously and overlay the events; read-only. Google
+    re-polls every ~8-24h, so updates are not instant — that's a subscription limit.
+    """
+    us = db.scalar(select(UserSettings).where(UserSettings.feed_token == token))
+    if us is None:
+        raise HTTPException(404, "Feed not found")
+    now = datetime.now(UTC)
+
+    events: list[IcsEvent] = []
+    planned = db.scalars(
+        select(PlannedWorkout)
+        .where(
+            PlannedWorkout.tenant_id == us.tenant_id,
+            PlannedWorkout.user_id == us.user_id,
+        )
+        .order_by(PlannedWorkout.scheduled_date)
+    ).all()
+    for pw in planned:
+        done = pw.status == "completed"
+        events.append(
+            IcsEvent(
+                uid=f"planned-{pw.id}@vires.nousergon.ai",
+                start=pw.scheduled_date,
+                summary=("✓ " if done else "") + (pw.name or "Workout"),
+                description=_describe_planned(pw, us.weight_unit),
+                dtstamp=pw.created_at or now,
+            )
+        )
+
+    # Ad-hoc finished sessions (planned ones already appear above via their plan).
+    sessions = db.scalars(
+        select(WorkoutSession)
+        .where(
+            WorkoutSession.tenant_id == us.tenant_id,
+            WorkoutSession.user_id == us.user_id,
+            WorkoutSession.planned_workout_id.is_(None),
+            WorkoutSession.ended_at.is_not(None),
+        )
+        .order_by(WorkoutSession.started_at)
+    ).all()
+    for ws in sessions:
+        events.append(
+            IcsEvent(
+                uid=f"session-{ws.id}@vires.nousergon.ai",
+                start=ws.started_at.date(),
+                summary="✓ " + (ws.name or "Workout"),
+                description=_describe_session(ws),
+                dtstamp=ws.ended_at or ws.started_at,
+            )
+        )
+
+    ics = build_calendar("Vires Workouts", events)
+    return Response(content=ics, media_type="text/calendar; charset=utf-8")

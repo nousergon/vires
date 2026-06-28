@@ -287,6 +287,11 @@ export interface ProgramSummary {
   completed_count: number
 }
 
+export interface FeedUrl {
+  token: string
+  ics_path: string
+}
+
 export interface ProgramModifyPreview {
   program_id: number
   preview: ProgramPreview
@@ -394,6 +399,8 @@ export const api = {
     req<WorkoutSession>(`/plan/planned/${id}/start`, { method: 'POST' }),
   listPrograms: () => req<ProgramSummary[]>('/plan/programs'),
   deleteProgram: (id: number) => req<void>(`/plan/programs/${id}`, { method: 'DELETE' }),
+  feedUrl: () => req<FeedUrl>('/plan/feed-url'),
+  rotateFeedUrl: () => req<FeedUrl>('/plan/feed-url/rotate', { method: 'POST' }),
 
   // coach
   coachGenerate: (message: string, priorSpec?: ProgramSpec) =>
