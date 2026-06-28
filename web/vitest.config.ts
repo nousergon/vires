@@ -23,12 +23,14 @@ export default defineConfig({
         'src/vite-env.d.ts',
       ],
       // Native coverage GATE: CI fails if frontend coverage drops below these
-      // floors. Ratchet — raise as component coverage grows (currently ~26%).
+      // floors. Ratchet — raise as component coverage grows (currently ~63% stmts
+      // / 66% lines; the remainder is browser-API glue jsdom can't exercise —
+      // push/recorder/wakeLock — plus the App shell).
       thresholds: {
-        statements: 20,
-        branches: 20,
-        functions: 20,
-        lines: 20,
+        statements: 58,
+        branches: 50,
+        functions: 55,
+        lines: 60,
       },
     },
   },
