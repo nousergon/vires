@@ -80,6 +80,24 @@ else
   echo "coach: no key at ${SSM_PARAM} — AI coach unavailable (non-fatal)"
 fi
 
+# --- Coaching edge: hydrate the tuned coach prompt from SSM (private) -------- #
+# The tuned prompt is the Vires edge (Commercial-tier) — kept out of the public
+# repo, stored in SSM, written to the gitignored prompts/coach_system.txt. Missing
+# is NON-FATAL: the committed coach_system.example.txt baseline is used instead.
+PROMPT_PARAM="${VIRES_COACH_PROMPT_SSM_PARAM:-/vires/coach_system_prompt}"
+PROMPT_FILE="$REPO/api/services/coach/prompts/coach_system.txt"
+if PROMPT=$(aws ssm get-parameter --name "$PROMPT_PARAM" --with-decryption \
+             --query Parameter.Value --output text 2>/dev/null) \
+   && [ -n "$PROMPT" ] && [ "$PROMPT" != "None" ]; then
+  printf '%s\n' "$PROMPT" > "$PROMPT_FILE"   # content not traced (no set -x)
+  chmod 600 "$PROMPT_FILE"
+  unset PROMPT
+  echo "coach: hydrated tuned prompt from ${PROMPT_PARAM}"
+else
+  rm -f "$PROMPT_FILE"  # ensure we fall back to the committed baseline
+  echo "coach: no tuned prompt at ${PROMPT_PARAM} — using public baseline (non-fatal)"
+fi
+
 # --- restart + health check ------------------------------------------------- #
 sudo systemctl restart vires
 sleep 4
