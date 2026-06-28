@@ -19,6 +19,10 @@ def _out(s: UserSettings) -> SettingsOut:
         default_rest_seconds=s.default_rest_seconds,
         default_sets=s.default_sets,
         default_reps=s.default_reps,
+        timer_sound=s.timer_sound,
+        timer_vibration=s.timer_vibration,
+        timer_notification=s.timer_notification,
+        timer_keep_awake=s.timer_keep_awake,
     )
 
 

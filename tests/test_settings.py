@@ -29,3 +29,26 @@ def test_settings_validation(client):
     assert client.put("/api/settings", json={"weight_unit": "stone"}).status_code == 422
     assert client.put("/api/settings", json={"default_rest_seconds": -5}).status_code == 422
     assert client.put("/api/settings", json={"default_reps": 0}).status_code == 422
+
+
+def test_timer_alert_pref_defaults(client):
+    body = client.get("/api/settings").json()
+    assert body["timer_sound"] is True
+    assert body["timer_vibration"] is True
+    assert body["timer_notification"] is False  # needs per-device permission
+    assert body["timer_keep_awake"] is True
+
+
+def test_timer_alert_prefs_update(client):
+    r = client.put(
+        "/api/settings",
+        json={"timer_vibration": False, "timer_notification": True, "timer_keep_awake": False},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["timer_vibration"] is False
+    assert body["timer_notification"] is True
+    assert body["timer_keep_awake"] is False
+    assert body["timer_sound"] is True  # untouched
+    # persisted
+    assert client.get("/api/settings").json()["timer_notification"] is True
