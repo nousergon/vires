@@ -21,6 +21,7 @@ export default function PlanPage() {
   const [month, setMonth] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1))
   const [selected, setSelected] = useState<Date | null>(null)
   const [coachOpen, setCoachOpen] = useState(false)
+  const [modifyProgram, setModifyProgram] = useState<{ id: number; name: string } | null>(null)
 
   const weeks = useMemo(() => monthMatrix(month.getFullYear(), month.getMonth()), [month])
   const rangeStart = isoDate(weeks[0][0])
@@ -37,7 +38,10 @@ export default function PlanPage() {
     return m
   }, [entries])
 
-  const refresh = () => qc.invalidateQueries({ queryKey: ['calendar'] })
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ['calendar'] })
+    qc.invalidateQueries({ queryKey: ['programs'] })
+  }
 
   function onStarted(sessionId: number) {
     localStorage.setItem(ACTIVE_KEY, String(sessionId))
@@ -71,6 +75,8 @@ export default function PlanPage() {
 
       <Legend />
 
+      <ProgramsSection onModify={setModifyProgram} onChanged={refresh} />
+
       <DaySheet
         date={selected}
         entries={selected ? byDate.get(isoDate(selected)) ?? [] : []}
@@ -79,6 +85,64 @@ export default function PlanPage() {
         onStarted={onStarted}
       />
       <CoachSheet open={coachOpen} onClose={() => setCoachOpen(false)} onSaved={refresh} />
+      <CoachSheet
+        open={!!modifyProgram}
+        program={modifyProgram}
+        onClose={() => setModifyProgram(null)}
+        onSaved={refresh}
+      />
+    </div>
+  )
+}
+
+// --------------------------------------------------------------------------- //
+function ProgramsSection({
+  onModify,
+  onChanged,
+}: {
+  onModify: (p: { id: number; name: string }) => void
+  onChanged: () => void
+}) {
+  const { data: programs = [] } = useQuery({ queryKey: ['programs'], queryFn: api.listPrograms })
+  const active = programs.filter((p) => p.status === 'active')
+  if (active.length === 0) return null
+
+  async function remove(id: number) {
+    if (!confirm('Delete this program? Completed workouts stay in your history.')) return
+    await api.deleteProgram(id)
+    onChanged()
+  }
+
+  return (
+    <div className="mt-6">
+      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-400">Programs</h2>
+      <div className="space-y-2">
+        {active.map((p) => (
+          <div
+            key={p.id}
+            className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-800/40 p-3"
+          >
+            <div className="min-w-0">
+              <div className="truncate font-semibold text-slate-100">{p.name}</div>
+              <div className="text-xs text-slate-400">
+                {p.completed_count}/{p.planned_count} done
+                {p.end_date && ` · ends ${p.end_date}`}
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-amber-300 hover:bg-slate-800"
+                onClick={() => onModify({ id: p.id, name: p.name })}
+              >
+                Modify
+              </button>
+              <button className="text-slate-600 hover:text-red-400" onClick={() => remove(p.id)} aria-label="Delete">
+                ✕
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

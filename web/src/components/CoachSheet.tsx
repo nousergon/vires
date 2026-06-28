@@ -2,14 +2,16 @@ import { useState } from 'react'
 import { api, type ProgramPreview, type PlannedWorkoutPreview } from '../lib/api'
 import { Button, Sheet } from './ui'
 
-const PLACEHOLDER =
+const CREATE_PLACEHOLDER =
   'e.g. Run both my routines once a week for 8 weeks, ramping from 10 reps at a ' +
   'lighter weight to 3–5 reps heavy by the end. Add a deload in week 4.'
+const MODIFY_PLACEHOLDER =
+  'e.g. Shift everything a week later · make weeks 5–8 heavier · ' +
+  'add a third day each week · I missed this week, push it back.'
 
 function friendlyError(message: string): string {
   if (message.startsWith('503')) return "The AI coach isn't configured yet (no API key)."
-  // strip the leading "NNN: " status prefix from req()
-  return message.replace(/^\d+:\s*/, '')
+  return message.replace(/^\d+:\s*/, '') // strip the "NNN: " status prefix from req()
 }
 
 function exerciseLine(
@@ -23,18 +25,28 @@ function exerciseLine(
   return `${e.exercise_name} · ${sets}×${reps}${w}`
 }
 
+/**
+ * The coach sheet doubles as create (no `program`) and modify (with `program`):
+ * the FIRST request differs (generate vs modify-against-stored-spec), but a
+ * refine is always a generate against the current preview's spec, and confirm
+ * is save (create) vs apply (modify).
+ */
 export default function CoachSheet({
   open,
   onClose,
   onSaved,
+  program,
 }: {
   open: boolean
   onClose: () => void
   onSaved: () => void
+  program?: { id: number; name: string } | null
 }) {
+  const isModify = !!program
   const [message, setMessage] = useState('')
   const [refine, setRefine] = useState('')
   const [preview, setPreview] = useState<ProgramPreview | null>(null)
+  const [modifyInfo, setModifyInfo] = useState<{ kept: number; future: number } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -42,17 +54,36 @@ export default function CoachSheet({
     setMessage('')
     setRefine('')
     setPreview(null)
+    setModifyInfo(null)
     setError(null)
     onClose()
   }
 
-  async function generate(text: string, prior?: ProgramPreview | null) {
+  async function runInitial(text: string) {
     if (!text.trim()) return
     setBusy(true)
     setError(null)
     try {
-      const p = await api.coachGenerate(text, prior?.spec)
-      setPreview(p)
+      if (isModify && program) {
+        const mp = await api.coachModifyProgram(program.id, text)
+        setPreview(mp.preview)
+        setModifyInfo({ kept: mp.completed_preserved, future: mp.future_count })
+      } else {
+        setPreview(await api.coachGenerate(text))
+      }
+    } catch (e) {
+      setError(friendlyError((e as Error).message))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function refineWith(text: string, prior: ProgramPreview) {
+    if (!text.trim()) return
+    setBusy(true)
+    setError(null)
+    try {
+      setPreview(await api.coachGenerate(text, prior.spec))
       setRefine('')
     } catch (e) {
       setError(friendlyError((e as Error).message))
@@ -66,7 +97,11 @@ export default function CoachSheet({
     setBusy(true)
     setError(null)
     try {
-      await api.coachSaveProgram(preview.spec, preview.name, message || undefined)
+      if (isModify && program) {
+        await api.coachApplyProgram(program.id, preview.spec, preview.name)
+      } else {
+        await api.coachSaveProgram(preview.spec, preview.name, message || undefined)
+      }
       onSaved()
       close()
     } catch (e) {
@@ -76,7 +111,6 @@ export default function CoachSheet({
     }
   }
 
-  // group the preview's workouts by week for a scannable plan view
   const byWeek = new Map<number, PlannedWorkoutPreview[]>()
   preview?.planned_workouts.forEach((w) => {
     const k = w.week_index ?? 0
@@ -84,35 +118,32 @@ export default function CoachSheet({
   })
 
   return (
-    <Sheet open={open} onClose={close} title="✨ AI Coach">
+    <Sheet open={open} onClose={close} title={isModify ? `Modify: ${program!.name}` : '✨ AI Coach'}>
       {!preview ? (
         <div className="space-y-3">
           <p className="text-sm text-slate-400">
-            Describe the program you want. The coach reads your routines and recent
-            performance, then lays workouts onto your calendar with progression.
+            {isModify
+              ? 'Describe the change. Completed workouts stay; future days are replanned.'
+              : 'Describe the program you want. The coach reads your routines and recent performance, then lays workouts onto your calendar with progression.'}
           </p>
           <textarea
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             rows={5}
-            placeholder={PLACEHOLDER}
+            placeholder={isModify ? MODIFY_PLACEHOLDER : CREATE_PLACEHOLDER}
             className="w-full rounded-xl bg-slate-800 p-3 text-sm outline-none focus:ring-1 focus:ring-amber-500"
           />
           {error && <ErrBanner error={error} />}
-          <Button
-            className="w-full"
-            onClick={() => generate(message)}
-            disabled={busy || !message.trim()}
-          >
-            {busy ? 'Thinking…' : 'Generate plan'}
+          <Button className="w-full" onClick={() => runInitial(message)} disabled={busy || !message.trim()}>
+            {busy ? 'Thinking…' : isModify ? 'Preview changes' : 'Generate plan'}
           </Button>
         </div>
       ) : (
         <div className="space-y-4">
           <p className="text-sm text-slate-200">{preview.coach_summary}</p>
           <p className="text-xs text-slate-500">
-            {preview.planned_workouts.length} workouts · {preview.start_date} →{' '}
-            {preview.end_date}
+            {preview.planned_workouts.length} workouts · {preview.start_date} → {preview.end_date}
+            {modifyInfo && ` · ${modifyInfo.kept} completed kept`}
           </p>
 
           <div className="space-y-3">
@@ -125,10 +156,7 @@ export default function CoachSheet({
                   </p>
                   <div className="space-y-1.5">
                     {workouts.map((w, i) => (
-                      <div
-                        key={i}
-                        className="rounded-lg border border-slate-800 bg-slate-800/40 px-3 py-2"
-                      >
+                      <div key={i} className="rounded-lg border border-slate-800 bg-slate-800/40 px-3 py-2">
                         <div className="flex items-center justify-between">
                           <span className="text-sm font-medium text-slate-100">{w.name}</span>
                           <span className="text-xs text-slate-500">{w.scheduled_date}</span>
@@ -149,7 +177,7 @@ export default function CoachSheet({
 
           <div className="flex gap-2">
             <Button className="flex-1" onClick={confirm} disabled={busy}>
-              {busy ? 'Saving…' : 'Add to calendar'}
+              {busy ? 'Saving…' : isModify ? 'Apply changes' : 'Add to calendar'}
             </Button>
             <Button variant="secondary" onClick={() => setPreview(null)} disabled={busy}>
               Back
@@ -157,9 +185,7 @@ export default function CoachSheet({
           </div>
 
           <div className="border-t border-slate-800 pt-3">
-            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Refine
-            </p>
+            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">Refine</p>
             <div className="flex gap-2">
               <input
                 value={refine}
@@ -167,11 +193,7 @@ export default function CoachSheet({
                 placeholder="e.g. make week 4 a deload"
                 className="flex-1 rounded-lg bg-slate-800 px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
               />
-              <Button
-                variant="secondary"
-                onClick={() => generate(refine, preview)}
-                disabled={busy || !refine.trim()}
-              >
+              <Button variant="secondary" onClick={() => refineWith(refine, preview)} disabled={busy || !refine.trim()}>
                 Apply
               </Button>
             </div>

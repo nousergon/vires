@@ -267,6 +267,13 @@ export interface ProgramSummary {
   completed_count: number
 }
 
+export interface ProgramModifyPreview {
+  program_id: number
+  preview: ProgramPreview
+  completed_preserved: number
+  future_count: number
+}
+
 // ---- endpoints ------------------------------------------------------------ //
 export const api = {
   // exercises
@@ -375,5 +382,15 @@ export const api = {
     req<{ id: number; name: string }>('/coach/programs', {
       method: 'POST',
       body: JSON.stringify({ spec, name: name ?? null, goal_text: goalText ?? null }),
+    }),
+  coachModifyProgram: (programId: number, message: string) =>
+    req<ProgramModifyPreview>(`/coach/programs/${programId}/modify`, {
+      method: 'POST',
+      body: JSON.stringify({ message }),
+    }),
+  coachApplyProgram: (programId: number, spec: ProgramSpec, name?: string) =>
+    req<{ id: number; name: string }>(`/coach/programs/${programId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ spec, name: name ?? null }),
     }),
 }
