@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type CalendarEntry } from '../lib/api'
 import { Button, EmptyState, PageTitle, Sheet, Spinner } from '../components/ui'
 import CoachSheet from '../components/CoachSheet'
+import ObjectiveSheet from '../components/ObjectiveSheet'
 import { ACTIVE_KEY } from './WorkoutPage'
 import {
   addMonths,
@@ -21,6 +22,7 @@ export default function PlanPage() {
   const [month, setMonth] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1))
   const [selected, setSelected] = useState<Date | null>(null)
   const [coachOpen, setCoachOpen] = useState(false)
+  const [objectiveOpen, setObjectiveOpen] = useState(false)
   const [modifyProgram, setModifyProgram] = useState<{ id: number; name: string } | null>(null)
 
   const weeks = useMemo(() => monthMatrix(month.getFullYear(), month.getMonth()), [month])
@@ -41,6 +43,7 @@ export default function PlanPage() {
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['calendar'] })
     qc.invalidateQueries({ queryKey: ['programs'] })
+    qc.invalidateQueries({ queryKey: ['active-objective'] })
   }
 
   function onStarted(sessionId: number) {
@@ -75,6 +78,8 @@ export default function PlanPage() {
 
       <Legend />
 
+      <ObjectiveSection onEdit={() => setObjectiveOpen(true)} />
+
       <ProgramsSection onModify={setModifyProgram} onChanged={refresh} />
 
       <DaySheet
@@ -83,6 +88,11 @@ export default function PlanPage() {
         onClose={() => setSelected(null)}
         onChanged={refresh}
         onStarted={onStarted}
+      />
+      <ObjectiveSheet
+        open={objectiveOpen}
+        onClose={() => setObjectiveOpen(false)}
+        onSaved={refresh}
       />
       <CoachSheet open={coachOpen} onClose={() => setCoachOpen(false)} onSaved={refresh} />
       <CoachSheet
@@ -93,6 +103,60 @@ export default function PlanPage() {
       />
     </div>
   )
+}
+
+// --------------------------------------------------------------------------- //
+function ObjectiveSection({ onEdit }: { onEdit: () => void }) {
+  const { data: active } = useQuery({
+    queryKey: ['active-objective'],
+    queryFn: api.activeObjective,
+  })
+  const o = active?.objective ?? null
+
+  return (
+    <div className="mt-6">
+      <div className="mb-2 flex items-center justify-between">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Objective</h2>
+        <button className="text-sm text-amber-300 hover:text-amber-200" onClick={onEdit}>
+          {o ? 'Edit' : 'Set objective'}
+        </button>
+      </div>
+      {o ? (
+        <button
+          onClick={onEdit}
+          className="block w-full rounded-xl border border-amber-700/40 bg-amber-900/15 p-3 text-left"
+        >
+          <div className="flex items-center gap-2 text-sm font-semibold text-amber-200">
+            <span>🎯</span>
+            <span className="truncate">{o.name}</span>
+          </div>
+          <div className="mt-0.5 text-xs text-amber-300/80">
+            {o.kind === 'dated' && o.target_date ? objectiveDateLabel(o.target_date) : 'open-ended'}
+            {o.sport && ` · ${o.sport}`}
+          </div>
+          {(active?.constraints.length ?? 0) > 0 && (
+            <div className="mt-1 text-xs text-slate-400">
+              Training around: {active!.constraints.map((c) => c.label).join(', ')}
+            </div>
+          )}
+        </button>
+      ) : (
+        <button
+          onClick={onEdit}
+          className="block w-full rounded-xl border border-dashed border-slate-700 p-3 text-left text-sm text-slate-400 hover:bg-slate-800/40"
+        >
+          Set a goal (e.g. “Climb Baker”) — the coach will periodize a plan toward it.
+        </button>
+      )}
+    </div>
+  )
+}
+
+function objectiveDateLabel(iso: string): string {
+  const d = new Date(iso + 'T00:00:00')
+  const label = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+  const weeks = Math.max(0, Math.round((d.getTime() - Date.now()) / (7 * 864e5)))
+  return `${label} · ~${weeks} wk${weeks === 1 ? '' : 's'} out`
 }
 
 // --------------------------------------------------------------------------- //

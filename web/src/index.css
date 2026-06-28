@@ -33,3 +33,17 @@ input[type='number']::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }
+
+/* Shared form field styling (text inputs, date inputs, textareas). */
+.input {
+  width: 100%;
+  border-radius: 0.5rem; /* rounded-lg */
+  background: #1e293b; /* slate-800 */
+  padding: 0.625rem 0.75rem;
+  font-size: 0.875rem; /* text-sm */
+  color: #e2e8f0; /* slate-200 */
+  outline: none;
+}
+.input:focus {
+  box-shadow: 0 0 0 1px #f59e0b; /* ring-1 ring-amber-500 */
+}
