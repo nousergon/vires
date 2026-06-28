@@ -3,6 +3,7 @@
 > *vires acquirit eundo* — "it gathers strength as it goes."
 
 [![CI](https://github.com/nousergon/vires/actions/workflows/ci.yml/badge.svg)](https://github.com/nousergon/vires/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/nousergon/vires/branch/main/graph/badge.svg)](https://codecov.io/gh/nousergon/vires)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 [![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
