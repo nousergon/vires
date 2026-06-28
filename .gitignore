@@ -13,6 +13,10 @@ venv/
 .env.*
 !.env.example
 
+# Coaching edge (Commercial-tier): the tuned coach prompt is private, hydrated
+# from SSM at deploy time. Only the .example baseline is committed.
+api/services/coach/prompts/coach_system.txt
+
 # Local data / artifacts
 *.db
 *.sqlite

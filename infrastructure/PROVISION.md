@@ -62,7 +62,20 @@ endpoints return 503 (the calendar/view/start/manual-schedule features keep work
 The model is set by `VIRES_COACH_MODEL` (default `claude-haiku-4-5`; bump to
 `claude-sonnet-4-6` for stronger plans).
 
+### 7a. Tuned coach prompt (optional — the private edge)
+The coach's system prompt is the Vires *edge* (Commercial-tier), so the public repo
+ships only a competent **baseline** (`api/services/coach/prompts/coach_system.example.txt`).
+To run a tuned/private prompt in prod, store it in SSM — `deploy-on-merge.sh` writes it to
+the gitignored `coach_system.txt` on each deploy (content never logged):
+```
+aws ssm put-parameter --name /vires/coach_system_prompt --type SecureString --value "<prompt>"
+```
+Grant the instance role `ssm:GetParameter` on that parameter; override the path with
+`VIRES_COACH_PROMPT_SSM_PARAM`. **Non-fatal:** with no SSM prompt the deploy succeeds and the
+baseline is used. The canonical tuned prompt lives in the private `nousergon/vires-ops` repo.
+
 ## Notes
-- The only app secret is the optional AI-coach Anthropic key (§7), SSM-hydrated into
-  `.env`. The MVP otherwise runs as one hardcoded dev user with no secrets.
+- App secrets (all optional, SSM-hydrated into the box, never committed): the AI-coach
+  Anthropic key (§7) and the tuned coach prompt (§7a). The MVP otherwise runs as one
+  hardcoded dev user with no secrets.
 - The SQLite DB lives at `/home/ec2-user/vires/vires.db` (not in git) — back it up.

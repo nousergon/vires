@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     anthropic_api_key: str | None = None
     coach_model: str = "claude-haiku-4-5"
     coach_max_tokens: int = 4096
+    # Optional explicit path to the coach system prompt. The tuned prompt is the
+    # private edge (gitignored coach_system.txt, hydrated from SSM at deploy time);
+    # absent => the committed coach_system.example.txt baseline is used.
+    coach_prompt_path: str | None = None
 
     # CORS — the Vite dev server during local development.
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]

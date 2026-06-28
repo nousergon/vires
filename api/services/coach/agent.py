@@ -18,30 +18,13 @@ from pydantic import ValidationError
 from api.config import get_settings
 from api.schemas.coach import ProgramSpec
 from api.services.coach.materialize import MaterializeContext
+from api.services.coach.prompt_loader import load_system_prompt
 
 TOOL_NAME = "emit_program_spec"
 
-SYSTEM_PROMPT = """\
-You are an expert strength & conditioning coach building a multi-week training \
-program for a single athlete. Convert their request into a structured program by \
-calling the emit_program_spec tool — this is the ONLY way to respond.
-
-Hard rules:
-- Reference ONLY the template_id and exercise_id values given in CONTEXT. Never \
-invent ids or exercises.
-- Express progression as CURVES (start/end values + mode), NOT per-week numbers — \
-the system materializes the weekly sets/reps/weight deterministically. A typical \
-strength block ramps reps DOWN (e.g. 10 -> 4) while weight ramps UP; use a \
-'percent_of_start' weight curve (e.g. 1.0 -> 1.3 for +30%) unless the user gives \
-absolute weights.
-- weekday is 0=Monday … 6=Sunday. One schedule entry = that template once per week \
-on that weekday. "each routine once a week" = one entry per template.
-- Pick a sensible start_date (default: the provided today, or the next occurrence of \
-the requested day). Set deload_weeks only if the user asks or the block is long.
-- Write a concise, friendly coach_summary explaining the plan in plain English \
-(weeks, frequency, how reps/weight move, any deload).
-- Respect the athlete's weight unit given in CONTEXT.
-"""
+# The system prompt is loaded at call time — tuned-private if hydrated onto the
+# box, else the committed public baseline (see prompt_loader). The prompt is the
+# Vires coaching edge, so its tuned form is NOT in this public repo.
 
 
 class CoachUnavailable(RuntimeError):
@@ -135,7 +118,7 @@ def generate_spec(
         resp = client.messages.create(
             model=settings.coach_model,
             max_tokens=settings.coach_max_tokens,
-            system=SYSTEM_PROMPT,
+            system=load_system_prompt(),
             tools=[tool],
             tool_choice={"type": "tool", "name": TOOL_NAME},
             messages=messages,
