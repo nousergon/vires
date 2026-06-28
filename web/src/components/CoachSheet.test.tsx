@@ -128,6 +128,41 @@ describe('CoachSheet', () => {
     expect(screen.getByText(/defer to PT/)).toBeInTheDocument()
   })
 
+  const WITH_OBJECTIVE = {
+    objective: {
+      id: 1,
+      name: 'Climb Baker',
+      kind: 'dated' as const,
+      target_date: '2026-09-05',
+      sport: 'alpine',
+      demands_profile: null,
+      is_primary: true,
+      created_at: '',
+      updated_at: '',
+    },
+    constraints: [],
+  }
+
+  it('auto-generates on open when launched with autoStart + an active objective', async () => {
+    vi.spyOn(api, 'activeObjective').mockResolvedValue(WITH_OBJECTIVE)
+    const gen = vi.spyOn(api, 'coachGenerate').mockResolvedValue(PREVIEW)
+    renderWithProviders(<CoachSheet open autoStart onClose={() => {}} onSaved={() => {}} />)
+    // no typing, no clicks — the preview appears on its own
+    expect(await screen.findByText('A 4-week ramp from 10 to 4 reps.')).toBeInTheDocument()
+    expect(gen).toHaveBeenCalledWith('Build my training plan for this objective.')
+  })
+
+  it('lets you generate with no typed message when an objective is active', async () => {
+    vi.spyOn(api, 'activeObjective').mockResolvedValue(WITH_OBJECTIVE)
+    const gen = vi.spyOn(api, 'coachGenerate').mockResolvedValue(PREVIEW)
+    renderWithProviders(<CoachSheet open onClose={() => {}} onSaved={() => {}} />)
+    await screen.findByText(/Building toward: Climb Baker/) // wait for objective to load
+    fireEvent.click(screen.getByText('Generate plan'))
+    await waitFor(() =>
+      expect(gen).toHaveBeenCalledWith('Build my training plan for this objective.'),
+    )
+  })
+
   it('shows the routines the coach will create in the preview', async () => {
     vi.spyOn(api, 'coachGenerate').mockResolvedValue({
       ...PREVIEW,
