@@ -10,9 +10,10 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
+from api.config import get_settings
 from api.db.identity import Identity, current_identity
 from api.db.models import PlannedExercise, PlannedWorkout, Program
 from api.db.session import get_db
@@ -25,6 +26,7 @@ from api.schemas.coach import (
     ProgramPreview,
     ProgramSpec,
     SaveProgramRequest,
+    TranscribeOut,
 )
 from api.schemas.plan import ProgramOut
 from api.serializers import to_program_out
@@ -35,6 +37,9 @@ from api.services.coach.materialize import (
     end_date,
     materialize,
 )
+from api.services.stt import STTError, transcribe_audio
+
+MAX_AUDIO_BYTES = 25 * 1024 * 1024  # 25 MB — the Whisper API per-file limit
 
 router = APIRouter(prefix="/coach", tags=["coach"])
 
@@ -90,6 +95,31 @@ def generate(
     except CoachError as e:
         raise HTTPException(502, f"Coach could not build a plan: {e}") from e
     return _build_preview(spec, ctx)
+
+
+@router.post("/transcribe", response_model=TranscribeOut)
+async def transcribe(
+    request: Request,
+    ident: Identity = Depends(current_identity),
+) -> TranscribeOut:
+    """Speak-to-the-coach: raw audio body -> Whisper -> text to drop in the box.
+
+    Audio arrives as the raw request body (Content-Type from the recorder), so no
+    multipart parsing is needed server-side. No key => 503 (mic hidden client-side).
+    """
+    if not get_settings().stt_api_key:
+        raise HTTPException(503, "Speech-to-text is not configured.")
+    audio = await request.body()
+    if not audio:
+        raise HTTPException(400, "Empty audio.")
+    if len(audio) > MAX_AUDIO_BYTES:
+        raise HTTPException(413, "Audio too large (max 25 MB).")
+    content_type = request.headers.get("content-type") or "audio/webm"
+    try:
+        text = await transcribe_audio(audio, content_type)
+    except STTError as e:
+        raise HTTPException(502, f"Transcription failed: {e}") from e
+    return TranscribeOut(text=text)
 
 
 @router.post("/programs", response_model=ProgramOut, status_code=201)

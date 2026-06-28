@@ -46,6 +46,13 @@ class Settings(BaseSettings):
     # absent => the committed coach_system.example.txt baseline is used.
     coach_prompt_path: str | None = None
 
+    # Speech-to-text (optional). OpenAI-compatible Whisper endpoint — point
+    # stt_base_url at Groq for a cheaper/faster Whisper. Key SSM-hydrated like the
+    # others; absent => the /coach/transcribe endpoint 503s and the mic is hidden.
+    stt_api_key: str | None = None
+    stt_model: str = "whisper-1"
+    stt_base_url: str = "https://api.openai.com/v1"
+
     # CORS — the Vite dev server during local development.
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
 
