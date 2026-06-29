@@ -20,6 +20,8 @@ class CalendarEntry(BaseModel):
     status: str
     program_id: int | None = None
     template_id: int | None = None
+    objective_id: int | None = None  # which objective's block this day prepares for
+    objective_name: str | None = None  # label for the block, e.g. "Kangaroo Temple"
     exercise_count: int = 0
     session_id: int | None = None  # planned -> the session that fulfilled it, if any
 

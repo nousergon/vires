@@ -14,10 +14,11 @@ from datetime import date, datetime, timedelta
 @dataclass
 class IcsEvent:
     uid: str
-    start: date  # all-day
+    start: date  # all-day (inclusive)
     summary: str
     description: str
     dtstamp: datetime
+    end: date | None = None  # last day (inclusive); None => single-day event
 
 
 def _esc(text: str) -> str:
@@ -59,7 +60,8 @@ def _vevent(e: IcsEvent) -> list[str]:
         f"UID:{e.uid}",
         f"DTSTAMP:{_stamp(e.dtstamp)}",
         f"DTSTART;VALUE=DATE:{e.start.strftime('%Y%m%d')}",
-        f"DTEND;VALUE=DATE:{(e.start + timedelta(days=1)).strftime('%Y%m%d')}",
+        # DTEND is exclusive for all-day events, so the day after the last day.
+        f"DTEND;VALUE=DATE:{((e.end or e.start) + timedelta(days=1)).strftime('%Y%m%d')}",
         f"SUMMARY:{_esc(e.summary)}",
         f"DESCRIPTION:{_esc(e.description)}",
         "TRANSP:TRANSPARENT",

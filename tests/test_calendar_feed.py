@@ -33,6 +33,16 @@ def test_build_calendar_structure_and_escaping():
     assert "\r\n" in ics  # CRLF line endings
 
 
+def test_build_calendar_multi_day_event_end_is_exclusive():
+    ev = IcsEvent(
+        uid="trip@vires", start=date(2026, 7, 9), end=date(2026, 7, 11),
+        summary="Baker", description="", dtstamp=datetime(2026, 6, 1, tzinfo=UTC),
+    )
+    ics = build_calendar("Cal", [ev])
+    assert "DTSTART;VALUE=DATE:20260709" in ics
+    assert "DTEND;VALUE=DATE:20260712" in ics  # 7/11 inclusive -> 7/12 exclusive end
+
+
 def test_build_calendar_folds_long_lines():
     ev = IcsEvent(
         uid="x@vires",
@@ -126,3 +136,43 @@ def test_feed_includes_dated_objectives_as_peaks(client):
     assert "SUMMARY:🎯 Climb Baker" in body
     assert "DTSTART;VALUE=DATE:20260905" in body
     assert "General health" not in body
+
+
+def test_feed_event_band_spans_a_multi_day_event(client):
+    client.post(
+        "/api/objectives",
+        json={"name": "Baker", "kind": "dated", "target_date": "2030-07-09",
+              "event_end_date": "2030-07-11", "sport": "alpine"},
+    )
+    token = client.get("/api/plan/feed-url").json()["token"]
+    body = client.get(f"/api/plan/feed/{token}.ics").text
+    assert "SUMMARY:🎯 Baker" in body
+    assert "DTSTART;VALUE=DATE:20300709" in body
+    assert "DTEND;VALUE=DATE:20300712" in body  # 7/9–7/11 inclusive event band
+
+
+def test_feed_block_band_and_workout_labels_for_objective(client):
+    e = client.get("/api/exercises/search", params={"q": "bench press"}).json()[0]["exercise"]["id"]
+    tpl = client.post(
+        "/api/templates",
+        json={"name": "Alpine", "exercises": [{"exercise_id": e, "target_sets": 3,
+              "target_reps": 5, "target_weight": 100}]},
+    ).json()
+    o = client.post(
+        "/api/objectives",
+        json={"name": "Baker", "kind": "dated", "target_date": "2030-07-09", "sport": "alpine"},
+    ).json()
+    spec = {
+        "name": "Season",
+        "phases": [
+            {"objective_id": o["id"], "start_date": "2030-06-01", "duration_weeks": 3,
+             "schedule": [{"template_id": tpl["id"], "weekday": "monday"}]},
+        ],
+    }
+    client.post("/api/coach/programs", json={"spec": spec})
+    token = client.get("/api/plan/feed-url").json()["token"]
+    body = client.get(f"/api/plan/feed/{token}.ics").text
+    # the training block shows as its own labeled band
+    assert "Baker — alpine block" in body
+    # each attributed workout is labeled with its objective
+    assert "For: Baker" in body
