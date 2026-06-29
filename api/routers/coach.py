@@ -56,6 +56,7 @@ from api.services.coach.materialize import (
     end_date,
     materialize,
     rewrite_routine_refs,
+    start_date_of,
     synthesize_routines,
 )
 from api.services.coach.replan import detect_triggers, replan_instruction
@@ -93,7 +94,7 @@ def _build_preview(spec: ProgramSpec, ctx: MaterializeContext, db: Session) -> P
     return ProgramPreview(
         name=spec.name,
         coach_summary=spec.coach_summary,
-        start_date=spec.start_date,
+        start_date=start_date_of(spec),
         end_date=end_date(spec),
         weight_unit=ctx.weight_unit,
         spec=spec,
@@ -239,7 +240,7 @@ def save_program(
         objective_id=_active_objective_id(db, ident),
         goal_text=body.goal_text,
         spec=spec.model_dump(mode="json"),
-        start_date=spec.start_date,
+        start_date=start_date_of(spec),
         end_date=end_date(spec),
         status="active",
         planned_workouts=rows,
@@ -270,6 +271,7 @@ def _materialize_rows(
                 tenant_id=ident.tenant_id,
                 user_id=ident.user_id,
                 template_id=pw.template_id,
+                objective_id=pw.objective_id,
                 scheduled_date=pw.scheduled_date,
                 name=pw.name,
                 week_index=pw.week_index,
@@ -419,7 +421,7 @@ def apply_program(
     program.spec = spec.model_dump(mode="json")
     if body.name:
         program.name = body.name.strip()
-    program.start_date = spec.start_date
+    program.start_date = start_date_of(spec)
     program.end_date = end_date(spec)
     record_plan_change(
         db,

@@ -17,6 +17,63 @@ from api.schemas.coach import ExerciseProgression, ProgramSpec, ScheduleEntry
 PLATE_INCREMENT = {"lb": 2.5, "kg": 1.25}
 DELOAD_LOAD_FACTOR = 0.9  # deload weeks prescribe ~10% lighter
 
+
+# --------------------------------------------------------------------------- #
+# Season blocks — a spec is either flat (one block) or phased (a block per
+# objective). Normalizing both into a list of blocks lets every consumer
+# (materialize, end_date, grounding) share one code path.
+# --------------------------------------------------------------------------- #
+@dataclass
+class Block:
+    objective_id: int | None
+    start_date: date
+    duration_weeks: int
+    schedule: list[ScheduleEntry]
+    progressions: list[ExerciseProgression]
+    deload_weeks: list[int]
+
+
+def program_blocks(spec: ProgramSpec) -> list[Block]:
+    """The spec's training blocks: its phases, or a single block from the flat
+    fields when not phased."""
+    if spec.phases:
+        return [
+            Block(
+                objective_id=p.objective_id,
+                start_date=p.start_date,
+                duration_weeks=p.duration_weeks,
+                schedule=p.schedule,
+                progressions=p.progressions,
+                deload_weeks=p.deload_weeks,
+            )
+            for p in spec.phases
+        ]
+    return [
+        Block(
+            objective_id=None,
+            start_date=spec.start_date,
+            duration_weeks=spec.duration_weeks,
+            schedule=spec.schedule,
+            progressions=spec.progressions,
+            deload_weeks=spec.deload_weeks,
+        )
+    ]
+
+
+def all_schedule(spec: ProgramSpec) -> list[ScheduleEntry]:
+    """Every schedule entry across all blocks (for grounding/validation)."""
+    return [e for b in program_blocks(spec) for e in b.schedule]
+
+
+def all_progressions(spec: ProgramSpec) -> list[ExerciseProgression]:
+    """Every progression across all blocks (for grounding/validation)."""
+    return [p for b in program_blocks(spec) for p in b.progressions]
+
+
+def start_date_of(spec: ProgramSpec) -> date:
+    """The program's overall start — the earliest block start."""
+    return min(b.start_date for b in program_blocks(spec))
+
 # Canonical day name -> Python weekday index (Monday=0 … Sunday=6).
 _WEEKDAY_INDEX = {
     "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
@@ -90,10 +147,20 @@ def rewrite_routine_refs(spec: ProgramSpec, key_to_id: dict[str, int]) -> Progra
             update={"template_id": key_to_id[p.routine_key], "routine_key": None}
         )
 
+    phases = [
+        ph.model_copy(
+            update={
+                "schedule": [_entry(e) for e in ph.schedule],
+                "progressions": [_prog(p) for p in ph.progressions],
+            }
+        )
+        for ph in spec.phases
+    ]
     return spec.model_copy(
         update={
             "schedule": [_entry(e) for e in spec.schedule],
             "progressions": [_prog(p) for p in spec.progressions],
+            "phases": phases,
             "new_routines": [],
         }
     )
@@ -155,6 +222,7 @@ class PlannedWorkoutData:
     scheduled_date: date
     name: str
     week_index: int
+    objective_id: int | None = None  # which objective's block (season phase) this is
     exercises: list[PlannedExerciseData] = field(default_factory=list)
 
 
@@ -196,12 +264,12 @@ def _round_reps(value: float | None) -> int | None:
 # main entry
 # --------------------------------------------------------------------------- #
 def _find_progression(
-    spec: ProgramSpec, template_id: int, exercise_id: int
+    progressions: list[ExerciseProgression], template_id: int, exercise_id: int
 ) -> ExerciseProgression | None:
     """Most specific matching progression: exercise-specific beats template-wide."""
     specific = None
     template_wide = None
-    for p in spec.progressions:
+    for p in progressions:
         if p.template_id != template_id:
             continue
         if p.exercise_id == exercise_id:
@@ -221,25 +289,36 @@ def _seed_weight(prog: ExerciseProgression | None, te: TemplateExerciseCtx) -> f
 
 
 def materialize(spec: ProgramSpec, ctx: MaterializeContext) -> list[PlannedWorkoutData]:
-    """Expand a spec into one ``PlannedWorkoutData`` per (week, schedule entry)."""
+    """Expand a spec into one ``PlannedWorkoutData`` per (week, schedule entry),
+    across every season block. Flat specs are a single block."""
     plate = PLATE_INCREMENT.get(ctx.weight_unit, PLATE_INCREMENT["lb"])
     out: list[PlannedWorkoutData] = []
-    dw = spec.duration_weeks
+    for block in program_blocks(spec):
+        out += _materialize_block(block, ctx, plate)
+    out.sort(key=lambda p: (p.scheduled_date, p.template_id or 0))
+    return out
 
-    for entry in spec.schedule:
+
+def _materialize_block(
+    block: Block, ctx: MaterializeContext, plate: float
+) -> list[PlannedWorkoutData]:
+    out: list[PlannedWorkoutData] = []
+    dw = block.duration_weeks
+
+    for entry in block.schedule:
         tpl = ctx.templates.get(entry.template_id)
         if tpl is None:
             continue  # unknown template (grounding should prevent this) — skip, don't guess
-        first_date = _first_on_or_after(spec.start_date, _weekday_index(entry.weekday))
+        first_date = _first_on_or_after(block.start_date, _weekday_index(entry.weekday))
 
         for w in range(1, dw + 1):
             f = 0.0 if dw == 1 else (w - 1) / (dw - 1)
-            deload = w in spec.deload_weeks
+            deload = w in block.deload_weeks
             scheduled = first_date + timedelta(days=(w - 1) * 7)
             exercises: list[PlannedExerciseData] = []
 
             for i, te in enumerate(tpl.exercises):
-                prog = _find_progression(spec, entry.template_id, te.exercise_id)
+                prog = _find_progression(block.progressions, entry.template_id, te.exercise_id)
                 sets = prog.sets if (prog and prog.sets) else te.target_sets
 
                 if te.is_timed:
@@ -291,11 +370,11 @@ def materialize(spec: ProgramSpec, ctx: MaterializeContext) -> list[PlannedWorko
                     scheduled_date=scheduled,
                     name=f"{tpl.name} — Week {w}",
                     week_index=w,
+                    objective_id=block.objective_id,
                     exercises=exercises,
                 )
             )
 
-    out.sort(key=lambda p: (p.scheduled_date, p.template_id or 0))
     return out
 
 
@@ -316,10 +395,11 @@ def _compute_weight(
 
 
 def end_date(spec: ProgramSpec) -> date:
-    """Last scheduled date across all schedule entries (for Program.end_date)."""
-    last = spec.start_date
-    for entry in spec.schedule:
-        first = _first_on_or_after(spec.start_date, _weekday_index(entry.weekday))
-        d = first + timedelta(days=(spec.duration_weeks - 1) * 7)
-        last = max(last, d)
+    """Last scheduled date across all blocks (for Program.end_date)."""
+    last = start_date_of(spec)
+    for block in program_blocks(spec):
+        for entry in block.schedule:
+            first = _first_on_or_after(block.start_date, _weekday_index(entry.weekday))
+            d = first + timedelta(days=(block.duration_weeks - 1) * 7)
+            last = max(last, d)
     return last
