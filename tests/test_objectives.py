@@ -168,3 +168,38 @@ def test_create_and_patch_priority(client):
     assert o["priority"] == 5
     r = client.patch(f"/api/objectives/{o['id']}", json={"priority": 9})
     assert r.status_code == 200 and r.json()["priority"] == 9
+
+
+# --------------------------------------------------------------------------- #
+# multi-day events (event_end_date)
+# --------------------------------------------------------------------------- #
+def test_create_objective_with_event_end_date(client):
+    o = _mk_objective(
+        client, target_date="2026-07-09", event_end_date="2026-07-11"
+    ).json()
+    assert o["target_date"] == "2026-07-09" and o["event_end_date"] == "2026-07-11"
+
+
+def test_event_end_before_target_rejected(client):
+    r = _mk_objective(client, target_date="2026-07-09", event_end_date="2026-07-05")
+    assert r.status_code == 422  # schema validation
+
+
+def test_event_end_without_target_rejected(client):
+    r = _mk_objective(
+        client, kind="open_ended", target_date=None, sport=None,
+        event_end_date="2026-07-11",
+    )
+    assert r.status_code == 422
+
+
+def test_patch_event_end_date_validated_against_merged_row(client):
+    o = _mk_objective(client, target_date="2026-07-09").json()
+    ok = client.patch(
+        f"/api/objectives/{o['id']}", json={"event_end_date": "2026-07-11"}
+    )
+    assert ok.status_code == 200 and ok.json()["event_end_date"] == "2026-07-11"
+    bad = client.patch(
+        f"/api/objectives/{o['id']}", json={"event_end_date": "2026-07-01"}
+    )
+    assert bad.status_code == 400  # before target_date, merged-row check

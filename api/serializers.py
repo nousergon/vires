@@ -42,6 +42,7 @@ def to_planned_workout_out(pw: PlannedWorkout) -> PlannedWorkoutOut:
         id=pw.id,
         program_id=pw.program_id,
         template_id=pw.template_id,
+        objective_id=pw.objective_id,
         scheduled_date=pw.scheduled_date,
         name=pw.name,
         notes=pw.notes,

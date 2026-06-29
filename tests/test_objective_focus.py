@@ -19,6 +19,7 @@ def _obj(
     *,
     kind: str = "dated",
     target_date: date | None = None,
+    event_end_date: date | None = None,
     is_primary: bool = False,
     priority: int = 0,
 ) -> Objective:
@@ -27,6 +28,7 @@ def _obj(
         name=f"o{id}",
         kind=kind,
         target_date=target_date,
+        event_end_date=event_end_date,
         is_primary=is_primary,
         priority=priority,
     )
@@ -52,6 +54,20 @@ def test_soonest_upcoming_dated_is_focus():
 def test_passed_dated_objectives_ignored():
     past = _obj(1, target_date=date(2026, 1, 1))
     assert pick_focus([past], TODAY) is None
+
+
+def test_objective_stays_focus_during_multi_day_event():
+    # peak day was yesterday but the trip runs through next week -> still the focus
+    on_trip = _obj(
+        1, target_date=date(2026, 6, 28), event_end_date=date(2026, 7, 3)
+    )
+    later = _obj(2, target_date=date(2026, 8, 1))
+    assert pick_focus([on_trip, later], TODAY).id == 1
+
+
+def test_objective_drops_after_event_end():
+    over = _obj(1, target_date=date(2026, 6, 20), event_end_date=date(2026, 6, 25))
+    assert pick_focus([over], TODAY) is None
 
 
 def test_priority_breaks_same_date_tie():

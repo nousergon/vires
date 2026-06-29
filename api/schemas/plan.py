@@ -50,6 +50,7 @@ class PlannedWorkoutOut(BaseModel):
     id: int
     program_id: int | None = None
     template_id: int | None = None
+    objective_id: int | None = None  # which objective's block this day prepares for
     scheduled_date: date
     name: str
     notes: str | None = None
