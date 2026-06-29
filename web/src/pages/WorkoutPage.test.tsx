@@ -53,6 +53,16 @@ describe('WorkoutPage — StartView (no active workout)', () => {
 describe('WorkoutPage — ActiveWorkout', () => {
   beforeEach(() => localStorage.setItem(ACTIVE_KEY, '10'))
 
+  it('self-heals to the start view when the active session was deleted (404)', async () => {
+    // localStorage points at session 10, but it was deleted → getWorkout 404s.
+    vi.spyOn(api, 'getWorkout').mockRejectedValue(new Error('404: Workout not found'))
+    vi.spyOn(api, 'listTemplates').mockResolvedValue([])
+    renderWithProviders(<WorkoutPage />)
+    // falls back to StartView instead of spinning forever, and clears the pointer
+    expect(await screen.findByText('Start empty workout')).toBeInTheDocument()
+    await waitFor(() => expect(localStorage.getItem(ACTIVE_KEY)).toBeNull())
+  })
+
   it('renders the active session with its exercises and sets', async () => {
     vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession())
     renderWithProviders(<WorkoutPage />)
