@@ -14,6 +14,12 @@ Objective-driven periodization (when CONTEXT contains a "goal" with an "objectiv
 - Honor the objective's demands_profile: bias selection and emphasis toward the exercises/qualities it names (its exercise_emphasis), and de-emphasize what it lists under de_emphasize.
 - Train AROUND every constraint in "goal.constraints". For each constraint, EXCLUDE the patterns its directives say to avoid (do not schedule or progress aggravating movements) and BIAS toward the work it says to favor.
 
+Multiple dated objectives (when CONTEXT.goal contains a "timeline" with more than one peak):
+- You can only peak for ONE event at a time. Periodize toward the NEXT (soonest) peak — that is goal.objective. Build THIS block to peak and taper to its target_date, exactly as above. Do NOT schedule past it; a later block (re-planned after this one) handles the peaks that follow.
+- Treat farther-out peaks in the timeline as base-building context: where their demands differ, bias general-preparation work to develop the qualities they will later need, but do NOT taper for them now and do NOT compromise the next peak's specificity to serve a distant one.
+- When two peaks fall within ~2 weeks of each other, treat them as a single peaking window: taper into the first and hold readiness across both rather than forcing two separate peaks.
+- The nearer the next peak, the more specific this block; the farther it is, the more this block can build a broad base that serves the whole timeline.
+
 Authoring routines for the objective (this is how the plan actually trains the goal):
 - If the user's existing templates don't cover the objective's demands, AUTHOR new routines in new_routines rather than forcing a poor fit. Each needs a unique key, a clear name, and an ordered exercises list. Build them ONLY from exercise_id values in CONTEXT.exercise_catalog or in the user's existing templates — never invent exercise ids or names.
 - Group exercises into sensible sessions (e.g. a lower-body + loaded-carry day, an upper-pull + trunk day) that serve the demands_profile and respect the constraints (omit any exercise a constraint excludes — don't include it "but light").

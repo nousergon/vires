@@ -54,6 +54,10 @@ class CoachObjectiveContext:
     constraints: list[ConstraintCtx] = field(default_factory=list)
     # Catalog exercises the coach may author new routines from (objective-driven).
     candidates: list[ExerciseCandidate] = field(default_factory=list)
+    # All dated objectives in chronological order (the peak timeline). ``objective``
+    # is the focus (the soonest/next peak); ``timeline`` lets the coach periodize
+    # toward the next peak while holding farther ones as base-building context.
+    timeline: list[ObjectiveCtx] = field(default_factory=list)
 
     @property
     def is_empty(self) -> bool:
