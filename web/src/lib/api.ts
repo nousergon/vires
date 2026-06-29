@@ -415,6 +415,23 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  updateWorkoutExercise: (
+    sessionId: number,
+    seId: number,
+    body: Partial<{
+      target_sets: number | null
+      target_reps: number | null
+      target_weight: number | null
+      target_duration_seconds: number | null
+      rest_seconds: number | null
+      notes: string | null
+      order_index: number
+    }>,
+  ) =>
+    req<SessionExercise>(`/workouts/${sessionId}/exercises/${seId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
   removeWorkoutExercise: (sessionId: number, seId: number) =>
     req<void>(`/workouts/${sessionId}/exercises/${seId}`, { method: 'DELETE' }),
   logSet: (
@@ -426,6 +443,7 @@ export const api = {
       rpe?: number | null
       duration_seconds?: number | null
       is_warmup?: boolean
+      done?: boolean
     },
   ) =>
     req<SetEntry>(`/workouts/${sessionId}/exercises/${seId}/sets`, {

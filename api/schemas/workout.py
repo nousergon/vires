@@ -21,6 +21,10 @@ class SetIn(BaseModel):
     duration_seconds: int | None = None
     is_warmup: bool = False
     set_number: int | None = None  # auto-assigned (next) when omitted
+    # Whether the new set is already performed. Defaults True (a directly-logged
+    # set). The app passes False from "+ Add set" so an empty row appears unchecked
+    # for the user to fill in and tick off themselves.
+    done: bool = True
 
 
 class SetUpdate(BaseModel):
@@ -52,6 +56,22 @@ class SessionExerciseIn(BaseModel):
     target_duration_seconds: int | None = None
     rest_seconds: int | None = None
     notes: str | None = None
+
+
+class SessionExerciseUpdate(BaseModel):
+    """Patch a session exercise in place: tweak its rest/targets or reorder it.
+
+    All fields optional; only those present (``exclude_unset``) are applied.
+    ``order_index`` drives drag-free reordering (the app swaps adjacent rows).
+    """
+
+    target_sets: int | None = None
+    target_reps: int | None = None
+    target_weight: float | None = None
+    target_duration_seconds: int | None = None
+    rest_seconds: int | None = None
+    notes: str | None = None
+    order_index: int | None = None
 
 
 class SessionExerciseOut(BaseModel):

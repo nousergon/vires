@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { type FocusEvent, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type SessionExercise, type SetEntry, type WorkoutSession } from '../lib/api'
@@ -10,6 +10,23 @@ import { Button, Card, EmptyState, PageTitle, Spinner } from '../components/ui'
 import ExercisePicker from '../components/ExercisePicker'
 
 export const ACTIVE_KEY = 'vires.activeWorkout'
+
+// Whether the rest countdown auto-starts after a set is checked off, remembered
+// per exercise (so disabling it on one move doesn't affect the others). Defaults
+// on; "0" means the user turned it off for this session exercise.
+function useRestEnabled(seId: number): [boolean, (v: boolean) => void] {
+  const key = `vires.restOn.${seId}`
+  const [on, setOn] = useState(() => localStorage.getItem(key) !== '0')
+  const set = (v: boolean) => {
+    localStorage.setItem(key, v ? '1' : '0')
+    setOn(v)
+  }
+  return [on, set]
+}
+
+// Select-all on focus so tapping a number field overwrites the value instead of
+// forcing the user to clear it first.
+const selectOnFocus = (e: FocusEvent<HTMLInputElement>) => e.currentTarget.select()
 
 function useActiveId(): [number | null, (id: number | null) => void] {
   const [id, setId] = useState<number | null>(() => {
@@ -164,6 +181,20 @@ function ActiveWorkout({ id, onClear }: { id: number; onClear: () => void }) {
     mutationFn: (exerciseId: number) => api.addWorkoutExercise(id, { exercise_id: exerciseId }),
     onSuccess: invalidate,
   })
+  // Reorder: swap an exercise's order_index with its neighbour, then refetch.
+  const move = useMutation({
+    mutationFn: async ({ idx, dir }: { idx: number; dir: -1 | 1 }) => {
+      const list = ws!.exercises
+      const a = list[idx]
+      const b = list[idx + dir]
+      if (!a || !b) return
+      await Promise.all([
+        api.updateWorkoutExercise(id, a.id, { order_index: b.order_index }),
+        api.updateWorkoutExercise(id, b.id, { order_index: a.order_index }),
+      ])
+    },
+    onSuccess: invalidate,
+  })
   const finish = useMutation({
     mutationFn: () => api.finishWorkout(id),
     onSuccess: () => {
@@ -193,7 +224,7 @@ function ActiveWorkout({ id, onClear }: { id: number; onClear: () => void }) {
       </div>
 
       <div className="space-y-4">
-        {ws.exercises.map((se) => (
+        {ws.exercises.map((se, i) => (
           <ExerciseBlock
             key={se.id}
             session={ws}
@@ -203,6 +234,10 @@ function ActiveWorkout({ id, onClear }: { id: number; onClear: () => void }) {
             runTimer={runTimer}
             stopTimer={stopTimer}
             onChanged={invalidate}
+            canMoveUp={i > 0}
+            canMoveDown={i < ws.exercises.length - 1}
+            onMoveUp={() => move.mutate({ idx: i, dir: -1 })}
+            onMoveDown={() => move.mutate({ idx: i, dir: 1 })}
           />
         ))}
       </div>
@@ -244,11 +279,13 @@ function InlineTimerBar({
   timer,
   kind,
   onAdd,
+  onSub,
   onSkip,
 }: {
   timer: ReturnType<typeof useCountdown>
   kind: TimerKind
   onAdd: () => void
+  onSub: () => void
   onSkip: () => void
 }) {
   const pct = timer.total > 0 ? (timer.remaining / timer.total) * 100 : 0
@@ -264,11 +301,12 @@ function InlineTimerBar({
         </span>
         <span className={`font-mono text-lg font-bold ${accent}`}>{fmtClock(timer.remaining)}</span>
         <div className="flex gap-1">
-          {!hold && (
-            <button className="rounded px-2 py-0.5 text-xs text-slate-300" onClick={onAdd}>
-              +30s
-            </button>
-          )}
+          <button className="rounded px-2 py-0.5 text-xs text-slate-300" onClick={onSub}>
+            −30s
+          </button>
+          <button className="rounded px-2 py-0.5 text-xs text-slate-300" onClick={onAdd}>
+            +30s
+          </button>
           <button className="rounded px-2 py-0.5 text-xs text-slate-300" onClick={onSkip}>
             {hold ? 'Stop' : 'Skip'}
           </button>
@@ -290,6 +328,10 @@ function ExerciseBlock({
   runTimer,
   stopTimer,
   onChanged,
+  canMoveUp,
+  canMoveDown,
+  onMoveUp,
+  onMoveDown,
 }: {
   session: WorkoutSession
   se: SessionExercise
@@ -298,10 +340,16 @@ function ExerciseBlock({
   runTimer: RunTimer
   stopTimer: () => void
   onChanged: () => void
+  canMoveUp: boolean
+  canMoveDown: boolean
+  onMoveUp: () => void
+  onMoveDown: () => void
 }) {
   const settings = useSettings()
   const prev = se.previous_performance
+  const [restEnabled, setRestEnabled] = useRestEnabled(se.id)
   const restSecs = se.rest_seconds ?? settings.default_rest_seconds
+  const [restInput, setRestInput] = useState(String(restSecs))
   const timed = se.exercise.is_timed
   const holdSecs = se.target_duration_seconds ?? 60
 
@@ -309,14 +357,23 @@ function ExerciseBlock({
     const idx = se.sets.length
     const ghost = prev?.sets[idx] ?? prev?.sets[prev.sets.length - 1]
     if (timed) {
-      await api.logSet(session.id, se.id, { duration_seconds: holdSecs })
+      await api.logSet(session.id, se.id, { duration_seconds: holdSecs, done: false })
     } else {
       await api.logSet(session.id, se.id, {
         reps: ghost?.reps ?? se.target_reps ?? null,
         weight: ghost?.weight ?? se.target_weight ?? null,
+        done: false,
       })
     }
     onChanged()
+  }
+
+  async function saveRest() {
+    const secs = restInput === '' ? settings.default_rest_seconds : Number(restInput)
+    if (secs !== restSecs) {
+      await api.updateWorkoutExercise(session.id, se.id, { rest_seconds: secs })
+      onChanged()
+    }
   }
 
   const showBar = timerCtx?.seId === se.id
@@ -325,18 +382,57 @@ function ExerciseBlock({
     <Card>
       <div className="mb-1 flex items-center justify-between">
         <h3 className="font-semibold text-slate-100">{se.exercise.name}</h3>
-        <button
-          className="text-xs text-slate-500"
-          onClick={async () => {
-            await api.removeWorkoutExercise(session.id, se.id)
-            onChanged()
-          }}
-        >
-          remove
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            className="px-1 text-slate-500 disabled:opacity-25"
+            disabled={!canMoveUp}
+            onClick={onMoveUp}
+            title="Move up"
+          >
+            ↑
+          </button>
+          <button
+            className="px-1 text-slate-500 disabled:opacity-25"
+            disabled={!canMoveDown}
+            onClick={onMoveDown}
+            title="Move down"
+          >
+            ↓
+          </button>
+          <button
+            className="text-xs text-slate-500"
+            onClick={async () => {
+              await api.removeWorkoutExercise(session.id, se.id)
+              onChanged()
+            }}
+          >
+            remove
+          </button>
+        </div>
       </div>
 
       <PrevHint prev={prev} unit={settings.weight_unit} />
+
+      <label className="mt-1 flex items-center gap-2 text-xs text-slate-400">
+        <input
+          type="checkbox"
+          checked={restEnabled}
+          onChange={(e) => setRestEnabled(e.target.checked)}
+          className="h-3.5 w-3.5 accent-amber-500"
+        />
+        Rest timer
+        <input
+          type="number"
+          inputMode="numeric"
+          value={restInput}
+          disabled={!restEnabled}
+          onFocus={selectOnFocus}
+          onChange={(e) => setRestInput(e.target.value)}
+          onBlur={saveRest}
+          className="w-14 rounded bg-slate-800 px-1.5 py-0.5 text-center outline-none focus:ring-1 focus:ring-amber-500 disabled:opacity-40"
+        />
+        <span>s</span>
+      </label>
 
       <div className="mt-2 space-y-1.5">
         {timed ? (
@@ -365,6 +461,7 @@ function ExerciseBlock({
               set={s}
               holdDefault={holdSecs}
               restSecs={restSecs}
+              restEnabled={restEnabled}
               runTimer={runTimer}
               onChanged={onChanged}
             />
@@ -375,6 +472,7 @@ function ExerciseBlock({
               seId={se.id}
               set={s}
               restSecs={restSecs}
+              restEnabled={restEnabled}
               runTimer={runTimer}
               onChanged={onChanged}
             />
@@ -387,6 +485,7 @@ function ExerciseBlock({
           timer={timer}
           kind={timerCtx.kind}
           onAdd={() => timer.addSeconds(30)}
+          onSub={() => timer.addSeconds(-30)}
           onSkip={stopTimer}
         />
       )}
@@ -476,6 +575,7 @@ function SetRow({
   seId,
   set,
   restSecs,
+  restEnabled,
   runTimer,
   onChanged,
 }: {
@@ -483,6 +583,7 @@ function SetRow({
   seId: number
   set: SetEntry
   restSecs: number
+  restEnabled: boolean
   runTimer: RunTimer
   onChanged: () => void
 }) {
@@ -500,7 +601,7 @@ function SetRow({
       weight: weight === '' ? undefined : Number(weight),
       reps: reps === '' ? undefined : Number(reps),
     })
-    if (nowDone) runTimer('rest', seId, restSecs)
+    if (nowDone && restEnabled) runTimer('rest', seId, restSecs)
     onChanged()
   }
 
@@ -519,6 +620,7 @@ function SetRow({
         type="number"
         inputMode="decimal"
         value={weight}
+        onFocus={selectOnFocus}
         onChange={(e) => setWeight(e.target.value)}
         onBlur={() => save({ weight: weight === '' ? undefined : Number(weight) })}
         className={cell}
@@ -527,6 +629,7 @@ function SetRow({
         type="number"
         inputMode="numeric"
         value={reps}
+        onFocus={selectOnFocus}
         onChange={(e) => setReps(e.target.value)}
         onBlur={() => save({ reps: reps === '' ? undefined : Number(reps) })}
         className={cell}
@@ -553,6 +656,7 @@ function TimedSetRow({
   set,
   holdDefault,
   restSecs,
+  restEnabled,
   runTimer,
   onChanged,
 }: {
@@ -561,6 +665,7 @@ function TimedSetRow({
   set: SetEntry
   holdDefault: number
   restSecs: number
+  restEnabled: boolean
   runTimer: RunTimer
   onChanged: () => void
 }) {
@@ -571,7 +676,7 @@ function TimedSetRow({
   async function complete() {
     await api.updateSet(sessionId, seId, set.id, { done: true, duration_seconds: seconds() })
     onChanged()
-    runTimer('rest', seId, restSecs)
+    if (restEnabled) runTimer('rest', seId, restSecs)
   }
 
   function startHold() {
@@ -595,6 +700,7 @@ function TimedSetRow({
         type="number"
         inputMode="numeric"
         value={dur}
+        onFocus={selectOnFocus}
         onChange={(e) => setDur(e.target.value)}
         onBlur={() => api.updateSet(sessionId, seId, set.id, { duration_seconds: seconds() })}
         className={cell}

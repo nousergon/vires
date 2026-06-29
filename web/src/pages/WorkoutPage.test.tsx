@@ -78,7 +78,9 @@ describe('WorkoutPage — ActiveWorkout', () => {
     const log = vi.spyOn(api, 'logSet').mockResolvedValue(makeSet({ id: 1001 }))
     renderWithProviders(<WorkoutPage />)
     fireEvent.click(await screen.findByText('+ Add set'))
-    await waitFor(() => expect(log).toHaveBeenCalledWith(10, 100, { reps: 8, weight: 135 }))
+    await waitFor(() =>
+      expect(log).toHaveBeenCalledWith(10, 100, { reps: 8, weight: 135, done: false }),
+    )
   })
 
   it('marks a set done and starts the rest timer', async () => {
@@ -92,6 +94,44 @@ describe('WorkoutPage — ActiveWorkout', () => {
     // rest timer bar appears
     expect(await screen.findByText('Rest')).toBeInTheDocument()
     expect(screen.getByText('Skip')).toBeInTheDocument()
+  })
+
+  it('skips the rest timer when the per-exercise toggle is off', async () => {
+    localStorage.setItem('vires.restOn.100', '0')
+    vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession())
+    vi.spyOn(api, 'updateSet').mockResolvedValue(makeSet({ completed_at: '2026-06-28T18:05:00Z' }))
+    renderWithProviders(<WorkoutPage />)
+    await screen.findByText('Bench Press')
+    expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false)
+    fireEvent.click(screen.getByTitle('Mark set done'))
+    await waitFor(() => expect(api.updateSet).toHaveBeenCalled())
+    // no rest bar appears because the timer is disabled for this exercise
+    expect(screen.queryByText('Rest')).not.toBeInTheDocument()
+    localStorage.removeItem('vires.restOn.100')
+  })
+
+  it('reorders exercises by swapping order_index with a neighbour', async () => {
+    const a = makeSessionExercise({ id: 100, order_index: 0, exercise: makeBrief({ name: 'Bench Press' }) })
+    const b = makeSessionExercise({ id: 101, order_index: 1, exercise: makeBrief({ id: 2, name: 'Squat' }) })
+    vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession({ exercises: [a, b] }))
+    const upd = vi.spyOn(api, 'updateWorkoutExercise').mockResolvedValue(a)
+    renderWithProviders(<WorkoutPage />)
+    await screen.findByText('Squat')
+    // the first exercise can move down; the second can move up
+    fireEvent.click(screen.getAllByTitle('Move down')[0])
+    await waitFor(() => expect(upd).toHaveBeenCalledTimes(2))
+    expect(upd).toHaveBeenCalledWith(10, 100, { order_index: 1 })
+    expect(upd).toHaveBeenCalledWith(10, 101, { order_index: 0 })
+  })
+
+  it('edits the rest duration ad hoc', async () => {
+    vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession())
+    const upd = vi.spyOn(api, 'updateWorkoutExercise').mockResolvedValue(makeSessionExercise())
+    renderWithProviders(<WorkoutPage />)
+    const rest = await screen.findByDisplayValue('90') // rest_seconds seeded at 90
+    fireEvent.change(rest, { target: { value: '120' } })
+    fireEvent.blur(rest)
+    await waitFor(() => expect(upd).toHaveBeenCalledWith(10, 100, { rest_seconds: 120 }))
   })
 
   it('edits weight on blur', async () => {
