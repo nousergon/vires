@@ -115,10 +115,19 @@ function ActiveWorkout({ id, onClear }: { id: number; onClear: () => void }) {
     return () => document.removeEventListener('visibilitychange', onVisibility)
   }, [settings.timer_notification])
 
-  const { data: ws, isLoading } = useQuery({
+  const { data: ws, isLoading, error } = useQuery({
     queryKey: ['workout', id],
     queryFn: () => api.getWorkout(id),
+    // A 404 means the active-workout pointer is stale (the session was deleted) —
+    // don't retry it; self-heal below. Other errors (transient) still retry.
+    retry: (count, err) => !String((err as Error).message).startsWith('404') && count < 2,
   })
+  // Recover from a deleted/missing active session: clear the stale pointer so the
+  // Train page falls back to the start view instead of spinning forever.
+  const missing = !!error && String((error as Error).message).startsWith('404')
+  useEffect(() => {
+    if (missing) onClear()
+  }, [missing, onClear])
   const invalidate = () => qc.invalidateQueries({ queryKey: ['workout', id] })
 
   function clearActiveTimer() {
@@ -168,6 +177,7 @@ function ActiveWorkout({ id, onClear }: { id: number; onClear: () => void }) {
     onSuccess: () => onClear(),
   })
 
+  if (missing) return null // stale pointer cleared; parent switches to the start view
   if (isLoading || !ws) return <Spinner />
 
   return (
