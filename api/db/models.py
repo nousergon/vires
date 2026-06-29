@@ -344,6 +344,11 @@ class PlannedWorkout(Base):
     template_id: Mapped[int | None] = mapped_column(
         ForeignKey("workout_templates.id"), nullable=True
     )
+    # Which objective's training block this day belongs to (the season phase it
+    # prepares for). SET NULL so the day survives the objective being deleted.
+    objective_id: Mapped[int | None] = mapped_column(
+        ForeignKey("objectives.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     scheduled_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -431,9 +436,13 @@ class Objective(Base):
     # 'dated' (peaks to target_date) | 'open_ended' (no fixed peak — stored, not
     # yet periodized).
     kind: Mapped[str] = mapped_column(String, nullable=False, default="dated")
-    # The peak/summit day. A pure Date (a goal belongs to a *day*), nullable for
-    # open-ended objectives; required for dated ones (enforced in the schema).
+    # The peak/summit day — the day you must be READY. A pure Date (a goal belongs
+    # to a *day*), nullable for open-ended objectives; required for dated ones.
     target_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Last day of a multi-day event (e.g. a trip). When set, the objective spans
+    # target_date..event_end_date with NO training scheduled, and the next block
+    # starts after it. None => a single-day event at target_date.
+    event_end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     # Sport profile key — 'alpine' is the only authored needs-analysis for now.
     sport: Mapped[str | None] = mapped_column(String, nullable=True)
     # The needs-analysis the coach consumes (structured JSON; see

@@ -165,6 +165,7 @@ def create_objective(
         name=body.name.strip(),
         kind=body.kind,
         target_date=body.target_date,
+        event_end_date=body.event_end_date,
         sport=body.sport,
         demands_profile=demands,
         is_primary=body.is_primary,
@@ -192,6 +193,8 @@ def update_objective(
         o.kind = data["kind"]
     if "target_date" in data:
         o.target_date = data["target_date"]
+    if "event_end_date" in data:
+        o.event_end_date = data["event_end_date"]
     if "sport" in data:
         o.sport = data["sport"]
         # Refresh the authored profile to match the new sport unless one is
@@ -203,9 +206,15 @@ def update_objective(
     if "priority" in data and data["priority"] is not None:
         o.priority = data["priority"]
 
-    # Validate the merged row: a dated objective must have a target_date.
+    # Validate the merged row: a dated objective must have a target_date, and a
+    # multi-day event must end on/after it.
     if o.kind == "dated" and o.target_date is None:
         raise HTTPException(400, "target_date is required when kind='dated'")
+    if o.event_end_date is not None:
+        if o.target_date is None:
+            raise HTTPException(400, "event_end_date requires target_date")
+        if o.event_end_date < o.target_date:
+            raise HTTPException(400, "event_end_date must be on or after target_date")
 
     if "is_primary" in data and data["is_primary"] is not None:
         if data["is_primary"]:

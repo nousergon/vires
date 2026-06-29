@@ -25,6 +25,8 @@ class ObjectiveCreate(BaseModel):
     name: str = Field(min_length=1)
     kind: ObjectiveKind = "dated"
     target_date: date | None = None
+    # Last day of a multi-day event (>= target_date); omit for a single-day event.
+    event_end_date: date | None = None
     sport: str | None = None
     # Omit to auto-fill from the authored profile for ``sport`` (if one exists).
     demands_profile: dict[str, Any] | None = None
@@ -33,9 +35,14 @@ class ObjectiveCreate(BaseModel):
     priority: int = 0
 
     @model_validator(mode="after")
-    def _dated_needs_target(self) -> ObjectiveCreate:
+    def _validate_dates(self) -> ObjectiveCreate:
         if self.kind == "dated" and self.target_date is None:
             raise ValueError("target_date is required when kind='dated'")
+        if self.event_end_date is not None:
+            if self.target_date is None:
+                raise ValueError("event_end_date requires target_date")
+            if self.event_end_date < self.target_date:
+                raise ValueError("event_end_date must be on or after target_date")
         return self
 
 
@@ -46,6 +53,7 @@ class ObjectiveUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1)
     kind: ObjectiveKind | None = None
     target_date: date | None = None
+    event_end_date: date | None = None
     sport: str | None = None
     demands_profile: dict[str, Any] | None = None
     is_primary: bool | None = None
@@ -59,6 +67,7 @@ class ObjectiveOut(BaseModel):
     name: str
     kind: str
     target_date: date | None
+    event_end_date: date | None
     sport: str | None
     demands_profile: dict[str, Any] | None
     is_primary: bool

@@ -30,6 +30,12 @@ from api.db.identity import Identity
 from api.db.models import Objective
 
 
+def effective_end(o: Objective) -> date | None:
+    """The day an objective stops being 'upcoming' — its event's last day for a
+    multi-day event, else its peak/target day."""
+    return o.event_end_date or o.target_date
+
+
 def pick_focus(objectives: Sequence[Objective], today: date) -> Objective | None:
     """Derive the focus objective from a user's objectives (pure)."""
     # 1. Manual override pin wins outright.
@@ -37,11 +43,14 @@ def pick_focus(objectives: Sequence[Objective], today: date) -> Objective | None
         if o.is_primary:
             return o
 
-    # 2. Soonest upcoming dated peak.
+    # 2. Soonest dated peak whose event hasn't finished (still the focus while you
+    #    are ON a multi-day event).
     upcoming = [
         o
         for o in objectives
-        if o.kind == "dated" and o.target_date is not None and o.target_date >= today
+        if o.kind == "dated"
+        and o.target_date is not None
+        and effective_end(o) >= today
     ]
     if upcoming:
         upcoming.sort(
