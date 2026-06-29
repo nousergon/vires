@@ -21,6 +21,7 @@ from api.schemas.exercise import ExercisePerformance, PerformedSet
 from api.schemas.workout import (
     SessionExerciseIn,
     SessionExerciseOut,
+    SessionExerciseUpdate,
     SetIn,
     SetOut,
     SetUpdate,
@@ -325,6 +326,23 @@ def add_session_exercise(
     return _se_out(db, ident, se)
 
 
+@router.patch("/{session_id}/exercises/{se_id}", response_model=SessionExerciseOut)
+def update_session_exercise(
+    session_id: int,
+    se_id: int,
+    body: SessionExerciseUpdate,
+    db: Session = Depends(get_db),
+    ident: Identity = Depends(current_identity),
+) -> SessionExerciseOut:
+    ws = _get_session(db, session_id, ident)
+    se = _get_se(db, ws, se_id)
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(se, field, value)
+    db.commit()
+    db.refresh(se)
+    return _se_out(db, ident, se)
+
+
 @router.delete("/{session_id}/exercises/{se_id}", status_code=204)
 def remove_session_exercise(
     session_id: int,
@@ -357,7 +375,7 @@ def log_set(
         rpe=body.rpe,
         duration_seconds=body.duration_seconds,
         is_warmup=body.is_warmup,
-        completed_at=_now(),
+        completed_at=_now() if body.done else None,
     )
     db.add(s)
     db.commit()

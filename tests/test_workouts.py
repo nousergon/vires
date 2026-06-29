@@ -210,5 +210,41 @@ def test_update_and_delete_set(client):
     assert got["exercises"][0]["sets"] == []
 
 
+def test_logged_set_completes_by_default_but_can_be_added_unchecked(client):
+    ex = _ex_id(client, "barbell deadlift")
+    ws = client.post("/api/workouts", json={}).json()
+    se = client.post(f"/api/workouts/{ws['id']}/exercises", json={"exercise_id": ex}).json()
+    sets_url = f"/api/workouts/{ws['id']}/exercises/{se['id']}/sets"
+    # Direct log (no flag) => performed/completed, as records-from-history relies on.
+    done = client.post(sets_url, json={"reps": 5, "weight": 100}).json()
+    assert done["completed_at"] is not None
+    # The app's "+ Add set" passes done=false => an empty row the user ticks off later.
+    fresh = client.post(sets_url, json={"reps": 5, "weight": 100, "done": False}).json()
+    assert fresh["completed_at"] is None
+
+
+def test_update_session_exercise_rest_seconds(client):
+    ex = _ex_id(client, "barbell deadlift")
+    ws = client.post("/api/workouts", json={}).json()
+    se = client.post(f"/api/workouts/{ws['id']}/exercises", json={"exercise_id": ex}).json()
+    upd = client.patch(
+        f"/api/workouts/{ws['id']}/exercises/{se['id']}", json={"rest_seconds": 120}
+    ).json()
+    assert upd["rest_seconds"] == 120
+
+
+def test_reorder_session_exercises_by_swapping_order_index(client):
+    e1, e2 = _ex_id(client, "bench press"), _ex_id(client, "squat")
+    ws = client.post("/api/workouts", json={}).json()
+    se1 = client.post(f"/api/workouts/{ws['id']}/exercises", json={"exercise_id": e1}).json()
+    se2 = client.post(f"/api/workouts/{ws['id']}/exercises", json={"exercise_id": e2}).json()
+    assert se1["order_index"] == 0 and se2["order_index"] == 1
+    # Swap their order; the session should list them in the new order.
+    client.patch(f"/api/workouts/{ws['id']}/exercises/{se1['id']}", json={"order_index": 1})
+    client.patch(f"/api/workouts/{ws['id']}/exercises/{se2['id']}", json={"order_index": 0})
+    got = client.get(f"/api/workouts/{ws['id']}").json()
+    assert [se["exercise"]["id"] for se in got["exercises"]] == [e2, e1]
+
+
 def test_workout_404(client):
     assert client.get("/api/workouts/99999999").status_code == 404

@@ -78,7 +78,9 @@ describe('WorkoutPage — ActiveWorkout', () => {
     const log = vi.spyOn(api, 'logSet').mockResolvedValue(makeSet({ id: 1001 }))
     renderWithProviders(<WorkoutPage />)
     fireEvent.click(await screen.findByText('+ Add set'))
-    await waitFor(() => expect(log).toHaveBeenCalledWith(10, 100, { reps: 8, weight: 135 }))
+    await waitFor(() =>
+      expect(log).toHaveBeenCalledWith(10, 100, { reps: 8, weight: 135, done: false }),
+    )
   })
 
   it('marks a set done and starts the rest timer', async () => {
@@ -86,12 +88,50 @@ describe('WorkoutPage — ActiveWorkout', () => {
     const upd = vi.spyOn(api, 'updateSet').mockResolvedValue(makeSet({ completed_at: '2026-06-28T18:05:00Z' }))
     renderWithProviders(<WorkoutPage />)
     await screen.findByText('Bench Press')
-    fireEvent.click(screen.getByTitle('Mark set done'))
+    fireEvent.click(screen.getByTitle('Mark done'))
     await waitFor(() => expect(upd).toHaveBeenCalled())
     expect(upd.mock.calls[0][3]).toMatchObject({ done: true })
     // rest timer bar appears
     expect(await screen.findByText('Rest')).toBeInTheDocument()
     expect(screen.getByText('Skip')).toBeInTheDocument()
+  })
+
+  it('skips the rest timer when the per-exercise toggle is off', async () => {
+    localStorage.setItem('vires.restOn.100', '0')
+    vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession())
+    vi.spyOn(api, 'updateSet').mockResolvedValue(makeSet({ completed_at: '2026-06-28T18:05:00Z' }))
+    renderWithProviders(<WorkoutPage />)
+    await screen.findByText('Bench Press')
+    expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false)
+    fireEvent.click(screen.getByTitle('Mark done'))
+    await waitFor(() => expect(api.updateSet).toHaveBeenCalled())
+    // no rest bar appears because the timer is disabled for this exercise
+    expect(screen.queryByText('Rest')).not.toBeInTheDocument()
+    localStorage.removeItem('vires.restOn.100')
+  })
+
+  it('reorders exercises by swapping order_index with a neighbour', async () => {
+    const a = makeSessionExercise({ id: 100, order_index: 0, exercise: makeBrief({ name: 'Bench Press' }) })
+    const b = makeSessionExercise({ id: 101, order_index: 1, exercise: makeBrief({ id: 2, name: 'Squat' }) })
+    vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession({ exercises: [a, b] }))
+    const upd = vi.spyOn(api, 'updateWorkoutExercise').mockResolvedValue(a)
+    renderWithProviders(<WorkoutPage />)
+    await screen.findByText('Squat')
+    // the first exercise can move down; the second can move up
+    fireEvent.click(screen.getAllByTitle('Move down')[0])
+    await waitFor(() => expect(upd).toHaveBeenCalledTimes(2))
+    expect(upd).toHaveBeenCalledWith(10, 100, { order_index: 1 })
+    expect(upd).toHaveBeenCalledWith(10, 101, { order_index: 0 })
+  })
+
+  it('edits the rest duration ad hoc', async () => {
+    vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession())
+    const upd = vi.spyOn(api, 'updateWorkoutExercise').mockResolvedValue(makeSessionExercise())
+    renderWithProviders(<WorkoutPage />)
+    const rest = await screen.findByDisplayValue('90') // rest_seconds seeded at 90
+    fireEvent.change(rest, { target: { value: '120' } })
+    fireEvent.blur(rest)
+    await waitFor(() => expect(upd).toHaveBeenCalledWith(10, 100, { rest_seconds: 120 }))
   })
 
   it('edits weight on blur', async () => {
@@ -178,5 +218,57 @@ describe('WorkoutPage — ActiveWorkout', () => {
     fireEvent.click(screen.getByTitle('Mark done')) // ✓
     await waitFor(() => expect(upd).toHaveBeenCalled())
     expect(upd.mock.calls[0][3]).toMatchObject({ done: true, duration_seconds: 45 })
+  })
+
+  it('hides the weight column when its toggle is turned off', async () => {
+    vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession())
+    renderWithProviders(<WorkoutPage />)
+    expect(await screen.findByDisplayValue('135')).toBeInTheDocument() // weight cell visible
+    fireEvent.click(screen.getByRole('button', { name: 'Weight' }))
+    expect(screen.queryByDisplayValue('135')).not.toBeInTheDocument()
+    expect(localStorage.getItem('vires.col.weight.100')).toBe('0')
+    localStorage.removeItem('vires.col.weight.100')
+  })
+
+  it('enables a hold timer on a rep exercise via the Timer toggle', async () => {
+    vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession())
+    renderWithProviders(<WorkoutPage />)
+    await screen.findByText('Bench Press')
+    expect(screen.queryByTitle('Start hold')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Timer' }))
+    expect(screen.getByTitle('Start hold')).toBeInTheDocument()
+    expect(localStorage.getItem('vires.col.timer.100')).toBe('1')
+    localStorage.removeItem('vires.col.timer.100')
+  })
+
+  it('exposes an editable seconds field on the running rest bar', async () => {
+    vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession())
+    vi.spyOn(api, 'updateSet').mockResolvedValue(makeSet({ completed_at: '2026-06-28T18:05:00Z' }))
+    renderWithProviders(<WorkoutPage />)
+    await screen.findByText('Bench Press')
+    fireEvent.click(screen.getByTitle('Mark done'))
+    await screen.findByText('Rest')
+    const secs = screen.getByLabelText('Set timer seconds') as HTMLInputElement
+    expect(secs.value).toBe('90') // seeded from the rest duration
+    fireEvent.change(secs, { target: { value: '45' } })
+    fireEvent.blur(secs)
+    expect(secs.value).toBe('45')
+  })
+
+  it('renders the rest bar directly beneath the set that triggered it', async () => {
+    const se = makeSessionExercise({
+      sets: [makeSet({ id: 1000, set_number: 1 }), makeSet({ id: 1001, set_number: 2 })],
+    })
+    vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession({ exercises: [se] }))
+    vi.spyOn(api, 'updateSet').mockResolvedValue(makeSet({ completed_at: '2026-06-28T18:05:00Z' }))
+    renderWithProviders(<WorkoutPage />)
+    await screen.findByText('Bench Press')
+    fireEvent.click(screen.getAllByTitle('Mark done')[0]) // complete the first set
+    const restBar = await screen.findByText('Rest')
+    const set1 = screen.getByRole('button', { name: '1' })
+    const set2 = screen.getByRole('button', { name: '2' })
+    // bar sits after set 1 and before set 2
+    expect(set1.compareDocumentPosition(restBar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(restBar.compareDocumentPosition(set2) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 })

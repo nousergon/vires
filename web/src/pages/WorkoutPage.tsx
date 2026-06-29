@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { type FocusEvent, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type SessionExercise, type SetEntry, type WorkoutSession } from '../lib/api'
@@ -10,6 +10,47 @@ import { Button, Card, EmptyState, PageTitle, Spinner } from '../components/ui'
 import ExercisePicker from '../components/ExercisePicker'
 
 export const ACTIVE_KEY = 'vires.activeWorkout'
+
+// A boolean preference remembered per session exercise in localStorage (so a
+// choice on one move doesn't affect the others). `null` storage falls back to
+// the provided default; "0" means explicitly off.
+function useFlag(key: string, dflt: boolean): [boolean, (v: boolean) => void] {
+  const [on, setOn] = useState(() => {
+    const raw = localStorage.getItem(key)
+    return raw == null ? dflt : raw !== '0'
+  })
+  const set = (v: boolean) => {
+    localStorage.setItem(key, v ? '1' : '0')
+    setOn(v)
+  }
+  return [on, set]
+}
+
+// Which input columns a set row shows. Independent per exercise; defaults derive
+// from whether the exercise is timed (a hold) — a timed move starts as
+// timer-only, a normal move as weight + reps — but each can be toggled freely so
+// e.g. a weighted plank can show weight + timer.
+interface Cols {
+  weight: boolean
+  reps: boolean
+  timer: boolean
+}
+
+// CSS grid track template shared by an exercise's header row and its set rows so
+// the two always line up. Built from the enabled columns: Set# · [weight] ·
+// [reps] · [hold-secs ▶] · ✓ · ✕.
+function gridTemplate(cols: Cols): string {
+  const tracks = ['2rem']
+  if (cols.weight) tracks.push('minmax(0,1fr)')
+  if (cols.reps) tracks.push('minmax(0,1fr)')
+  if (cols.timer) tracks.push('minmax(0,1fr)', '2rem')
+  tracks.push('2rem', '1.5rem')
+  return tracks.join(' ')
+}
+
+// Select-all on focus so tapping a number field overwrites the value instead of
+// forcing the user to clear it first.
+const selectOnFocus = (e: FocusEvent<HTMLInputElement>) => e.currentTarget.select()
 
 function useActiveId(): [number | null, (id: number | null) => void] {
   const [id, setId] = useState<number | null>(() => {
@@ -79,14 +120,17 @@ function StartView({ onStarted }: { onStarted: (id: number) => void }) {
 
 // --------------------------------------------------------------------------- //
 type TimerKind = 'rest' | 'hold'
-type RunTimer = (kind: TimerKind, seId: number, secs: number, onFinish?: () => void) => void
+// (kind, seId, setId, secs, onFinish) — setId anchors the inline bar to the set
+// that started the timer so it renders directly beneath that row.
+type RunTimer = (kind: TimerKind, seId: number, setId: number, secs: number, onFinish?: () => void) => void
+type TimerCtx = { seId: number; setId: number; kind: TimerKind }
 
 function ActiveWorkout({ id, onClear }: { id: number; onClear: () => void }) {
   const qc = useQueryClient()
   const nav = useNavigate()
   const settings = useSettings()
   const timer = useCountdown((label) => fireTimerAlert(settings, label))
-  const [timerCtx, setTimerCtx] = useState<{ seId: number; kind: TimerKind } | null>(null)
+  const [timerCtx, setTimerCtx] = useState<TimerCtx | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
 
   // Keep the screen awake while a timer runs so the end alert reliably fires.
@@ -136,8 +180,8 @@ function ActiveWorkout({ id, onClear }: { id: number; onClear: () => void }) {
     activeTimer.current = null
   }
 
-  const runTimer: RunTimer = (kind, seId, secs, onFinish) => {
-    setTimerCtx({ seId, kind })
+  const runTimer: RunTimer = (kind, seId, setId, secs, onFinish) => {
+    setTimerCtx({ seId, setId, kind })
     const title = kind === 'hold' ? 'Hold complete' : 'Rest over'
     activeTimer.current = {
       id: `${id}-${seId}-${Date.now()}`,
@@ -162,6 +206,20 @@ function ActiveWorkout({ id, onClear }: { id: number; onClear: () => void }) {
 
   const addExercise = useMutation({
     mutationFn: (exerciseId: number) => api.addWorkoutExercise(id, { exercise_id: exerciseId }),
+    onSuccess: invalidate,
+  })
+  // Reorder: swap an exercise's order_index with its neighbour, then refetch.
+  const move = useMutation({
+    mutationFn: async ({ idx, dir }: { idx: number; dir: -1 | 1 }) => {
+      const list = ws!.exercises
+      const a = list[idx]
+      const b = list[idx + dir]
+      if (!a || !b) return
+      await Promise.all([
+        api.updateWorkoutExercise(id, a.id, { order_index: b.order_index }),
+        api.updateWorkoutExercise(id, b.id, { order_index: a.order_index }),
+      ])
+    },
     onSuccess: invalidate,
   })
   const finish = useMutation({
@@ -193,7 +251,7 @@ function ActiveWorkout({ id, onClear }: { id: number; onClear: () => void }) {
       </div>
 
       <div className="space-y-4">
-        {ws.exercises.map((se) => (
+        {ws.exercises.map((se, i) => (
           <ExerciseBlock
             key={se.id}
             session={ws}
@@ -203,6 +261,10 @@ function ActiveWorkout({ id, onClear }: { id: number; onClear: () => void }) {
             runTimer={runTimer}
             stopTimer={stopTimer}
             onChanged={invalidate}
+            canMoveUp={i > 0}
+            canMoveDown={i < ws.exercises.length - 1}
+            onMoveUp={() => move.mutate({ idx: i, dir: -1 })}
+            onMoveDown={() => move.mutate({ idx: i, dir: 1 })}
           />
         ))}
       </div>
@@ -239,16 +301,37 @@ function Elapsed({ start }: { start: string }) {
   return <div className="text-sm text-slate-400">{fmtClock(secs)} elapsed</div>
 }
 
-// Inline countdown shown directly under the exercise it belongs to.
+// Small segmented toggle for a set-row column (weight / reps / timer).
+function ColToggle({ label, on, onToggle }: { label: string; on: boolean; onToggle: (v: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={on}
+      onClick={() => onToggle(!on)}
+      className={`rounded-full border px-2.5 py-0.5 text-xs ${
+        on
+          ? 'border-amber-600/60 bg-amber-900/30 text-amber-200'
+          : 'border-slate-700 text-slate-500'
+      }`}
+    >
+      {label}
+    </button>
+  )
+}
+
+// Inline countdown shown directly under the set it belongs to. The seconds field
+// re-bases the running timer on the fly; ±30s nudges it.
 function InlineTimerBar({
   timer,
   kind,
   onAdd,
+  onSub,
   onSkip,
 }: {
   timer: ReturnType<typeof useCountdown>
   kind: TimerKind
   onAdd: () => void
+  onSub: () => void
   onSkip: () => void
 }) {
   const pct = timer.total > 0 ? (timer.remaining / timer.total) * 100 : 0
@@ -256,19 +339,41 @@ function InlineTimerBar({
   const accent = hold ? 'text-sky-300' : 'text-amber-300'
   const bar = hold ? 'bg-sky-500' : 'bg-amber-500'
   const border = hold ? 'border-sky-700/50 bg-sky-900/20' : 'border-amber-700/50 bg-amber-900/20'
+  // Seeded once when the bar mounts (i.e. when the timer starts); editing it
+  // commits a new total via setDuration.
+  const [secs, setSecs] = useState(String(timer.total))
+  const commit = () => {
+    const n = secs === '' ? 0 : Number(secs)
+    if (n > 0) timer.setDuration(n)
+  }
   return (
     <div className={`mt-2 rounded-lg border px-3 py-2 ${border}`}>
-      <div className="mb-1.5 flex items-center justify-between">
+      <div className="mb-1.5 flex items-center justify-between gap-2">
         <span className="text-xs font-semibold uppercase text-slate-400">
           {hold ? 'Hold' : 'Rest'}
         </span>
         <span className={`font-mono text-lg font-bold ${accent}`}>{fmtClock(timer.remaining)}</span>
-        <div className="flex gap-1">
-          {!hold && (
-            <button className="rounded px-2 py-0.5 text-xs text-slate-300" onClick={onAdd}>
-              +30s
-            </button>
-          )}
+        <div className="flex items-center gap-1">
+          <input
+            type="number"
+            inputMode="numeric"
+            aria-label="Set timer seconds"
+            value={secs}
+            onFocus={selectOnFocus}
+            onChange={(e) => setSecs(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') e.currentTarget.blur()
+            }}
+            className="w-12 rounded bg-slate-800 px-1 py-0.5 text-center text-xs outline-none focus:ring-1 focus:ring-amber-500"
+          />
+          <span className="text-xs text-slate-500">s</span>
+          <button className="rounded px-2 py-0.5 text-xs text-slate-300" onClick={onSub}>
+            −30s
+          </button>
+          <button className="rounded px-2 py-0.5 text-xs text-slate-300" onClick={onAdd}>
+            +30s
+          </button>
           <button className="rounded px-2 py-0.5 text-xs text-slate-300" onClick={onSkip}>
             {hold ? 'Stop' : 'Skip'}
           </button>
@@ -290,106 +395,170 @@ function ExerciseBlock({
   runTimer,
   stopTimer,
   onChanged,
+  canMoveUp,
+  canMoveDown,
+  onMoveUp,
+  onMoveDown,
 }: {
   session: WorkoutSession
   se: SessionExercise
   timer: ReturnType<typeof useCountdown>
-  timerCtx: { seId: number; kind: TimerKind } | null
+  timerCtx: TimerCtx | null
   runTimer: RunTimer
   stopTimer: () => void
   onChanged: () => void
+  canMoveUp: boolean
+  canMoveDown: boolean
+  onMoveUp: () => void
+  onMoveDown: () => void
 }) {
   const settings = useSettings()
   const prev = se.previous_performance
-  const restSecs = se.rest_seconds ?? settings.default_rest_seconds
   const timed = se.exercise.is_timed
+  // Independent per-exercise column toggles; a normal move defaults to
+  // weight + reps, a timed move to timer-only, but any combination is allowed.
+  const [showWeight, setShowWeight] = useFlag(`vires.col.weight.${se.id}`, !timed)
+  const [showReps, setShowReps] = useFlag(`vires.col.reps.${se.id}`, !timed)
+  const [showTimer, setShowTimer] = useFlag(`vires.col.timer.${se.id}`, timed)
+  const cols: Cols = { weight: showWeight, reps: showReps, timer: showTimer }
+  const template = gridTemplate(cols)
+
+  const [restEnabled, setRestEnabled] = useFlag(`vires.restOn.${se.id}`, true)
+  const restSecs = se.rest_seconds ?? settings.default_rest_seconds
+  const [restInput, setRestInput] = useState(String(restSecs))
   const holdSecs = se.target_duration_seconds ?? 60
 
   async function addSet() {
     const idx = se.sets.length
     const ghost = prev?.sets[idx] ?? prev?.sets[prev.sets.length - 1]
-    if (timed) {
-      await api.logSet(session.id, se.id, { duration_seconds: holdSecs })
-    } else {
-      await api.logSet(session.id, se.id, {
-        reps: ghost?.reps ?? se.target_reps ?? null,
-        weight: ghost?.weight ?? se.target_weight ?? null,
-      })
-    }
+    const body: {
+      reps?: number | null
+      weight?: number | null
+      duration_seconds?: number | null
+      done: boolean
+    } = { done: false }
+    // Hidden weight logs as 0 (bodyweight). Seed visible columns from the prior
+    // session / routine targets so a new row is a sensible editable target.
+    body.weight = showWeight ? (ghost?.weight ?? se.target_weight ?? null) : 0
+    if (showReps) body.reps = ghost?.reps ?? se.target_reps ?? null
+    if (showTimer) body.duration_seconds = holdSecs
+    await api.logSet(session.id, se.id, body)
     onChanged()
   }
 
-  const showBar = timerCtx?.seId === se.id
+  async function saveRest() {
+    const secs = restInput === '' ? settings.default_rest_seconds : Number(restInput)
+    if (secs !== restSecs) {
+      await api.updateWorkoutExercise(session.id, se.id, { rest_seconds: secs })
+      onChanged()
+    }
+  }
 
   return (
     <Card>
       <div className="mb-1 flex items-center justify-between">
         <h3 className="font-semibold text-slate-100">{se.exercise.name}</h3>
-        <button
-          className="text-xs text-slate-500"
-          onClick={async () => {
-            await api.removeWorkoutExercise(session.id, se.id)
-            onChanged()
-          }}
-        >
-          remove
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            className="px-1 text-slate-500 disabled:opacity-25"
+            disabled={!canMoveUp}
+            onClick={onMoveUp}
+            title="Move up"
+          >
+            ↑
+          </button>
+          <button
+            className="px-1 text-slate-500 disabled:opacity-25"
+            disabled={!canMoveDown}
+            onClick={onMoveDown}
+            title="Move down"
+          >
+            ↓
+          </button>
+          <button
+            className="text-xs text-slate-500"
+            onClick={async () => {
+              await api.removeWorkoutExercise(session.id, se.id)
+              onChanged()
+            }}
+          >
+            remove
+          </button>
+        </div>
       </div>
 
       <PrevHint prev={prev} unit={settings.weight_unit} />
 
-      <div className="mt-2 space-y-1.5">
-        {timed ? (
-          <div className="grid grid-cols-[2rem_1fr_2rem_2rem_1.5rem] gap-2 px-1 text-xs uppercase text-slate-500">
-            <span>Set</span>
-            <span>Hold (s)</span>
-            <span className="text-center">▶</span>
-            <span className="text-center">✓</span>
-            <span />
-          </div>
-        ) : (
-          <div className="grid grid-cols-[2rem_1fr_1fr_2rem_1.5rem] gap-2 px-1 text-xs uppercase text-slate-500">
-            <span>Set</span>
-            <span>{settings.weight_unit}</span>
-            <span>Reps</span>
-            <span className="text-center">✓</span>
-            <span />
-          </div>
-        )}
-        {se.sets.map((s) =>
-          timed ? (
-            <TimedSetRow
-              key={s.id}
-              sessionId={session.id}
-              seId={se.id}
-              set={s}
-              holdDefault={holdSecs}
-              restSecs={restSecs}
-              runTimer={runTimer}
-              onChanged={onChanged}
-            />
-          ) : (
-            <SetRow
-              key={s.id}
-              sessionId={session.id}
-              seId={se.id}
-              set={s}
-              restSecs={restSecs}
-              runTimer={runTimer}
-              onChanged={onChanged}
-            />
-          ),
-        )}
+      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+        <ColToggle label="Weight" on={showWeight} onToggle={setShowWeight} />
+        <ColToggle label="Reps" on={showReps} onToggle={setShowReps} />
+        <ColToggle label="Timer" on={showTimer} onToggle={setShowTimer} />
       </div>
 
-      {showBar && (
-        <InlineTimerBar
-          timer={timer}
-          kind={timerCtx.kind}
-          onAdd={() => timer.addSeconds(30)}
-          onSkip={stopTimer}
+      <label className="mt-1.5 flex items-center gap-2 text-xs text-slate-400">
+        <input
+          type="checkbox"
+          checked={restEnabled}
+          onChange={(e) => setRestEnabled(e.target.checked)}
+          className="h-3.5 w-3.5 accent-amber-500"
         />
-      )}
+        Rest timer
+        <input
+          type="number"
+          inputMode="numeric"
+          value={restInput}
+          disabled={!restEnabled}
+          onFocus={selectOnFocus}
+          onChange={(e) => setRestInput(e.target.value)}
+          onBlur={saveRest}
+          className="w-14 rounded bg-slate-800 px-1.5 py-0.5 text-center outline-none focus:ring-1 focus:ring-amber-500 disabled:opacity-40"
+        />
+        <span>s</span>
+      </label>
+
+      <div className="mt-2 space-y-1.5">
+        <div
+          className="grid gap-2 px-1 text-xs uppercase text-slate-500"
+          style={{ gridTemplateColumns: template }}
+        >
+          <span>Set</span>
+          {showWeight && <span>{settings.weight_unit}</span>}
+          {showReps && <span>Reps</span>}
+          {showTimer && (
+            <>
+              <span>Hold (s)</span>
+              <span className="text-center">▶</span>
+            </>
+          )}
+          <span className="text-center">✓</span>
+          <span />
+        </div>
+        {se.sets.map((s) => (
+          <div key={s.id}>
+            <SetRow
+              sessionId={session.id}
+              seId={se.id}
+              set={s}
+              cols={cols}
+              template={template}
+              holdDefault={holdSecs}
+              restSecs={restSecs}
+              restEnabled={restEnabled}
+              runTimer={runTimer}
+              onChanged={onChanged}
+            />
+            {timerCtx?.seId === se.id && timerCtx.setId === s.id && (
+              <InlineTimerBar
+                timer={timer}
+                kind={timerCtx.kind}
+                onAdd={() => timer.addSeconds(30)}
+                onSub={() => timer.addSeconds(-30)}
+                onSkip={stopTimer}
+              />
+            )}
+          </div>
+        ))}
+      </div>
 
       <button
         onClick={addSet}
@@ -471,143 +640,120 @@ function DeleteSetButton({
   )
 }
 
+// A single set row whose visible inputs follow the exercise's column toggles:
+// optional weight, optional reps, and an optional hold timer (a duration field
+// plus a ▶ that counts the hold down, logs it, then auto-starts rest). ✓ marks
+// the set done and — when the rest timer is enabled — kicks off the rest bar.
 function SetRow({
   sessionId,
   seId,
   set,
+  cols,
+  template,
+  holdDefault,
   restSecs,
+  restEnabled,
   runTimer,
   onChanged,
 }: {
   sessionId: number
   seId: number
   set: SetEntry
+  cols: Cols
+  template: string
+  holdDefault: number
   restSecs: number
+  restEnabled: boolean
   runTimer: RunTimer
   onChanged: () => void
 }) {
   const [weight, setWeight] = useState(set.weight?.toString() ?? '')
   const [reps, setReps] = useState(set.reps?.toString() ?? '')
-  const done = !!set.completed_at
-
-  const save = (patch: { weight?: number; reps?: number }) =>
-    api.updateSet(sessionId, seId, set.id, patch)
-
-  async function toggleDone() {
-    const nowDone = !done
-    await api.updateSet(sessionId, seId, set.id, {
-      done: nowDone,
-      weight: weight === '' ? undefined : Number(weight),
-      reps: reps === '' ? undefined : Number(reps),
-    })
-    if (nowDone) runTimer('rest', seId, restSecs)
-    onChanged()
-  }
-
-  const cell = `rounded-lg px-3 py-2 text-center outline-none focus:ring-1 focus:ring-amber-500 ${
-    done ? 'bg-emerald-900/30 text-slate-300' : 'bg-slate-800'
-  }`
-
-  return (
-    <div
-      className={`grid grid-cols-[2rem_1fr_1fr_2rem_1.5rem] items-center gap-2 rounded-lg ${
-        done ? 'bg-emerald-900/10' : ''
-      }`}
-    >
-      <SetNumButton sessionId={sessionId} seId={seId} set={set} onChanged={onChanged} />
-      <input
-        type="number"
-        inputMode="decimal"
-        value={weight}
-        onChange={(e) => setWeight(e.target.value)}
-        onBlur={() => save({ weight: weight === '' ? undefined : Number(weight) })}
-        className={cell}
-      />
-      <input
-        type="number"
-        inputMode="numeric"
-        value={reps}
-        onChange={(e) => setReps(e.target.value)}
-        onBlur={() => save({ reps: reps === '' ? undefined : Number(reps) })}
-        className={cell}
-      />
-      <button
-        onClick={toggleDone}
-        title="Mark set done"
-        className={`h-7 w-7 rounded-md text-sm font-bold ${
-          done ? 'bg-emerald-500 text-slate-950' : 'bg-slate-700 text-slate-400'
-        }`}
-      >
-        ✓
-      </button>
-      <DeleteSetButton sessionId={sessionId} seId={seId} setId={set.id} onChanged={onChanged} />
-    </div>
-  )
-}
-
-// Timed (isometric / hold) exercise row: a duration + a ▶ hold countdown that
-// logs the hold and then auto-starts rest.
-function TimedSetRow({
-  sessionId,
-  seId,
-  set,
-  holdDefault,
-  restSecs,
-  runTimer,
-  onChanged,
-}: {
-  sessionId: number
-  seId: number
-  set: SetEntry
-  holdDefault: number
-  restSecs: number
-  runTimer: RunTimer
-  onChanged: () => void
-}) {
   const [dur, setDur] = useState((set.duration_seconds ?? holdDefault).toString())
   const done = !!set.completed_at
   const seconds = () => (dur === '' ? holdDefault : Number(dur))
 
-  async function complete() {
-    await api.updateSet(sessionId, seId, set.id, { done: true, duration_seconds: seconds() })
+  const save = (patch: { weight?: number; reps?: number; duration_seconds?: number }) =>
+    api.updateSet(sessionId, seId, set.id, patch)
+
+  // Persist whichever toggled-on fields the row carries, mark the set done, and
+  // start the rest countdown beneath this row.
+  async function markDone(nowDone: boolean) {
+    const patch: {
+      done: boolean
+      weight?: number
+      reps?: number
+      duration_seconds?: number
+    } = { done: nowDone }
+    if (cols.weight) patch.weight = weight === '' ? undefined : Number(weight)
+    if (cols.reps) patch.reps = reps === '' ? undefined : Number(reps)
+    if (cols.timer) patch.duration_seconds = seconds()
+    await api.updateSet(sessionId, seId, set.id, patch)
+    if (nowDone && restEnabled) runTimer('rest', seId, set.id, restSecs)
     onChanged()
-    runTimer('rest', seId, restSecs)
   }
 
+  // ▶ : count the hold down, then log it done and roll into rest.
   function startHold() {
-    runTimer('hold', seId, seconds(), () => {
-      complete()
+    runTimer('hold', seId, set.id, seconds(), () => {
+      markDone(true)
     })
   }
 
-  const cell = `rounded-lg px-3 py-2 text-center outline-none focus:ring-1 focus:ring-amber-500 ${
+  const cell = `w-full min-w-0 rounded-lg px-2 py-2 text-center outline-none focus:ring-1 focus:ring-amber-500 ${
     done ? 'bg-emerald-900/30 text-slate-300' : 'bg-slate-800'
   }`
 
   return (
     <div
-      className={`grid grid-cols-[2rem_1fr_2rem_2rem_1.5rem] items-center gap-2 rounded-lg ${
-        done ? 'bg-emerald-900/10' : ''
-      }`}
+      className={`grid items-center gap-2 rounded-lg ${done ? 'bg-emerald-900/10' : ''}`}
+      style={{ gridTemplateColumns: template }}
     >
       <SetNumButton sessionId={sessionId} seId={seId} set={set} onChanged={onChanged} />
-      <input
-        type="number"
-        inputMode="numeric"
-        value={dur}
-        onChange={(e) => setDur(e.target.value)}
-        onBlur={() => api.updateSet(sessionId, seId, set.id, { duration_seconds: seconds() })}
-        className={cell}
-      />
+      {cols.weight && (
+        <input
+          type="number"
+          inputMode="decimal"
+          value={weight}
+          onFocus={selectOnFocus}
+          onChange={(e) => setWeight(e.target.value)}
+          onBlur={() => save({ weight: weight === '' ? undefined : Number(weight) })}
+          className={cell}
+        />
+      )}
+      {cols.reps && (
+        <input
+          type="number"
+          inputMode="numeric"
+          value={reps}
+          onFocus={selectOnFocus}
+          onChange={(e) => setReps(e.target.value)}
+          onBlur={() => save({ reps: reps === '' ? undefined : Number(reps) })}
+          className={cell}
+        />
+      )}
+      {cols.timer && (
+        <>
+          <input
+            type="number"
+            inputMode="numeric"
+            value={dur}
+            onFocus={selectOnFocus}
+            onChange={(e) => setDur(e.target.value)}
+            onBlur={() => save({ duration_seconds: seconds() })}
+            className={cell}
+          />
+          <button
+            onClick={startHold}
+            title="Start hold"
+            className="h-7 w-7 rounded-md bg-sky-600 text-sm font-bold text-slate-950"
+          >
+            ▶
+          </button>
+        </>
+      )}
       <button
-        onClick={startHold}
-        title="Start hold"
-        className="h-7 w-7 rounded-md bg-sky-600 text-sm font-bold text-slate-950"
-      >
-        ▶
-      </button>
-      <button
-        onClick={complete}
+        onClick={() => markDone(!done)}
         title="Mark done"
         className={`h-7 w-7 rounded-md text-sm font-bold ${
           done ? 'bg-emerald-500 text-slate-950' : 'bg-slate-700 text-slate-400'
