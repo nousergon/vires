@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from api.config import get_settings
 from api.db.identity import Identity, current_identity
 from api.db.models import (
     PlannedWorkout,
@@ -30,6 +32,9 @@ from api.schemas.workout import (
     WorkoutSummary,
 )
 from api.serializers import to_exercise_brief
+from api.services.coach.autoregulate import autoregulate_after_session
+
+log = logging.getLogger("vires.autoregulate")
 
 router = APIRouter(prefix="/workouts", tags=["workouts"])
 
@@ -267,9 +272,41 @@ def finish_workout(
     ws = _get_session(db, session_id, ident)
     if ws.ended_at is None:
         ws.ended_at = _now()
-        db.commit()
+        db.commit()  # the workout log is the primary deliverable — land it first
         db.refresh(ws)
+        # Then adapt the upcoming plan. Best-effort + AFTER the finish commit:
+        # autoregulation is secondary to recording the workout, so it must never
+        # fail a completed session (see _maybe_autoregulate).
+        _maybe_autoregulate(db, ident, ws)
     return _session_out(db, ident, ws)
+
+
+def _maybe_autoregulate(
+    db: Session, ident: Identity, ws: WorkoutSession
+) -> None:
+    """Run deterministic autoregulation off a finished session, best-effort.
+
+    Swallows + WARN-logs any failure: the finish already committed, so a bad
+    adjustment must not surface as a 500 on a workout the user actually did. The
+    WARN log is the failure-recording surface (durable audit = vires-ops#18)."""
+    if not get_settings().autoregulation_enabled:
+        return
+    try:
+        applied = autoregulate_after_session(db, ident, ws)
+        if applied:
+            db.commit()
+            for a in applied:
+                log.info(
+                    "autoregulation session=%s exercise=%s verdict=%s "
+                    "weight_delta=%s duration_delta=%s occurrences=%s",
+                    ws.id, a.exercise_id, a.verdict, a.weight_delta,
+                    a.duration_delta_seconds, a.occurrences_adjusted,
+                )
+        else:
+            db.rollback()  # no-op: discard any read-state, leave nothing pending
+    except Exception:  # noqa: BLE001 — secondary best-effort path; see docstring
+        db.rollback()
+        log.warning("autoregulation failed for session %s", ws.id, exc_info=True)
 
 
 @router.delete("/{session_id}", status_code=204)
