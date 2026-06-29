@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     # private edge (gitignored coach_system.txt, hydrated from SSM at deploy time);
     # absent => the committed coach_system.example.txt baseline is used.
     coach_prompt_path: str | None = None
+    # Kill-switch for deterministic post-workout autoregulation (the micro loop
+    # that nudges upcoming planned loads from logged performance). Default on.
+    autoregulation_enabled: bool = True
 
     # Speech-to-text (optional). OpenAI-compatible Whisper endpoint — point
     # stt_base_url at Groq for a cheaper/faster Whisper. Key SSM-hydrated like the
