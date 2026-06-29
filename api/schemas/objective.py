@@ -29,6 +29,8 @@ class ObjectiveCreate(BaseModel):
     # Omit to auto-fill from the authored profile for ``sport`` (if one exists).
     demands_profile: dict[str, Any] | None = None
     is_primary: bool = False
+    # Rank among concurrent objectives (higher = more important).
+    priority: int = 0
 
     @model_validator(mode="after")
     def _dated_needs_target(self) -> ObjectiveCreate:
@@ -47,6 +49,7 @@ class ObjectiveUpdate(BaseModel):
     sport: str | None = None
     demands_profile: dict[str, Any] | None = None
     is_primary: bool | None = None
+    priority: int | None = None
 
 
 class ObjectiveOut(BaseModel):
@@ -59,6 +62,7 @@ class ObjectiveOut(BaseModel):
     sport: str | None
     demands_profile: dict[str, Any] | None
     is_primary: bool
+    priority: int
     created_at: datetime
     updated_at: datetime
 
@@ -108,10 +112,16 @@ class ProgramStrategy(BaseModel):
 
 
 class ActiveObjectiveOut(BaseModel):
-    """The active primary objective (if any) + the active constraints — the
+    """The active *focus* objective (if any) + the active constraints — the
     context objective-driven generation runs against — plus the active plan's
-    strategy, when one has been generated for this objective."""
+    strategy, when one has been generated for this objective.
+
+    ``objective`` is the derived focus (next peak / manual pin / standing goal);
+    ``objectives`` is the full set the user holds, with dated peaks in
+    chronological order first, for the multi-objective timeline UI. The single
+    ``objective`` field is retained for backward compatibility."""
 
     objective: ObjectiveOut | None
+    objectives: list[ObjectiveOut] = []
     constraints: list[ConstraintOut]
     active_program: ProgramStrategy | None = None

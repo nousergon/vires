@@ -14,7 +14,6 @@ from api.db.identity import Identity, get_or_create_settings
 from api.db.models import (
     Constraint,
     Exercise,
-    Objective,
     SessionExercise,
     SetEntry,
     WorkoutSession,
@@ -32,6 +31,7 @@ from api.services.coach.objective_context import (
     ExerciseCandidate,
     ObjectiveCtx,
 )
+from api.services.objective_focus import resolve_focus_objective
 from api.services.search import get_search_service
 
 # Cap the candidate pool so the grounding context stays compact.
@@ -98,17 +98,11 @@ def build_materialize_context(db: Session, ident: Identity) -> MaterializeContex
 def build_coach_objective_context(
     db: Session, ident: Identity
 ) -> CoachObjectiveContext:
-    """The active primary objective + active constraints generation runs against.
+    """The derived focus objective + active constraints generation runs against.
 
     Empty (no objective, no constraints) for users who haven't set one — the
     coach then behaves exactly as before (generic routine-driven generation)."""
-    objective = db.scalar(
-        select(Objective).where(
-            Objective.tenant_id == ident.tenant_id,
-            Objective.user_id == ident.user_id,
-            Objective.is_primary.is_(True),
-        )
-    )
+    objective = resolve_focus_objective(db, ident)
     obj_ctx = (
         ObjectiveCtx(
             name=objective.name,

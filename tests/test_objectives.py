@@ -131,3 +131,40 @@ def test_active_endpoint_returns_primary_and_constraints(client):
 def test_active_endpoint_empty_when_unset(client):
     active = client.get("/api/objectives/active").json()
     assert active["objective"] is None and active["constraints"] == []
+    assert active["objectives"] == []
+
+
+# --------------------------------------------------------------------------- #
+# multiple objectives: derived focus + timeline + priority
+# (far-future dates so "upcoming" holds regardless of test run date)
+# --------------------------------------------------------------------------- #
+def test_active_focus_is_soonest_upcoming_dated(client):
+    far = _mk_objective(
+        client, name="Climb Baker", target_date="2030-12-01", is_primary=False
+    ).json()
+    soon = _mk_objective(
+        client, name="Run a 50k", target_date="2030-07-15", is_primary=False, sport=None
+    ).json()
+    active = client.get("/api/objectives/active").json()
+    # focus = the soonest upcoming peak
+    assert active["objective"]["id"] == soon["id"]
+    # timeline carries both, chronologically
+    assert [o["id"] for o in active["objectives"]] == [soon["id"], far["id"]]
+
+
+def test_active_primary_overrides_derived_focus(client):
+    far = _mk_objective(
+        client, name="Climb Baker", target_date="2030-12-01", is_primary=True
+    ).json()
+    _mk_objective(
+        client, name="Run a 50k", target_date="2030-07-15", is_primary=False, sport=None
+    )
+    active = client.get("/api/objectives/active").json()
+    assert active["objective"]["id"] == far["id"]  # the manual pin wins
+
+
+def test_create_and_patch_priority(client):
+    o = _mk_objective(client, priority=5).json()
+    assert o["priority"] == 5
+    r = client.patch(f"/api/objectives/{o['id']}", json={"priority": 9})
+    assert r.status_code == 200 and r.json()["priority"] == 9

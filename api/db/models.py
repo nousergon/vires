@@ -440,7 +440,12 @@ class Objective(Base):
     # api.services.coach.objective_profiles). This is the data that makes the
     # coach credible rather than generic.
     demands_profile: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Manual override pin: at most one per user (partial unique index above). When
+    # set it forces the focus; otherwise focus is derived from dates + priority.
     is_primary: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    # Rank among concurrent objectives (higher = more important). Tiebreak when
+    # two dated objectives peak on the same day; ordering key for open-ended ones.
+    priority: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         UTCDateTime(), default=_utcnow, onupdate=_utcnow

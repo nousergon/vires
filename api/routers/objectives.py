@@ -1,12 +1,16 @@
-"""Objectives: the goal the coach periodizes toward.
+"""Objectives: the goals the coach periodizes toward.
 
-CRUD over ``Objective`` plus ``/objectives/active`` (the active primary + active
-constraints the coach generates against). Exactly one primary per user is
-enforced here in the write path (setting one primary demotes the others) on top
-of the partial unique index that structurally guarantees it.
+CRUD over ``Objective`` plus ``/objectives/active`` (the derived *focus*
+objective + the dated timeline + active constraints the coach generates
+against). A user may hold several objectives at once; the focus is derived in
+``api.services.objective_focus`` (next peak / ``is_primary`` override / standing
+goal). ``is_primary`` is an optional manual override pin — at most one per user,
+upheld here in the write path on top of the partial unique index.
 """
 
 from __future__ import annotations
+
+from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import select, update
@@ -25,6 +29,11 @@ from api.schemas.objective import (
 )
 from api.serializers import program_coach_summary
 from api.services.coach.objective_profiles import demands_profile_for_sport
+from api.services.objective_focus import (
+    dated_timeline,
+    load_objectives,
+    pick_focus,
+)
 
 router = APIRouter(prefix="/objectives", tags=["objectives"])
 
@@ -65,7 +74,11 @@ def list_objectives(
                 Objective.tenant_id == ident.tenant_id,
                 Objective.user_id == ident.user_id,
             )
-            .order_by(Objective.is_primary.desc(), Objective.created_at.desc())
+            .order_by(
+                Objective.is_primary.desc(),
+                Objective.priority.desc(),
+                Objective.created_at.desc(),
+            )
         ).all()
     )
 
@@ -75,15 +88,19 @@ def active_objective(
     db: Session = Depends(get_db),
     ident: Identity = Depends(current_identity),
 ) -> ActiveObjectiveOut:
-    """The active primary objective (if any) + active constraints — the context
-    objective-driven generation runs against. Drives the coach + the UI banner."""
-    primary = db.scalar(
-        select(Objective).where(
-            Objective.tenant_id == ident.tenant_id,
-            Objective.user_id == ident.user_id,
-            Objective.is_primary.is_(True),
-        )
+    """The derived focus objective (if any) + the dated timeline + active
+    constraints — the context objective-driven generation runs against. Drives
+    the coach + the UI banner."""
+    objectives = load_objectives(db, ident)
+    primary = pick_focus(objectives, date.today())
+    # Dated peaks chronologically, then any open-ended standing goals.
+    timeline = dated_timeline(objectives)
+    timeline_ids = {o.id for o in timeline}
+    standing = sorted(
+        (o for o in objectives if o.id not in timeline_ids),
+        key=lambda o: (-(o.priority or 0), -(o.id or 0)),
     )
+    ordered = timeline + standing
     constraints = db.scalars(
         select(Constraint)
         .where(
@@ -116,6 +133,7 @@ def active_objective(
 
     return ActiveObjectiveOut(
         objective=ObjectiveOut.model_validate(primary) if primary else None,
+        objectives=[ObjectiveOut.model_validate(o) for o in ordered],
         constraints=[ConstraintOut.model_validate(c) for c in constraints],
         active_program=strategy,
     )
@@ -150,6 +168,7 @@ def create_objective(
         sport=body.sport,
         demands_profile=demands,
         is_primary=body.is_primary,
+        priority=body.priority,
     )
     db.add(o)
     db.commit()
@@ -181,6 +200,8 @@ def update_objective(
             o.demands_profile = demands_profile_for_sport(o.sport)
     if "demands_profile" in data:
         o.demands_profile = data["demands_profile"]
+    if "priority" in data and data["priority"] is not None:
+        o.priority = data["priority"]
 
     # Validate the merged row: a dated objective must have a target_date.
     if o.kind == "dated" and o.target_date is None:
