@@ -165,12 +165,20 @@ def _next_planned_exercises(
     db: Session,
     ident: Identity,
     program_id: int,
+    objective_id: int | None,
     exercise_id: int,
     today: date,
     limit: int,
 ) -> list[PlannedExercise]:
-    """The next ``limit`` still-planned future occurrences of an exercise in a
-    program, chronological."""
+    """The next ``limit`` still-planned future occurrences of an exercise within
+    the SAME season block (objective), chronological. Scoping to the block keeps
+    a Baker-session adjustment from leaking into the Kangaroo-Temple block; a flat
+    program (objective_id None) scopes to the whole program as before."""
+    block_filter = (
+        PlannedWorkout.objective_id.is_(None)
+        if objective_id is None
+        else PlannedWorkout.objective_id == objective_id
+    )
     return list(
         db.scalars(
             select(PlannedExercise)
@@ -179,6 +187,7 @@ def _next_planned_exercises(
                 PlannedWorkout.tenant_id == ident.tenant_id,
                 PlannedWorkout.user_id == ident.user_id,
                 PlannedWorkout.program_id == program_id,
+                block_filter,
                 PlannedWorkout.status == "planned",
                 PlannedWorkout.scheduled_date >= today,
                 PlannedExercise.exercise_id == exercise_id,
@@ -231,7 +240,8 @@ def autoregulate_after_session(
         if not adj.is_change:
             continue
         upcoming = _next_planned_exercises(
-            db, ident, pw.program_id, perf.exercise_id, today, AUTOREG_LOOKAHEAD
+            db, ident, pw.program_id, pw.objective_id, perf.exercise_id,
+            today, AUTOREG_LOOKAHEAD,
         )
         n = sum(1 for pe in upcoming if _apply(pe, adj, weight_unit))
         if n:

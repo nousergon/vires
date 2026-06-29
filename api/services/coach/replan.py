@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from api.db.identity import Identity
 from api.db.models import Objective, Program
-from api.services.objective_focus import resolve_focus_objective
+from api.services.objective_focus import effective_end, resolve_focus_objective
 
 # Past planned-but-never-started sessions before a re-plan is suggested.
 MISSED_SESSIONS_THRESHOLD = 2
@@ -38,12 +38,17 @@ class ReplanTrigger:
 def evaluate_triggers(
     planned: Iterable,
     *,
-    program_objective: Objective | None,
+    program_objectives: list[Objective],
     focus_objective: Objective | None,
     today: date,
     missed_threshold: int = MISSED_SESSIONS_THRESHOLD,
 ) -> list[ReplanTrigger]:
-    """Which structural re-plan triggers have fired (pure)."""
+    """Which structural re-plan triggers have fired (pure).
+
+    Season-aware: ``program_objectives`` is EVERY objective the program trains
+    for (its season blocks), not a single one — so a passed block fires while
+    later blocks remain, and a newly-added focus the season doesn't cover fires
+    objective_changed."""
     planned = list(planned)
     triggers: list[ReplanTrigger] = []
 
@@ -64,26 +69,30 @@ def evaluate_triggers(
             ReplanTrigger("plan_exhausted", "No upcoming workouts remain in this plan.")
         )
 
-    if (
-        program_objective is not None
-        and program_objective.kind == "dated"
-        and program_objective.target_date is not None
-        and program_objective.target_date < today
-    ):
+    # A block is done once its objective's event has passed (use the event end,
+    # not just the peak, so a multi-day trip isn't "passed" while you're on it).
+    passed = [
+        o
+        for o in program_objectives
+        if o.kind == "dated" and o.target_date is not None and effective_end(o) < today
+    ]
+    if passed:
+        names = ", ".join(f"'{o.name}'" for o in passed)
         triggers.append(
             ReplanTrigger(
                 "objective_passed",
-                f"The target date for '{program_objective.name}' has passed.",
+                f"You've finished {names} — refresh the rest of your season.",
             )
         )
 
-    program_objective_id = program_objective.id if program_objective else None
-    focus_id = focus_objective.id if focus_objective else None
-    if focus_id != program_objective_id:
+    # A new focus the season doesn't yet train for (e.g. an objective added after
+    # the plan was built).
+    program_ids = {o.id for o in program_objectives}
+    if focus_objective is not None and focus_objective.id not in program_ids:
         triggers.append(
             ReplanTrigger(
                 "objective_changed",
-                "Your focus objective changed since this plan was built.",
+                "A new focus objective isn't covered by this plan yet.",
             )
         )
 
@@ -96,13 +105,17 @@ def detect_triggers(
     """DB-backed trigger detection for a program."""
     if today is None:
         today = date.today()
-    program_obj = (
-        db.get(Objective, program.objective_id) if program.objective_id else None
-    )
+    # Every objective the program trains for: its legacy single link + every
+    # season-block objective its planned workouts are attributed to.
+    ids: set[int] = set()
+    if program.objective_id is not None:
+        ids.add(program.objective_id)
+    ids.update(pw.objective_id for pw in program.planned_workouts if pw.objective_id)
+    program_objs = [o for o in (db.get(Objective, i) for i in ids) if o is not None]
     focus = resolve_focus_objective(db, ident, today)
     return evaluate_triggers(
         program.planned_workouts,
-        program_objective=program_obj,
+        program_objectives=program_objs,
         focus_objective=focus,
         today=today,
     )

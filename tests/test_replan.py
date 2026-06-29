@@ -19,16 +19,28 @@ def _pw(scheduled_date: date, status: str = "planned") -> PlannedWorkout:
     return PlannedWorkout(scheduled_date=scheduled_date, status=status)
 
 
-def _obj(id: int, *, kind: str = "dated", target_date: date | None = None) -> Objective:
-    return Objective(id=id, name=f"o{id}", kind=kind, target_date=target_date)
+def _obj(
+    id: int,
+    *,
+    kind: str = "dated",
+    target_date: date | None = None,
+    event_end_date: date | None = None,
+) -> Objective:
+    return Objective(
+        id=id, name=f"o{id}", kind=kind,
+        target_date=target_date, event_end_date=event_end_date,
+    )
 
 
-def _kinds(planned, program_objective=None, focus_objective=None):
+def _kinds(planned, program_objective=None, focus_objective=None, program_objectives=None):
+    objs = program_objectives if program_objectives is not None else (
+        [program_objective] if program_objective is not None else []
+    )
     return {
         t.kind
         for t in evaluate_triggers(
             planned,
-            program_objective=program_objective,
+            program_objectives=objs,
             focus_objective=focus_objective,
             today=TODAY,
         )
@@ -83,3 +95,32 @@ def test_multiple_triggers_stack():
         "objective_passed",
         "objective_changed",
     }
+
+
+# --------------------------------------------------------------------------- #
+# season-aware (multiple program objectives)
+# --------------------------------------------------------------------------- #
+def test_passed_block_fires_while_a_later_block_remains():
+    baker = _obj(1, target_date=PAST)  # block done
+    kt = _obj(2, target_date=FUTURE)  # still ahead
+    # focus is the upcoming KT (a program objective) -> no objective_changed;
+    # KT block still has future workouts -> not exhausted
+    kinds = _kinds([_pw(FUTURE)], program_objectives=[baker, kt], focus_objective=kt)
+    assert kinds == {"objective_passed"}
+
+
+def test_block_on_a_multi_day_event_is_not_yet_passed():
+    # peak was yesterday but the trip runs through next week -> block not done
+    on_trip = _obj(1, target_date=date(2026, 6, 28), event_end_date=date(2026, 7, 3))
+    kinds = _kinds([_pw(FUTURE)], program_objectives=[on_trip], focus_objective=on_trip)
+    assert "objective_passed" not in kinds
+
+
+def test_new_objective_outside_the_season_fires_changed():
+    baker = _obj(1, target_date=FUTURE)
+    kt = _obj(2, target_date=FUTURE)
+    brand_new = _obj(3, target_date=FUTURE)  # added after the plan was built
+    kinds = _kinds(
+        [_pw(FUTURE)], program_objectives=[baker, kt], focus_objective=brand_new
+    )
+    assert kinds == {"objective_changed"}
