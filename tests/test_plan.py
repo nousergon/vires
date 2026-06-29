@@ -194,3 +194,41 @@ def test_program_completed_count_tracks_started(client):
     client.post(f"/api/plan/planned/{first_day}/start")
     summary = next(p for p in client.get("/api/plan/programs").json() if p["id"] == prog["id"])
     assert summary["completed_count"] == 1
+
+
+def test_save_phased_season_attributes_workouts_and_skips_event(client):
+    """A two-objective season: each phase's workouts carry its objective_id, and
+    no training is scheduled across Baker's multi-day event."""
+    alpine = _routine(client, "Alpine")
+    rock = _routine(client, "Rock")
+    baker = client.post(
+        "/api/objectives",
+        json={"name": "Baker", "kind": "dated", "target_date": "2030-06-23",
+              "event_end_date": "2030-06-25", "sport": "alpine"},
+    ).json()
+    kt = client.post(
+        "/api/objectives",
+        json={"name": "Kangaroo Temple", "kind": "dated", "target_date": "2030-07-21"},
+    ).json()
+    spec = {
+        "name": "Cascades season",
+        "phases": [
+            {"objective_id": baker["id"], "name": "Baker block",
+             "start_date": "2030-06-03", "duration_weeks": 3,
+             "schedule": [{"template_id": alpine["id"], "weekday": "monday"}]},
+            {"objective_id": kt["id"], "name": "Kangaroo Temple block",
+             "start_date": "2030-06-29", "duration_weeks": 3,
+             "schedule": [{"template_id": rock["id"], "weekday": "monday"}]},
+        ],
+    }
+    prog = client.post("/api/coach/programs", json={"spec": spec}).json()
+    days = prog["planned_workouts"]
+    # every workout is attributed to its block's objective
+    for d in days:
+        expected = baker["id"] if d["template_id"] == alpine["id"] else kt["id"]
+        assert d["objective_id"] == expected
+    # no training during Baker's event (6/23–6/25)
+    assert not any("2030-06-23" <= d["scheduled_date"] <= "2030-06-25" for d in days)
+    # both blocks materialized (3 weeks each)
+    assert sum(1 for d in days if d["objective_id"] == baker["id"]) == 3
+    assert sum(1 for d in days if d["objective_id"] == kt["id"]) == 3

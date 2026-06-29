@@ -139,24 +139,68 @@ class ScheduleEntry(BaseModel):
         return self
 
 
+class ProgramPhase(BaseModel):
+    """One training BLOCK of a multi-objective season — a date-bounded mesocycle
+    that peaks/tapers to one objective. A season is a list of these, consecutive
+    and non-overlapping; the gap between a phase's end and the next phase's start
+    is the prior objective's multi-day event (no training scheduled there)."""
+
+    objective_id: int | None = Field(
+        default=None, description="the objective this block trains for"
+    )
+    name: str | None = Field(
+        default=None, description="phase label, e.g. 'Baker — alpine base'"
+    )
+    start_date: date = Field(description="ISO date this block begins")
+    duration_weeks: int = Field(ge=1, le=52, description="weeks until this block's peak")
+    schedule: list[ScheduleEntry] = Field(
+        description="one entry per (routine, weekday) trained each week of this block"
+    )
+    progressions: list[ExerciseProgression] = Field(default_factory=list)
+    deload_weeks: list[int] = Field(
+        default_factory=list, description="1-based week numbers within this block to deload"
+    )
+
+
 class ProgramSpec(BaseModel):
     name: str = Field(description="short program name, e.g. '8-Week Strength Block'")
-    start_date: date = Field(description="ISO date the program begins")
-    duration_weeks: int = Field(ge=1, le=52)
+    # Flat single-block fields (legacy / single-objective). For a phased season,
+    # leave these empty and populate ``phases`` instead.
+    start_date: date | None = Field(
+        default=None, description="ISO date the program begins (single-block specs)"
+    )
+    duration_weeks: int | None = Field(default=None, ge=1, le=52)
     new_routines: list[RoutineSpec] = Field(
         default_factory=list,
         description="routines the coach authors for this objective (persisted on save)",
     )
     schedule: list[ScheduleEntry] = Field(
-        description="one entry per (routine, weekday) the user trains each week"
+        default_factory=list,
+        description="single-block schedule; one entry per (routine, weekday). Leave "
+        "empty when using phases.",
     )
     progressions: list[ExerciseProgression] = Field(default_factory=list)
     deload_weeks: list[int] = Field(
         default_factory=list, description="1-based week numbers to deload (~-10% load)"
     )
+    phases: list[ProgramPhase] = Field(
+        default_factory=list,
+        description="season blocks — one per dated objective, consecutive. Use this "
+        "(instead of the flat schedule) to plan a multi-objective season.",
+    )
     coach_summary: str = Field(
         default="", description="plain-English explanation of the plan for the user"
     )
+
+    @model_validator(mode="after")
+    def _flat_or_phased(self) -> ProgramSpec:
+        if self.phases:
+            return self  # phased: flat start/duration/schedule are derived, not required
+        if not self.schedule:
+            raise ValueError("provide either phases or a (non-empty) flat schedule")
+        if self.start_date is None or self.duration_weeks is None:
+            raise ValueError("a flat (non-phased) spec requires start_date and duration_weeks")
+        return self
 
 
 # --------------------------------------------------------------------------- #

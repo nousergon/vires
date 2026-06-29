@@ -17,7 +17,11 @@ from pydantic import ValidationError
 
 from api.config import get_settings
 from api.schemas.coach import ProgramSpec
-from api.services.coach.materialize import MaterializeContext
+from api.services.coach.materialize import (
+    MaterializeContext,
+    all_progressions,
+    all_schedule,
+)
 from api.services.coach.objective_context import CoachObjectiveContext
 from api.services.coach.prompt_loader import load_system_prompt
 
@@ -168,8 +172,11 @@ def _validate_grounding(
     known_templates = _known_template_ids(ctx)
     routine_keys = {r.key for r in spec.new_routines}
     allowed_exercises = _allowed_exercise_ids(ctx, obj_ctx)
+    # Validate across every block (flat spec = one block; phased = the season).
+    schedule = all_schedule(spec)
+    progressions = all_progressions(spec)
 
-    if not spec.schedule:
+    if not schedule:
         raise ValueError("schedule is empty — at least one routine must be scheduled")
 
     # Every authored routine must have exercises drawn only from real ids.
@@ -185,12 +192,12 @@ def _validate_grounding(
 
     # Every schedule/progression target must resolve to a known template or a
     # routine defined in this spec.
-    for e in spec.schedule:
+    for e in schedule:
         if e.template_id is not None and e.template_id not in known_templates:
             raise ValueError(f"schedule references unknown template_id: {e.template_id}")
         if e.routine_key is not None and e.routine_key not in routine_keys:
             raise ValueError(f"schedule references undefined routine_key: '{e.routine_key}'")
-    for p in spec.progressions:
+    for p in progressions:
         if p.template_id is not None and p.template_id not in known_templates:
             raise ValueError(f"progression references unknown template_id: {p.template_id}")
         if p.routine_key is not None and p.routine_key not in routine_keys:
