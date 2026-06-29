@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from api.db.identity import Identity, current_identity, get_or_create_settings
 from api.db.models import (
     Exercise,
+    Objective,
     PlannedExercise,
     PlannedWorkout,
     Program,
@@ -397,6 +398,13 @@ def _describe_planned(pw: PlannedWorkout, unit: str) -> str:
     return "\n".join(lines) or (pw.notes or "")
 
 
+def _describe_objective(o: Objective) -> str:
+    bits = ["Target / peak day"]
+    if o.sport:
+        bits.append(f"sport: {o.sport}")
+    return " · ".join(bits)
+
+
 def _describe_session(ws: WorkoutSession) -> str:
     parts: list[str] = []
     for se in ws.exercises:
@@ -465,6 +473,29 @@ def calendar_feed(
                 summary="✓ " + (ws.name or "Workout"),
                 description=_describe_session(ws),
                 dtstamp=ws.ended_at or ws.started_at,
+            )
+        )
+
+    # Dated objectives as all-day peak markers, so the subscribed calendar shows
+    # what the plan is building toward — not just the workouts.
+    objectives = db.scalars(
+        select(Objective)
+        .where(
+            Objective.tenant_id == us.tenant_id,
+            Objective.user_id == us.user_id,
+            Objective.kind == "dated",
+            Objective.target_date.is_not(None),
+        )
+        .order_by(Objective.target_date)
+    ).all()
+    for o in objectives:
+        events.append(
+            IcsEvent(
+                uid=f"objective-{o.id}@vires.nousergon.ai",
+                start=o.target_date,
+                summary=f"🎯 {o.name}",
+                description=_describe_objective(o),
+                dtstamp=o.updated_at or o.created_at or now,
             )
         )
 

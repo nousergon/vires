@@ -107,3 +107,22 @@ def test_feed_excludes_in_progress_adhoc(client):
     token = client.get("/api/plan/feed-url").json()["token"]
     body = client.get(f"/api/plan/feed/{token}.ics").text
     assert "Unfinished" not in body
+
+
+def test_feed_includes_dated_objectives_as_peaks(client):
+    # A dated objective shows on the subscribed calendar as an all-day peak marker.
+    client.post(
+        "/api/objectives",
+        json={"name": "Climb Baker", "kind": "dated", "target_date": "2026-09-05",
+              "sport": "alpine"},
+    )
+    # an open-ended objective must NOT appear (no date to anchor)
+    client.post(
+        "/api/objectives",
+        json={"name": "General health", "kind": "open_ended", "sport": None},
+    )
+    token = client.get("/api/plan/feed-url").json()["token"]
+    body = client.get(f"/api/plan/feed/{token}.ics").text
+    assert "SUMMARY:🎯 Climb Baker" in body
+    assert "DTSTART;VALUE=DATE:20260905" in body
+    assert "General health" not in body
