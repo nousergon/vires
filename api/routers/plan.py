@@ -64,6 +64,17 @@ def _get_program(db: Session, program_id: int, ident: Identity) -> Program:
     return p
 
 
+def _objective_name_map(db: Session, ident: Identity) -> dict[int, str]:
+    """{objective_id: name} for this user — labels a planned day's training block."""
+    rows = db.execute(
+        select(Objective.id, Objective.name).where(
+            Objective.tenant_id == ident.tenant_id,
+            Objective.user_id == ident.user_id,
+        )
+    ).all()
+    return {oid: name for oid, name in rows}
+
+
 # --------------------------------------------------------------------------- #
 # calendar feed
 # --------------------------------------------------------------------------- #
@@ -104,6 +115,7 @@ def calendar(
             )
         )
 
+    objective_names = _objective_name_map(db, ident)
     planned = db.scalars(
         select(PlannedWorkout)
         .where(
@@ -124,6 +136,8 @@ def calendar(
                 status=pw.status,
                 program_id=pw.program_id,
                 template_id=pw.template_id,
+                objective_id=pw.objective_id,
+                objective_name=objective_names.get(pw.objective_id),
                 exercise_count=len(pw.exercises),
                 session_id=pw.session_id,
             )
@@ -434,6 +448,20 @@ def calendar_feed(
     now = datetime.now(UTC)
 
     events: list[IcsEvent] = []
+
+    # User's dated objectives — drive the per-workout labels + the season bands.
+    objectives = db.scalars(
+        select(Objective)
+        .where(
+            Objective.tenant_id == us.tenant_id,
+            Objective.user_id == us.user_id,
+            Objective.kind == "dated",
+            Objective.target_date.is_not(None),
+        )
+        .order_by(Objective.target_date)
+    ).all()
+    obj_by_id = {o.id: o for o in objectives}
+
     planned = db.scalars(
         select(PlannedWorkout)
         .where(
@@ -442,14 +470,21 @@ def calendar_feed(
         )
         .order_by(PlannedWorkout.scheduled_date)
     ).all()
+    block_span: dict[int, tuple[date, date]] = {}  # objective_id -> (first, last) day
     for pw in planned:
         done = pw.status == "completed"
+        desc = _describe_planned(pw, us.weight_unit)
+        obj = obj_by_id.get(pw.objective_id)
+        if obj is not None:
+            desc = f"For: {obj.name}\n{desc}" if desc else f"For: {obj.name}"
+            lo, hi = block_span.get(obj.id, (pw.scheduled_date, pw.scheduled_date))
+            block_span[obj.id] = (min(lo, pw.scheduled_date), max(hi, pw.scheduled_date))
         events.append(
             IcsEvent(
                 uid=f"planned-{pw.id}@vires.nousergon.ai",
                 start=pw.scheduled_date,
                 summary=("✓ " if done else "") + (pw.name or "Workout"),
-                description=_describe_planned(pw, us.weight_unit),
+                description=desc,
                 dtstamp=pw.created_at or now,
             )
         )
@@ -476,26 +511,32 @@ def calendar_feed(
             )
         )
 
-    # Dated objectives as all-day peak markers, so the subscribed calendar shows
-    # what the plan is building toward — not just the workouts.
-    objectives = db.scalars(
-        select(Objective)
-        .where(
-            Objective.tenant_id == us.tenant_id,
-            Objective.user_id == us.user_id,
-            Objective.kind == "dated",
-            Objective.target_date.is_not(None),
-        )
-        .order_by(Objective.target_date)
-    ).all()
+    # Season bands per dated objective: the training BLOCK (prep span, when there
+    # are workouts attributed to it) and the EVENT/peak itself (a multi-day band
+    # when it has an event window, else a single-day marker).
     for o in objectives:
+        stamp = o.updated_at or o.created_at or now
+        span = block_span.get(o.id)
+        if span is not None:
+            sport = f" — {o.sport}" if o.sport else ""
+            events.append(
+                IcsEvent(
+                    uid=f"objective-block-{o.id}@vires.nousergon.ai",
+                    start=span[0],
+                    end=o.target_date,
+                    summary=f"🏋 {o.name}{sport} block",
+                    description=f"Training block building toward {o.name}.",
+                    dtstamp=stamp,
+                )
+            )
         events.append(
             IcsEvent(
                 uid=f"objective-{o.id}@vires.nousergon.ai",
                 start=o.target_date,
+                end=o.event_end_date,  # None => single-day peak (as before)
                 summary=f"🎯 {o.name}",
                 description=_describe_objective(o),
-                dtstamp=o.updated_at or o.created_at or now,
+                dtstamp=stamp,
             )
         )
 

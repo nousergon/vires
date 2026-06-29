@@ -196,6 +196,27 @@ def test_program_completed_count_tracks_started(client):
     assert summary["completed_count"] == 1
 
 
+def test_calendar_entries_carry_objective_label(client):
+    alpine = _routine(client, "Alpine")
+    o = client.post(
+        "/api/objectives",
+        json={"name": "Baker", "kind": "dated", "target_date": "2030-07-09", "sport": "alpine"},
+    ).json()
+    spec = {
+        "name": "Season",
+        "phases": [
+            {"objective_id": o["id"], "start_date": "2030-06-01", "duration_weeks": 2,
+             "schedule": [{"template_id": alpine["id"], "weekday": "monday"}]},
+        ],
+    }
+    client.post("/api/coach/programs", json={"spec": spec})
+    cal = client.get(
+        "/api/plan/calendar", params={"start": "2030-01-01", "end": "2030-12-31"}
+    ).json()
+    attributed = [c for c in cal if c["kind"] == "planned" and c["objective_id"] == o["id"]]
+    assert attributed and all(c["objective_name"] == "Baker" for c in attributed)
+
+
 def test_save_phased_season_attributes_workouts_and_skips_event(client):
     """A two-objective season: each phase's workouts carry its objective_id, and
     no training is scheduled across Baker's multi-day event."""
