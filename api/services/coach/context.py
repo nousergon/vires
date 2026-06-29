@@ -147,9 +147,11 @@ def _to_objective_ctx(o: Objective | None) -> ObjectiveCtx | None:
     if o is None:
         return None
     return ObjectiveCtx(
+        id=o.id,
         name=o.name,
         kind=o.kind,
         target_date=o.target_date,
+        event_end_date=o.event_end_date,
         sport=o.sport,
         demands_profile=o.demands_profile,
     )

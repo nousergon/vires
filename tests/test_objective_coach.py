@@ -79,14 +79,17 @@ def test_objective_block_computes_weeks_until_target():
 
 
 def _multi_obj_ctx() -> CoachObjectiveContext:
-    """Two dated peaks: a nearer 50k (the focus) and a farther alpine climb."""
+    """Two dated peaks: a nearer 50k (the focus) and a farther alpine climb (a
+    multi-day event)."""
     near = ObjectiveCtx(
-        name="Run a 50k", kind="dated", target_date=date(2026, 7, 15), sport=None
+        id=10, name="Run a 50k", kind="dated", target_date=date(2026, 7, 15), sport=None
     )
     far = ObjectiveCtx(
+        id=20,
         name="Climb Baker",
         kind="dated",
         target_date=date(2026, 9, 5),
+        event_end_date=date(2026, 9, 7),
         sport="alpine",
         demands_profile=ALPINE_DEMANDS_PROFILE,
     )
@@ -97,12 +100,15 @@ def test_objective_block_renders_timeline_for_multiple_peaks():
     block = _objective_block(_multi_obj_ctx(), date(2026, 6, 28))
     # focus = the nearer peak
     assert block["objective"]["name"] == "Run a 50k"
-    # the full timeline travels, chronologically, with weeks-to-each
+    # the full timeline travels, chronologically, with weeks-to-each + the data
+    # the coach needs to build a phase per peak (id + event window)
     tl = block["timeline"]
     assert [p["name"] for p in tl] == ["Run a 50k", "Climb Baker"]
+    assert [p["objective_id"] for p in tl] == [10, 20]
     assert tl[0]["weeks_until_target"] == 2  # 6/28 -> 7/15 = 17 days
     assert tl[1]["weeks_until_target"] == 9  # 6/28 -> 9/5 = 69 days = 9 whole weeks
     assert tl[1]["sport"] == "alpine"
+    assert tl[1]["event_end_date"] == "2026-09-07"
 
 
 def test_single_objective_block_has_no_timeline_key():
@@ -260,14 +266,86 @@ def test_baseline_prompt_has_periodization_and_safety_language():
         load_system_prompt.cache_clear()
 
 
-def test_baseline_prompt_has_multipeak_language():
+def test_generate_accepts_and_materializes_a_phased_season(client, monkeypatch):
+    """End-to-end: the model sees the timeline (with objective_id + event window)
+    and emits a phased season; grounding accepts it and the materializer expands
+    both blocks."""
+    import anthropic
+
+    from api.config import get_settings
+
+    e = client.get("/api/exercises/search", params={"q": "step up"}).json()[0]["exercise"]["id"]
+    tpl = client.post(
+        "/api/templates",
+        json={"name": "Lower", "exercises": [{"exercise_id": e, "target_sets": 3}]},
+    ).json()
+    o1 = client.post(
+        "/api/objectives",
+        json={"name": "Baker", "kind": "dated", "target_date": "2030-06-23",
+              "event_end_date": "2030-06-25", "sport": "alpine"},
+    ).json()
+    o2 = client.post(
+        "/api/objectives",
+        json={"name": "Kangaroo Temple", "kind": "dated", "target_date": "2030-07-21"},
+    ).json()
+
+    phased = {
+        "name": "Cascades season",
+        "phases": [
+            {"objective_id": o1["id"], "start_date": "2030-06-03", "duration_weeks": 2,
+             "schedule": [{"template_id": tpl["id"], "weekday": "monday"}]},
+            {"objective_id": o2["id"], "start_date": "2030-06-29", "duration_weeks": 2,
+             "schedule": [{"template_id": tpl["id"], "weekday": "monday"}]},
+        ],
+        "coach_summary": "alpine then rock",
+    }
+
+    captured: list[dict] = []
+
+    class _Msgs:
+        def create(self, **kw):
+            captured.append(kw)
+
+            class _B:
+                type = "tool_use"
+                name = "emit_program_spec"
+                input = phased
+
+            class _R:
+                content = [_B()]
+
+            return _R()
+
+    class _Cli:
+        def __init__(self, **_kw):
+            pass
+
+        @property
+        def messages(self):
+            return _Msgs()
+
+    monkeypatch.setattr(get_settings(), "anthropic_api_key", "test-key")
+    monkeypatch.setattr(anthropic, "Anthropic", _Cli)
+
+    r = client.post("/api/coach/generate", json={"message": "plan my whole season"})
+    assert r.status_code == 200, r.text
+    # both blocks materialized (2 weeks each)
+    assert len(r.json()["planned_workouts"]) == 4
+    # the model was handed the timeline with the data needed to phase-plan
+    user_text = captured[0]["messages"][0]["content"]
+    assert '"event_end_date": "2030-06-25"' in user_text
+    assert f'"objective_id": {o1["id"]}' in user_text
+
+
+def test_baseline_prompt_has_season_phase_language():
     from api.services.coach.prompt_loader import load_system_prompt
 
     load_system_prompt.cache_clear()
     text = load_system_prompt().lower()
     try:
-        assert "timeline" in text  # multi-peak block keys off goal.timeline
-        assert "one event at a time" in text or "next (soonest) peak" in text
-        assert "base-building context" in text  # farther peaks = base-build
+        assert "season" in text  # plans the whole season up front
+        assert "phases" in text and "objective_id" in text  # emit phased spec
+        assert "event_end_date" in text  # chain blocks past the multi-day event
+        assert "sport-specific" in text  # each block specific to its objective
     finally:
         load_system_prompt.cache_clear()

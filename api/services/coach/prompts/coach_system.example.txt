@@ -14,11 +14,12 @@ Objective-driven periodization (when CONTEXT contains a "goal" with an "objectiv
 - Honor the objective's demands_profile: bias selection and emphasis toward the exercises/qualities it names (its exercise_emphasis), and de-emphasize what it lists under de_emphasize.
 - Train AROUND every constraint in "goal.constraints". For each constraint, EXCLUDE the patterns its directives say to avoid (do not schedule or progress aggravating movements) and BIAS toward the work it says to favor.
 
-Multiple dated objectives (when CONTEXT.goal contains a "timeline" with more than one peak):
-- You can only peak for ONE event at a time. Periodize toward the NEXT (soonest) peak — that is goal.objective. Build THIS block to peak and taper to its target_date, exactly as above. Do NOT schedule past it; a later block (re-planned after this one) handles the peaks that follow.
-- Treat farther-out peaks in the timeline as base-building context: where their demands differ, bias general-preparation work to develop the qualities they will later need, but do NOT taper for them now and do NOT compromise the next peak's specificity to serve a distant one.
-- When two peaks fall within ~2 weeks of each other, treat them as a single peaking window: taper into the first and hold readiness across both rather than forcing two separate peaks.
-- The nearer the next peak, the more specific this block; the farther it is, the more this block can build a broad base that serves the whole timeline.
+Season planning — multiple dated objectives (when CONTEXT.goal has a "timeline" with 2+ peaks):
+- Plan the WHOLE season up front as consecutive blocks: emit one entry in "phases" (one per dated objective, in chronological order) INSTEAD of a single flat schedule. Leave the top-level schedule empty when you use phases.
+- Each phase is a self-contained block that PEAKS and TAPERS to its own objective, periodized exactly like the single-objective rules above (base → max strength → conversion → taper final week, with the final week in that phase's deload_weeks). On each phase set: objective_id (from that timeline entry), start_date, duration_weeks so its LAST week lands on that objective's target_date, and its own sport-appropriate schedule/progressions (authored routines allowed).
+- Make each phase SPORT-SPECIFIC to its own objective's demands_profile — do NOT carry the prior objective's emphasis into the next block (e.g. an alpine load-carry/endurance block, then a rock-climbing pulling/grip/core block).
+- Sequence blocks with NO overlap and a clean transition: a phase ends on its objective's target_date; the NEXT phase's start_date is AFTER the prior objective's event_end_date (or its target_date when there is no event_end_date) — leaving the multi-day event itself training-free — and should OPEN with a few lighter recovery/re-base days before building to its own peak.
+- The first phase starts at "today" (or the next sensible day); each later phase chains off the previous objective's event end. A single dated objective (timeline of one, or none) still uses the flat single-block schedule, not phases.
 
 Authoring routines for the objective (this is how the plan actually trains the goal):
 - If the user's existing templates don't cover the objective's demands, AUTHOR new routines in new_routines rather than forcing a poor fit. Each needs a unique key, a clear name, and an ordered exercises list. Build them ONLY from exercise_id values in CONTEXT.exercise_catalog or in the user's existing templates — never invent exercise ids or names.

@@ -60,21 +60,30 @@ def _objective_block(obj_ctx: CoachObjectiveContext | None, today: date) -> dict
     obj = obj_ctx.objective
     if obj is not None:
         block["objective"] = {
+            "objective_id": obj.id,
             "name": obj.name,
             "kind": obj.kind,
             "target_date": obj.target_date.isoformat() if obj.target_date else None,
+            "event_end_date": obj.event_end_date.isoformat()
+            if obj.event_end_date
+            else None,
             "weeks_until_target": _weeks_until(obj.target_date, today),
             "sport": obj.sport,
             "demands_profile": obj.demands_profile,
         }
     # Only emit the timeline when there's genuinely more than one dated peak —
-    # for a single objective it is redundant with "objective".
+    # for a single objective it is redundant with "objective". Each entry carries
+    # objective_id + event_end_date so the coach can build a season phase per peak.
     if len(obj_ctx.timeline) >= 2:
         block["timeline"] = [
             {
+                "objective_id": peak.id,
                 "name": peak.name,
                 "target_date": peak.target_date.isoformat()
                 if peak.target_date
+                else None,
+                "event_end_date": peak.event_end_date.isoformat()
+                if peak.event_end_date
                 else None,
                 "weeks_until_target": _weeks_until(peak.target_date, today),
                 "sport": peak.sport,
