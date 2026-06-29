@@ -11,11 +11,13 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from api.config import get_settings
 from api.db.identity import Identity, current_identity
 from api.db.models import (
+    PlanChangeEvent,
     PlannedExercise,
     PlannedWorkout,
     Program,
@@ -27,6 +29,7 @@ from api.schemas.coach import (
     CreatedRoutinePreview,
     GenerateRequest,
     ModifyRequest,
+    PlanChangeEventOut,
     PlannedExercisePreview,
     PlannedWorkoutPreview,
     ProgramModifyPreview,
@@ -41,6 +44,7 @@ from api.schemas.coach import (
 from api.schemas.plan import ProgramOut
 from api.serializers import to_program_out
 from api.services.coach.agent import CoachError, CoachUnavailable, generate_spec
+from api.services.coach.audit import record_plan_change
 from api.services.coach.context import (
     build_coach_objective_context,
     build_materialize_context,
@@ -417,6 +421,39 @@ def apply_program(
         program.name = body.name.strip()
     program.start_date = spec.start_date
     program.end_date = end_date(spec)
+    record_plan_change(
+        db,
+        ident,
+        source="plan_revision",
+        program_id=program.id,
+        summary=(
+            f"Plan revised: {len(kept)} completed workout(s) kept, "
+            f"{len(new_future)} upcoming workout(s) rescheduled."
+        ),
+        detail={"completed_preserved": len(kept), "future_count": len(new_future)},
+    )
     db.commit()
     db.refresh(program)
     return to_program_out(program)
+
+
+@router.get("/programs/{program_id}/changes", response_model=list[PlanChangeEventOut])
+def list_plan_changes(
+    program_id: int,
+    db: Session = Depends(get_db),
+    ident: Identity = Depends(current_identity),
+) -> list[PlanChangeEvent]:
+    """The plan-change audit trail for a program (most recent first) — answers
+    'why did my plan change?' across both the autoregulation and revision loops."""
+    _get_owned_program(db, program_id, ident)  # ownership check (404 if not yours)
+    return list(
+        db.scalars(
+            select(PlanChangeEvent)
+            .where(
+                PlanChangeEvent.tenant_id == ident.tenant_id,
+                PlanChangeEvent.user_id == ident.user_id,
+                PlanChangeEvent.program_id == program_id,
+            )
+            .order_by(PlanChangeEvent.created_at.desc(), PlanChangeEvent.id.desc())
+        ).all()
+    )

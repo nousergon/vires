@@ -10,10 +10,10 @@ forced to emit (see ``api.services.coach.agent``).
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 Weekday = Literal[
     "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"
@@ -255,6 +255,21 @@ class ReplanProposal(BaseModel):
 
     triggers: list[ReplanTriggerOut]
     modification: ProgramModifyPreview
+
+
+class PlanChangeEventOut(BaseModel):
+    """One row of the plan-change audit trail (autoregulation or revision)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    program_id: int | None
+    session_id: int | None
+    source: str  # autoregulation | plan_revision
+    trigger: str | None
+    summary: str
+    detail: dict | None
+    created_at: datetime
 
 
 class TranscribeOut(BaseModel):

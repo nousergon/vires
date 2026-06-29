@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session
 
 from api.db.identity import Identity, get_or_create_settings
 from api.db.models import PlannedExercise, PlannedWorkout, WorkoutSession
+from api.services.coach.audit import record_plan_change
 from api.services.coach.materialize import PLATE_INCREMENT, _round_to_plate
 
 # How many future occurrences of an exercise a single session may adjust.
@@ -243,4 +244,32 @@ def autoregulate_after_session(
                     occurrences_adjusted=n,
                 )
             )
+
+    if applied:
+        progressed = sum(1 for a in applied if a.verdict == "progress")
+        backed_off = sum(1 for a in applied if a.verdict == "back_off")
+        record_plan_change(
+            db,
+            ident,
+            source="autoregulation",
+            program_id=pw.program_id,
+            session_id=session.id,
+            trigger="performance",
+            summary=(
+                f"Autoregulated {len(applied)} exercise(s) from your last session "
+                f"({progressed} up, {backed_off} down)."
+            ),
+            detail={
+                "adjustments": [
+                    {
+                        "exercise_id": a.exercise_id,
+                        "verdict": a.verdict,
+                        "weight_delta": a.weight_delta,
+                        "duration_delta_seconds": a.duration_delta_seconds,
+                        "occurrences_adjusted": a.occurrences_adjusted,
+                    }
+                    for a in applied
+                ]
+            },
+        )
     return applied
