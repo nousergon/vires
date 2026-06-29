@@ -78,6 +78,39 @@ def test_objective_block_computes_weeks_until_target():
     assert block["objective"]["weeks_until_target"] == 5
 
 
+def _multi_obj_ctx() -> CoachObjectiveContext:
+    """Two dated peaks: a nearer 50k (the focus) and a farther alpine climb."""
+    near = ObjectiveCtx(
+        name="Run a 50k", kind="dated", target_date=date(2026, 7, 15), sport=None
+    )
+    far = ObjectiveCtx(
+        name="Climb Baker",
+        kind="dated",
+        target_date=date(2026, 9, 5),
+        sport="alpine",
+        demands_profile=ALPINE_DEMANDS_PROFILE,
+    )
+    return CoachObjectiveContext(objective=near, timeline=[near, far])
+
+
+def test_objective_block_renders_timeline_for_multiple_peaks():
+    block = _objective_block(_multi_obj_ctx(), date(2026, 6, 28))
+    # focus = the nearer peak
+    assert block["objective"]["name"] == "Run a 50k"
+    # the full timeline travels, chronologically, with weeks-to-each
+    tl = block["timeline"]
+    assert [p["name"] for p in tl] == ["Run a 50k", "Climb Baker"]
+    assert tl[0]["weeks_until_target"] == 2  # 6/28 -> 7/15 = 17 days
+    assert tl[1]["weeks_until_target"] == 9  # 6/28 -> 9/5 = 69 days = 9 whole weeks
+    assert tl[1]["sport"] == "alpine"
+
+
+def test_single_objective_block_has_no_timeline_key():
+    # _obj_ctx() has the default empty timeline -> no redundant "timeline" block
+    block = _objective_block(_obj_ctx(), date(2026, 6, 28))
+    assert "timeline" not in block
+
+
 def test_no_goal_key_when_objective_context_empty():
     block = json.loads(_context_block(_mat_ctx(), date(2026, 6, 28), None))
     assert "goal" not in block
@@ -177,6 +210,38 @@ def test_generate_feeds_active_objective_and_constraint(client, monkeypatch):
     assert "axial" in user_text.lower()
 
 
+def test_generate_feeds_full_dated_timeline(client, monkeypatch):
+    """With two dated objectives, the model sees the timeline (both peaks),
+    focused on the nearer one. Far-future dates keep 'upcoming' run-date-stable."""
+    hits = client.get("/api/exercises/search", params={"q": "step up"}).json()
+    ex_id = hits[0]["exercise"]["id"]
+    tpl = client.post(
+        "/api/templates",
+        json={"name": "Lower", "exercises": [{"exercise_id": ex_id, "target_sets": 3}]},
+    ).json()
+    # two dated peaks, neither pinned -> focus is derived as the soonest
+    client.post(
+        "/api/objectives",
+        json={"name": "Climb Baker", "kind": "dated", "target_date": "2030-09-05",
+              "sport": "alpine"},
+    )
+    client.post(
+        "/api/objectives",
+        json={"name": "Run a 50k", "kind": "dated", "target_date": "2030-07-15"},
+    )
+
+    _install_capturing(monkeypatch, tpl["id"])
+    r = client.post("/api/coach/generate", json={"message": "build my plan"})
+    assert r.status_code == 200, r.text
+
+    user_text = _CapturingClient.captured[0]["messages"][0]["content"]
+    payload = json.loads(user_text.split("CONTEXT:\n", 1)[1].split("\n\nREQUEST:", 1)[0])
+    goal = payload["goal"]
+    # focus = the nearer peak; the timeline carries both, chronologically
+    assert goal["objective"]["name"] == "Run a 50k"
+    assert [p["name"] for p in goal["timeline"]] == ["Run a 50k", "Climb Baker"]
+
+
 # --------------------------------------------------------------------------- #
 # the public baseline prompt carries the new rules
 # --------------------------------------------------------------------------- #
@@ -191,5 +256,18 @@ def test_baseline_prompt_has_periodization_and_safety_language():
         assert "never prescribe" in text  # injury safety
         assert "pt/physician" in text or "physician" in text  # defer to professional
         assert "demands_profile" in text  # honor the needs-analysis
+    finally:
+        load_system_prompt.cache_clear()
+
+
+def test_baseline_prompt_has_multipeak_language():
+    from api.services.coach.prompt_loader import load_system_prompt
+
+    load_system_prompt.cache_clear()
+    text = load_system_prompt().lower()
+    try:
+        assert "timeline" in text  # multi-peak block keys off goal.timeline
+        assert "one event at a time" in text or "next (soonest) peak" in text
+        assert "base-building context" in text  # farther peaks = base-build
     finally:
         load_system_prompt.cache_clear()

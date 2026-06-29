@@ -7,6 +7,8 @@ and recent performance into the dataclasses the coach + materializer consume.
 
 from __future__ import annotations
 
+from datetime import date
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -14,6 +16,7 @@ from api.db.identity import Identity, get_or_create_settings
 from api.db.models import (
     Constraint,
     Exercise,
+    Objective,
     SessionExercise,
     SetEntry,
     WorkoutSession,
@@ -31,7 +34,11 @@ from api.services.coach.objective_context import (
     ExerciseCandidate,
     ObjectiveCtx,
 )
-from api.services.objective_focus import resolve_focus_objective
+from api.services.objective_focus import (
+    dated_timeline,
+    load_objectives,
+    pick_focus,
+)
 from api.services.search import get_search_service
 
 # Cap the candidate pool so the grounding context stays compact.
@@ -101,19 +108,13 @@ def build_coach_objective_context(
     """The derived focus objective + active constraints generation runs against.
 
     Empty (no objective, no constraints) for users who haven't set one — the
-    coach then behaves exactly as before (generic routine-driven generation)."""
-    objective = resolve_focus_objective(db, ident)
-    obj_ctx = (
-        ObjectiveCtx(
-            name=objective.name,
-            kind=objective.kind,
-            target_date=objective.target_date,
-            sport=objective.sport,
-            demands_profile=objective.demands_profile,
-        )
-        if objective is not None
-        else None
-    )
+    coach then behaves exactly as before (generic routine-driven generation).
+    ``timeline`` carries every dated peak chronologically so the coach can
+    periodize toward the next one while base-building for the rest."""
+    objectives = load_objectives(db, ident)
+    focus = pick_focus(objectives, date.today())
+    obj_ctx = _to_objective_ctx(focus)
+    timeline = [_to_objective_ctx(o) for o in dated_timeline(objectives)]
     constraints = db.scalars(
         select(Constraint)
         .where(
@@ -134,7 +135,23 @@ def build_coach_objective_context(
     ]
     candidates = _build_exercise_candidates(db, ident, obj_ctx)
     return CoachObjectiveContext(
-        objective=obj_ctx, constraints=con_ctxs, candidates=candidates
+        objective=obj_ctx,
+        constraints=con_ctxs,
+        candidates=candidates,
+        timeline=timeline,
+    )
+
+
+def _to_objective_ctx(o: Objective | None) -> ObjectiveCtx | None:
+    """Project an ``Objective`` row into the DB-free coach context dataclass."""
+    if o is None:
+        return None
+    return ObjectiveCtx(
+        name=o.name,
+        kind=o.kind,
+        target_date=o.target_date,
+        sport=o.sport,
+        demands_profile=o.demands_profile,
     )
 
 

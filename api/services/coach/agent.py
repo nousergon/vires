@@ -36,25 +36,47 @@ class CoachError(RuntimeError):
     """The model failed to produce a usable spec after retry."""
 
 
+def _weeks_until(target_date: date | None, today: date) -> int | None:
+    """Whole weeks from ``today`` to ``target_date`` (>= 0), or None if undated."""
+    if target_date is None:
+        return None
+    return max(0, (target_date - today).days // 7)
+
+
 def _objective_block(obj_ctx: CoachObjectiveContext | None, today: date) -> dict | None:
     """The objective + active constraints the program must peak/taper to and
-    train around (None when the user hasn't set an objective or constraints)."""
+    train around (None when the user hasn't set an objective or constraints).
+
+    When the athlete holds multiple dated peaks, ``timeline`` carries them all so
+    the coach periodizes toward the next (``objective``) and base-builds for the
+    rest."""
     if obj_ctx is None or obj_ctx.is_empty:
         return None
     block: dict = {}
     obj = obj_ctx.objective
     if obj is not None:
-        weeks_to_target = None
-        if obj.target_date is not None:
-            weeks_to_target = max(0, (obj.target_date - today).days // 7)
         block["objective"] = {
             "name": obj.name,
             "kind": obj.kind,
             "target_date": obj.target_date.isoformat() if obj.target_date else None,
-            "weeks_until_target": weeks_to_target,
+            "weeks_until_target": _weeks_until(obj.target_date, today),
             "sport": obj.sport,
             "demands_profile": obj.demands_profile,
         }
+    # Only emit the timeline when there's genuinely more than one dated peak —
+    # for a single objective it is redundant with "objective".
+    if len(obj_ctx.timeline) >= 2:
+        block["timeline"] = [
+            {
+                "name": peak.name,
+                "target_date": peak.target_date.isoformat()
+                if peak.target_date
+                else None,
+                "weeks_until_target": _weeks_until(peak.target_date, today),
+                "sport": peak.sport,
+            }
+            for peak in obj_ctx.timeline
+        ]
     if obj_ctx.constraints:
         block["constraints"] = [
             {
