@@ -477,3 +477,34 @@ class Constraint(Base):
     updated_at: Mapped[datetime] = mapped_column(
         UTCDateTime(), default=_utcnow, onupdate=_utcnow
     )
+
+
+# --------------------------------------------------------------------------- #
+# Plan-change audit — "why did my plan change?"
+#
+# Both adaptation loops mutate future planned workouts: the deterministic micro
+# loop (autoregulation, per-workout load nudges) and the macro loop (a full
+# re-plan / revision applied from the coach). Each writes one row here so the
+# change is explainable and the "based on history" behavior is observable.
+# --------------------------------------------------------------------------- #
+class PlanChangeEvent(Base):
+    __tablename__ = "plan_change_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    # The plan that changed. SET NULL (not CASCADE) so the audit trail outlives a
+    # deleted program.
+    program_id: Mapped[int | None] = mapped_column(
+        ForeignKey("programs.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    # The session that triggered an autoregulation change (NULL for macro revisions).
+    session_id: Mapped[int | None] = mapped_column(
+        ForeignKey("workout_sessions.id", ondelete="SET NULL"), nullable=True
+    )
+    source: Mapped[str] = mapped_column(String, nullable=False)  # autoregulation|plan_revision
+    # What prompted it: autoreg verdict mix, or the re-plan trigger kind(s).
+    trigger: Mapped[str | None] = mapped_column(String, nullable=True)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)  # human-readable
+    detail: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # structured payload
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow, index=True)
