@@ -88,7 +88,7 @@ describe('WorkoutPage — ActiveWorkout', () => {
     const upd = vi.spyOn(api, 'updateSet').mockResolvedValue(makeSet({ completed_at: '2026-06-28T18:05:00Z' }))
     renderWithProviders(<WorkoutPage />)
     await screen.findByText('Bench Press')
-    fireEvent.click(screen.getByTitle('Mark set done'))
+    fireEvent.click(screen.getByTitle('Mark done'))
     await waitFor(() => expect(upd).toHaveBeenCalled())
     expect(upd.mock.calls[0][3]).toMatchObject({ done: true })
     // rest timer bar appears
@@ -103,7 +103,7 @@ describe('WorkoutPage — ActiveWorkout', () => {
     renderWithProviders(<WorkoutPage />)
     await screen.findByText('Bench Press')
     expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false)
-    fireEvent.click(screen.getByTitle('Mark set done'))
+    fireEvent.click(screen.getByTitle('Mark done'))
     await waitFor(() => expect(api.updateSet).toHaveBeenCalled())
     // no rest bar appears because the timer is disabled for this exercise
     expect(screen.queryByText('Rest')).not.toBeInTheDocument()
@@ -218,5 +218,57 @@ describe('WorkoutPage — ActiveWorkout', () => {
     fireEvent.click(screen.getByTitle('Mark done')) // ✓
     await waitFor(() => expect(upd).toHaveBeenCalled())
     expect(upd.mock.calls[0][3]).toMatchObject({ done: true, duration_seconds: 45 })
+  })
+
+  it('hides the weight column when its toggle is turned off', async () => {
+    vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession())
+    renderWithProviders(<WorkoutPage />)
+    expect(await screen.findByDisplayValue('135')).toBeInTheDocument() // weight cell visible
+    fireEvent.click(screen.getByRole('button', { name: 'Weight' }))
+    expect(screen.queryByDisplayValue('135')).not.toBeInTheDocument()
+    expect(localStorage.getItem('vires.col.weight.100')).toBe('0')
+    localStorage.removeItem('vires.col.weight.100')
+  })
+
+  it('enables a hold timer on a rep exercise via the Timer toggle', async () => {
+    vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession())
+    renderWithProviders(<WorkoutPage />)
+    await screen.findByText('Bench Press')
+    expect(screen.queryByTitle('Start hold')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Timer' }))
+    expect(screen.getByTitle('Start hold')).toBeInTheDocument()
+    expect(localStorage.getItem('vires.col.timer.100')).toBe('1')
+    localStorage.removeItem('vires.col.timer.100')
+  })
+
+  it('exposes an editable seconds field on the running rest bar', async () => {
+    vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession())
+    vi.spyOn(api, 'updateSet').mockResolvedValue(makeSet({ completed_at: '2026-06-28T18:05:00Z' }))
+    renderWithProviders(<WorkoutPage />)
+    await screen.findByText('Bench Press')
+    fireEvent.click(screen.getByTitle('Mark done'))
+    await screen.findByText('Rest')
+    const secs = screen.getByLabelText('Set timer seconds') as HTMLInputElement
+    expect(secs.value).toBe('90') // seeded from the rest duration
+    fireEvent.change(secs, { target: { value: '45' } })
+    fireEvent.blur(secs)
+    expect(secs.value).toBe('45')
+  })
+
+  it('renders the rest bar directly beneath the set that triggered it', async () => {
+    const se = makeSessionExercise({
+      sets: [makeSet({ id: 1000, set_number: 1 }), makeSet({ id: 1001, set_number: 2 })],
+    })
+    vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession({ exercises: [se] }))
+    vi.spyOn(api, 'updateSet').mockResolvedValue(makeSet({ completed_at: '2026-06-28T18:05:00Z' }))
+    renderWithProviders(<WorkoutPage />)
+    await screen.findByText('Bench Press')
+    fireEvent.click(screen.getAllByTitle('Mark done')[0]) // complete the first set
+    const restBar = await screen.findByText('Rest')
+    const set1 = screen.getByRole('button', { name: '1' })
+    const set2 = screen.getByRole('button', { name: '2' })
+    // bar sits after set 1 and before set 2
+    expect(set1.compareDocumentPosition(restBar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(restBar.compareDocumentPosition(set2) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 })

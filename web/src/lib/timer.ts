@@ -73,6 +73,7 @@ export interface Countdown {
   start: (seconds: number, onFinish?: () => void, label?: string) => void
   stop: () => void
   addSeconds: (delta: number) => void
+  setDuration: (seconds: number) => void
 }
 
 /**
@@ -140,7 +141,18 @@ export function useCountdown(onAlert?: (label?: string) => void): Countdown {
     setRemaining(Math.max(0, Math.round((endRef.current - Date.now()) / 1000)))
   }, [])
 
-  return { remaining, total, running, start, stop, addSeconds }
+  // Re-base a running countdown to an exact number of seconds ("change the
+  // number of seconds on the fly"). Resets the fired latch so a re-extended
+  // timer alerts again at the new zero.
+  const setDuration = useCallback((seconds: number) => {
+    if (endRef.current == null || seconds <= 0) return
+    endRef.current = Date.now() + seconds * 1000
+    firedRef.current = false
+    setTotal(seconds)
+    setRemaining(seconds)
+  }, [])
+
+  return { remaining, total, running, start, stop, addSeconds, setDuration }
 }
 
 export function fmtClock(totalSeconds: number): string {
