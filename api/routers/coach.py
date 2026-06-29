@@ -32,6 +32,9 @@ from api.schemas.coach import (
     ProgramModifyPreview,
     ProgramPreview,
     ProgramSpec,
+    ReplanCheckOut,
+    ReplanProposal,
+    ReplanTriggerOut,
     SaveProgramRequest,
     TranscribeOut,
 )
@@ -51,6 +54,7 @@ from api.services.coach.materialize import (
     rewrite_routine_refs,
     synthesize_routines,
 )
+from api.services.coach.replan import detect_triggers, replan_instruction
 from api.services.objective_focus import resolve_focus_objective
 from api.services.stt import STTError, transcribe_audio
 
@@ -305,22 +309,17 @@ def _cutover(program: Program, today: date) -> date:
     return max([today, *(d + timedelta(days=1) for d in completed)])
 
 
-@router.post("/programs/{program_id}/modify", response_model=ProgramModifyPreview)
-def modify_program(
-    program_id: int,
-    body: ModifyRequest,
-    db: Session = Depends(get_db),
-    ident: Identity = Depends(current_identity),
+def _modify_preview(
+    db: Session, ident: Identity, program: Program, message: str
 ) -> ProgramModifyPreview:
-    """Preview a NL change to a program. The coach edits the stored spec (refine
-    against prior_spec); nothing is persisted until PUT /coach/programs/{id}."""
-    program = _get_owned_program(db, program_id, ident)
+    """Run the LLM modify against a program's stored spec and build the
+    non-persisted cutover preview. Shared by manual modify + auto re-plan."""
     prior = _program_spec(program)
     ctx = build_materialize_context(db, ident)
     obj_ctx = build_coach_objective_context(db, ident)
     try:
         new_spec = generate_spec(
-            body.message, ctx, date.today(), prior_spec=prior, obj_ctx=obj_ctx
+            message, ctx, date.today(), prior_spec=prior, obj_ctx=obj_ctx
         )
     except CoachUnavailable as e:
         raise HTTPException(503, str(e)) from e
@@ -337,6 +336,57 @@ def modify_program(
         preview=_build_preview(new_spec, ctx, db),
         completed_preserved=completed,
         future_count=future,
+    )
+
+
+@router.post("/programs/{program_id}/modify", response_model=ProgramModifyPreview)
+def modify_program(
+    program_id: int,
+    body: ModifyRequest,
+    db: Session = Depends(get_db),
+    ident: Identity = Depends(current_identity),
+) -> ProgramModifyPreview:
+    """Preview a NL change to a program. The coach edits the stored spec (refine
+    against prior_spec); nothing is persisted until PUT /coach/programs/{id}."""
+    program = _get_owned_program(db, program_id, ident)
+    return _modify_preview(db, ident, program, body.message)
+
+
+@router.get("/programs/{program_id}/replan-check", response_model=ReplanCheckOut)
+def replan_check(
+    program_id: int,
+    db: Session = Depends(get_db),
+    ident: Identity = Depends(current_identity),
+) -> ReplanCheckOut:
+    """Cheap (no-LLM) check for whether a structural re-plan is suggested — the UI
+    calls this (e.g. after a workout / on opening the plan) to decide whether to
+    offer a re-plan before paying for the proposal."""
+    program = _get_owned_program(db, program_id, ident)
+    triggers = detect_triggers(db, ident, program, date.today())
+    return ReplanCheckOut(
+        suggested=bool(triggers),
+        triggers=[ReplanTriggerOut(kind=t.kind, reason=t.reason) for t in triggers],
+    )
+
+
+@router.post("/programs/{program_id}/replan", response_model=ReplanProposal)
+def replan_program(
+    program_id: int,
+    db: Session = Depends(get_db),
+    ident: Identity = Depends(current_identity),
+) -> ReplanProposal:
+    """Propose an auto re-plan when a structural trigger has fired. Generates (but
+    does NOT persist) an updated plan from a synthesized instruction; the user
+    applies it via PUT /coach/programs/{id} (propose-and-confirm, never silent)."""
+    program = _get_owned_program(db, program_id, ident)
+    today = date.today()
+    triggers = detect_triggers(db, ident, program, today)
+    if not triggers:
+        raise HTTPException(409, "No re-plan is currently suggested for this program.")
+    preview = _modify_preview(db, ident, program, replan_instruction(triggers, today))
+    return ReplanProposal(
+        triggers=[ReplanTriggerOut(kind=t.kind, reason=t.reason) for t in triggers],
+        modification=preview,
     )
 
 

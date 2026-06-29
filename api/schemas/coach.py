@@ -233,5 +233,29 @@ class ProgramModifyPreview(BaseModel):
     future_count: int  # new future workouts that will be scheduled (>= today)
 
 
+class ReplanTriggerOut(BaseModel):
+    """One structural reason the coach suggests re-planning."""
+
+    kind: str  # missed_sessions | plan_exhausted | objective_passed | objective_changed
+    reason: str
+
+
+class ReplanCheckOut(BaseModel):
+    """Cheap (no-LLM) answer to 'should this plan be re-planned?' — gates the
+    expensive proposal so the UI only offers a re-plan when something fired."""
+
+    suggested: bool
+    triggers: list[ReplanTriggerOut]
+
+
+class ReplanProposal(BaseModel):
+    """A proposed (non-persisted) auto re-plan: why it fired + the modification
+    preview. Applied via PUT /coach/programs/{id} (propose-and-confirm; never
+    auto-applied)."""
+
+    triggers: list[ReplanTriggerOut]
+    modification: ProgramModifyPreview
+
+
 class TranscribeOut(BaseModel):
     text: str
