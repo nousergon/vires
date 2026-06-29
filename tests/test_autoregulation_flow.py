@@ -94,3 +94,54 @@ def test_adhoc_session_finish_is_a_noop(client):
     ws = client.post("/api/workouts", json={"name": "Ad hoc"}).json()
     r = client.post(f"/api/workouts/{ws['id']}/finish")
     assert r.status_code == 200 and r.json()["ended_at"] is not None
+
+
+def test_autoregulation_stays_within_the_season_block(client):
+    """A strong Baker-block session bumps the rest of the Baker block but must NOT
+    leak the adjustment into the Kangaroo-Temple block (a different phase), even
+    when the same exercise appears in both."""
+    e = _ex_id(client, "bench press")
+    tpl = client.post(
+        "/api/templates",
+        json={"name": "Push", "exercises": [{"exercise_id": e, "target_sets": 3,
+              "target_reps": 10, "target_weight": 100}]},
+    ).json()
+    baker = client.post(
+        "/api/objectives",
+        json={"name": "Baker", "kind": "dated", "target_date": "2030-07-09", "sport": "alpine"},
+    ).json()
+    kt = client.post(
+        "/api/objectives",
+        json={"name": "Kangaroo Temple", "kind": "dated", "target_date": "2030-09-01"},
+    ).json()
+    spec = {
+        "name": "Season",
+        "phases": [
+            {"objective_id": baker["id"], "start_date": "2030-06-03", "duration_weeks": 2,
+             "schedule": [{"template_id": tpl["id"], "weekday": "monday"}]},
+            {"objective_id": kt["id"], "start_date": "2030-08-05", "duration_weeks": 2,
+             "schedule": [{"template_id": tpl["id"], "weekday": "monday"}]},
+        ],
+    }
+    prog = client.post("/api/coach/programs", json={"spec": spec}).json()
+    days = sorted(prog["planned_workouts"], key=lambda d: d["scheduled_date"])
+    baker_days = [d for d in days if d["objective_id"] == baker["id"]]
+    kt_days = [d for d in days if d["objective_id"] == kt["id"]]
+    baker_wk2_before = baker_days[1]["exercises"][0]["target_weight"]
+    kt_first_before = kt_days[0]["exercises"][0]["target_weight"]
+
+    # finish Baker week 1 at/above target -> progress
+    ses = client.post(f"/api/plan/planned/{baker_days[0]['id']}/start").json()
+    se = ses["exercises"][0]
+    for s in se["sets"]:
+        client.patch(
+            f"/api/workouts/{ses['id']}/exercises/{se['id']}/sets/{s['id']}",
+            json={"done": True, "reps": 10, "weight": 100},
+        )
+    client.post(f"/api/workouts/{ses['id']}/finish")
+
+    def _wt(day_id):
+        return client.get(f"/api/plan/planned/{day_id}").json()["exercises"][0]["target_weight"]
+
+    assert _wt(baker_days[1]["id"]) == baker_wk2_before + 2.5  # same block bumped
+    assert _wt(kt_days[0]["id"]) == kt_first_before  # other block untouched
