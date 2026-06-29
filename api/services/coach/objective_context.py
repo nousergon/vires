@@ -14,13 +14,17 @@ from typing import Any
 
 @dataclass
 class ObjectiveCtx:
-    """The active primary objective the program peaks/tapers toward."""
+    """An objective the program peaks/tapers toward (the focus, or a timeline peak)."""
 
     name: str
     kind: str  # 'dated' | 'open_ended'
     target_date: date | None
     sport: str | None
     demands_profile: dict[str, Any] | None = None
+    # The real objective id — the coach sets it on each season phase it builds.
+    id: int | None = None
+    # Last day of a multi-day event; training is skipped target_date..event_end_date.
+    event_end_date: date | None = None
 
 
 @dataclass
