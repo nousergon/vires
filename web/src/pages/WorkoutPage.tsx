@@ -436,7 +436,7 @@ function ExerciseBlock({
 
       <div className="mt-2 space-y-1.5">
         {timed ? (
-          <div className="grid grid-cols-[2rem_1fr_2rem_2rem_1.5rem] gap-2 px-1 text-xs uppercase text-slate-500">
+          <div className="grid grid-cols-[2rem_minmax(0,1fr)_2rem_2rem_1.5rem] gap-2 px-1 text-xs uppercase text-slate-500">
             <span>Set</span>
             <span>Hold (s)</span>
             <span className="text-center">▶</span>
@@ -444,7 +444,7 @@ function ExerciseBlock({
             <span />
           </div>
         ) : (
-          <div className="grid grid-cols-[2rem_1fr_1fr_2rem_1.5rem] gap-2 px-1 text-xs uppercase text-slate-500">
+          <div className="grid grid-cols-[2rem_minmax(0,1fr)_minmax(0,1fr)_2rem_1.5rem] gap-2 px-1 text-xs uppercase text-slate-500">
             <span>Set</span>
             <span>{settings.weight_unit}</span>
             <span>Reps</span>
@@ -605,13 +605,13 @@ function SetRow({
     onChanged()
   }
 
-  const cell = `rounded-lg px-3 py-2 text-center outline-none focus:ring-1 focus:ring-amber-500 ${
+  const cell = `w-full min-w-0 rounded-lg px-2 py-2 text-center outline-none focus:ring-1 focus:ring-amber-500 ${
     done ? 'bg-emerald-900/30 text-slate-300' : 'bg-slate-800'
   }`
 
   return (
     <div
-      className={`grid grid-cols-[2rem_1fr_1fr_2rem_1.5rem] items-center gap-2 rounded-lg ${
+      className={`grid grid-cols-[2rem_minmax(0,1fr)_minmax(0,1fr)_2rem_1.5rem] items-center gap-2 rounded-lg ${
         done ? 'bg-emerald-900/10' : ''
       }`}
     >
@@ -685,13 +685,13 @@ function TimedSetRow({
     })
   }
 
-  const cell = `rounded-lg px-3 py-2 text-center outline-none focus:ring-1 focus:ring-amber-500 ${
+  const cell = `w-full min-w-0 rounded-lg px-2 py-2 text-center outline-none focus:ring-1 focus:ring-amber-500 ${
     done ? 'bg-emerald-900/30 text-slate-300' : 'bg-slate-800'
   }`
 
   return (
     <div
-      className={`grid grid-cols-[2rem_1fr_2rem_2rem_1.5rem] items-center gap-2 rounded-lg ${
+      className={`grid grid-cols-[2rem_minmax(0,1fr)_2rem_2rem_1.5rem] items-center gap-2 rounded-lg ${
         done ? 'bg-emerald-900/10' : ''
       }`}
     >
