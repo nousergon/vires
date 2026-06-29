@@ -11,13 +11,11 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from api.config import get_settings
 from api.db.identity import Identity, current_identity
 from api.db.models import (
-    Objective,
     PlannedExercise,
     PlannedWorkout,
     Program,
@@ -53,6 +51,7 @@ from api.services.coach.materialize import (
     rewrite_routine_refs,
     synthesize_routines,
 )
+from api.services.objective_focus import resolve_focus_objective
 from api.services.stt import STTError, transcribe_audio
 
 MAX_AUDIO_BYTES = 25 * 1024 * 1024  # 25 MB — the Whisper API per-file limit
@@ -204,14 +203,9 @@ def _persist_new_routines(db: Session, ident: Identity, spec: ProgramSpec) -> Pr
 
 
 def _active_objective_id(db: Session, ident: Identity) -> int | None:
-    """The active primary objective for this user (the plan trains for it)."""
-    return db.scalar(
-        select(Objective.id).where(
-            Objective.tenant_id == ident.tenant_id,
-            Objective.user_id == ident.user_id,
-            Objective.is_primary.is_(True),
-        )
-    )
+    """The derived focus objective for this user (the plan trains for it)."""
+    focus = resolve_focus_objective(db, ident)
+    return focus.id if focus is not None else None
 
 
 @router.post("/programs", response_model=ProgramOut, status_code=201)
