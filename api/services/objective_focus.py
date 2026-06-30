@@ -36,10 +36,29 @@ def effective_end(o: Objective) -> date | None:
     return o.event_end_date or o.target_date
 
 
+def is_sub_objective(o: Objective) -> bool:
+    """A sub-objective (training milestone) is one nested under a parent. It is
+    never a focus-eligible peak of its own — it lives inside the parent's block."""
+    return o.parent_objective_id is not None
+
+
+def top_level(objectives: Sequence[Objective]) -> list[Objective]:
+    """Only the standalone objectives — sub-objectives (milestones) are excluded
+    from focus/timeline derivation so they can't hijack the focus from their
+    parent (the crux of the sub-objective design)."""
+    return [o for o in objectives if not is_sub_objective(o)]
+
+
 def pick_focus(objectives: Sequence[Objective], today: date) -> Objective | None:
-    """Derive the focus objective from a user's objectives (pure)."""
+    """Derive the focus objective from a user's objectives (pure).
+
+    Sub-objectives are excluded up front: a milestone nested under a parent
+    (e.g. "Mailbox Peak" under "Climb Baker") must never become the focus on its
+    own date — it is part of the parent's plan, not a competing peak."""
+    candidates = top_level(objectives)
+
     # 1. Manual override pin wins outright.
-    for o in objectives:
+    for o in candidates:
         if o.is_primary:
             return o
 
@@ -47,7 +66,7 @@ def pick_focus(objectives: Sequence[Objective], today: date) -> Objective | None
     #    are ON a multi-day event).
     upcoming = [
         o
-        for o in objectives
+        for o in candidates
         if o.kind == "dated"
         and o.target_date is not None
         and effective_end(o) >= today
@@ -59,7 +78,7 @@ def pick_focus(objectives: Sequence[Objective], today: date) -> Objective | None
         return upcoming[0]
 
     # 3. Standing open-ended goal (general health / maintenance).
-    standing = [o for o in objectives if o.kind == "open_ended"]
+    standing = [o for o in candidates if o.kind == "open_ended"]
     if standing:
         standing.sort(key=lambda o: (-(o.priority or 0), -(o.id or 0)))
         return standing[0]
@@ -69,10 +88,30 @@ def pick_focus(objectives: Sequence[Objective], today: date) -> Objective | None
 
 
 def dated_timeline(objectives: Sequence[Objective]) -> list[Objective]:
-    """All dated objectives in chronological order (pure) — the peak timeline."""
-    dated = [o for o in objectives if o.kind == "dated" and o.target_date is not None]
+    """All top-level dated objectives in chronological order (pure) — the peak
+    timeline. Sub-objectives are excluded (they're surfaced nested under their
+    parent via ``milestones_for``, not as standalone peaks)."""
+    dated = [
+        o
+        for o in top_level(objectives)
+        if o.kind == "dated" and o.target_date is not None
+    ]
     dated.sort(key=lambda o: (o.target_date, -(o.priority or 0), o.id or 0))
     return dated
+
+
+def milestones_for(
+    objectives: Sequence[Objective], parent_id: int | None
+) -> list[Objective]:
+    """The sub-objectives (training milestones) of ``parent_id``, chronologically.
+
+    Empty for ``None`` or a parent with no milestones. Pure over the full object
+    set so the coach + API derive a parent's benchmarks without an extra query."""
+    if parent_id is None:
+        return []
+    subs = [o for o in objectives if o.parent_objective_id == parent_id]
+    subs.sort(key=lambda o: (o.target_date or date.max, -(o.priority or 0), o.id or 0))
+    return subs
 
 
 def load_objectives(db: Session, ident: Identity) -> list[Objective]:

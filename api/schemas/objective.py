@@ -33,6 +33,11 @@ class ObjectiveCreate(BaseModel):
     is_primary: bool = False
     # Rank among concurrent objectives (higher = more important).
     priority: int = 0
+    # When set, this objective is a *sub-objective* (training milestone) of the
+    # given parent — a dated benchmark inside the parent's block, not a focus of
+    # its own. The parent must exist, be dated, and itself be top-level; the full
+    # rule set is enforced in the router against the live rows.
+    parent_objective_id: int | None = None
 
     @model_validator(mode="after")
     def _validate_dates(self) -> ObjectiveCreate:
@@ -58,6 +63,9 @@ class ObjectiveUpdate(BaseModel):
     demands_profile: dict[str, Any] | None = None
     is_primary: bool | None = None
     priority: int | None = None
+    # Set to nest under a parent (make this a sub-objective); set explicitly to
+    # null to detach (promote back to a standalone objective). Absent = unchanged.
+    parent_objective_id: int | None = None
 
 
 class ObjectiveOut(BaseModel):
@@ -72,6 +80,8 @@ class ObjectiveOut(BaseModel):
     demands_profile: dict[str, Any] | None
     is_primary: bool
     priority: int
+    # The parent objective this is a training milestone of (None = standalone).
+    parent_objective_id: int | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -132,5 +142,9 @@ class ActiveObjectiveOut(BaseModel):
 
     objective: ObjectiveOut | None
     objectives: list[ObjectiveOut] = []
+    # The focus objective's sub-objectives (training milestones), chronologically.
+    # Empty when the focus has none. Drives the in-app milestones editor + lets
+    # the UI render benchmarks nested under their parent peak.
+    milestones: list[ObjectiveOut] = []
     constraints: list[ConstraintOut]
     active_program: ProgramStrategy | None = None

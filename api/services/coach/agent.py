@@ -71,6 +71,27 @@ def _objective_block(obj_ctx: CoachObjectiveContext | None, today: date) -> dict
             "sport": obj.sport,
             "demands_profile": obj.demands_profile,
         }
+        # Training milestones (sub-objectives) inside this block: dated benchmarks
+        # the coach should periodize a mini-taper + retest around, then resume the
+        # build toward the peak. NOT separate peaks — they serve the parent.
+        if obj.milestones:
+            block["objective"]["milestones"] = [
+                {
+                    "objective_id": m.id,
+                    "name": m.name,
+                    "target_date": m.target_date.isoformat()
+                    if m.target_date
+                    else None,
+                    "weeks_until_target": _weeks_until(m.target_date, today),
+                    "sport": m.sport,
+                    "note": (
+                        "training milestone within this objective's block — "
+                        "taper lightly into it, treat the result as a fitness "
+                        "checkpoint, then resume the build toward the peak"
+                    ),
+                }
+                for m in obj.milestones
+            ]
     # Only emit the timeline when there's genuinely more than one dated peak —
     # for a single objective it is redundant with "objective". Each entry carries
     # objective_id + event_end_date so the coach can build a season phase per peak.

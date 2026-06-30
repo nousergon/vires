@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, type Constraint } from '../lib/api'
+import { api, type Constraint, type Objective } from '../lib/api'
 import { Button, Sheet, Spinner } from './ui'
 
 const CONSTRAINT_KINDS = ['injury', 'schedule', 'equipment'] as const
@@ -139,6 +139,14 @@ export default function ObjectiveSheet({
             </Button>
           </div>
 
+          {objective && objective.kind === 'dated' && (
+            <MilestonesEditor
+              parent={objective}
+              milestones={active?.milestones ?? []}
+              onChanged={refresh}
+            />
+          )}
+
           <ConstraintsEditor constraints={active?.constraints ?? []} onChanged={refresh} />
 
           <p className="text-xs text-slate-500">
@@ -148,6 +156,151 @@ export default function ObjectiveSheet({
         </div>
       )}
     </Sheet>
+  )
+}
+
+// --------------------------------------------------------------------------- //
+/**
+ * Training milestones (sub-objectives) nested under the active objective. A
+ * milestone — e.g. a "Mailbox Peak" training hike under "Climb Baker" — is a
+ * dated benchmark the coach periodizes a mini-taper/retest around; it does NOT
+ * become the focus and never hijacks the parent's plan. It must fall on or
+ * before the parent's target date (the server enforces this).
+ */
+function MilestonesEditor({
+  parent,
+  milestones,
+  onChanged,
+}: {
+  parent: Objective
+  milestones: Objective[]
+  onChanged: () => void
+}) {
+  const [adding, setAdding] = useState(false)
+  const [name, setName] = useState('')
+  const [date, setDate] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function add() {
+    if (!name.trim() || !date) return
+    setBusy(true)
+    setError(null)
+    try {
+      await api.createObjective({
+        name: name.trim(),
+        kind: 'dated',
+        target_date: date,
+        sport: parent.sport, // inherit the parent's needs-analysis by default
+        is_primary: false,
+        parent_objective_id: parent.id,
+      })
+      setName('')
+      setDate('')
+      setAdding(false)
+      onChanged()
+    } catch (e) {
+      setError((e as Error).message.replace(/^\d+:\s*/, ''))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function remove(id: number) {
+    setBusy(true)
+    try {
+      await api.deleteObjective(id)
+      onChanged()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="border-t border-slate-800 pt-4">
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
+          Training milestones
+        </h3>
+        {!adding && (
+          <button
+            className="text-sm text-amber-300 hover:text-amber-200"
+            onClick={() => setAdding(true)}
+          >
+            + Add
+          </button>
+        )}
+      </div>
+
+      {milestones.length === 0 && !adding && (
+        <p className="text-sm text-slate-500">
+          None — add a dated benchmark (e.g. a training hike) that counts toward this
+          objective without becoming a goal of its own.
+        </p>
+      )}
+
+      <div className="space-y-2">
+        {milestones.map((m) => (
+          <div
+            key={m.id}
+            className="flex items-start justify-between gap-2 rounded-lg border border-slate-800 bg-slate-800/40 px-3 py-2"
+          >
+            <div className="min-w-0">
+              <div className="text-sm font-medium text-slate-100">{m.name}</div>
+              {m.target_date && (
+                <div className="mt-0.5 text-xs text-slate-400">{m.target_date}</div>
+              )}
+            </div>
+            <button
+              className="shrink-0 text-slate-600 hover:text-red-400"
+              onClick={() => remove(m.id)}
+              disabled={busy}
+              aria-label="Remove milestone"
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {adding && (
+        <div className="mt-2 space-y-2 rounded-lg border border-slate-800 bg-slate-800/40 p-3">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. Mailbox Peak (loaded-pack hike)"
+            className="input"
+          />
+          <input
+            type="date"
+            value={date}
+            max={parent.target_date ?? undefined}
+            onChange={(e) => setDate(e.target.value)}
+            className="input"
+          />
+          {error && (
+            <p className="rounded-lg border border-red-800/50 bg-red-900/20 px-3 py-2 text-xs text-red-300">
+              {error}
+            </p>
+          )}
+          <div className="flex gap-2">
+            <Button className="flex-1" onClick={add} disabled={busy || !name.trim() || !date}>
+              {busy ? 'Adding…' : 'Add milestone'}
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setAdding(false)
+                setError(null)
+              }}
+              disabled={busy}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 

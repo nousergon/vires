@@ -25,6 +25,10 @@ class ObjectiveCtx:
     id: int | None = None
     # Last day of a multi-day event; training is skipped target_date..event_end_date.
     event_end_date: date | None = None
+    # Sub-objectives (dated training milestones) nested under this objective —
+    # benchmarks the coach periodizes a mini-taper/retest around inside the block.
+    # Only populated for the focus objective. Each is itself an ObjectiveCtx.
+    milestones: list[ObjectiveCtx] = field(default_factory=list)
 
 
 @dataclass

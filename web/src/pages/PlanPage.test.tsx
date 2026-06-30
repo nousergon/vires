@@ -71,9 +71,11 @@ describe('PlanPage', () => {
         sport: 'alpine',
         demands_profile: null,
         is_primary: true,
+        parent_objective_id: null,
         created_at: '',
         updated_at: '',
       },
+      milestones: [],
       constraints: [],
       active_program: {
         program_id: 7,

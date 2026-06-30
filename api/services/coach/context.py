@@ -37,6 +37,7 @@ from api.services.coach.objective_context import (
 from api.services.objective_focus import (
     dated_timeline,
     load_objectives,
+    milestones_for,
     pick_focus,
 )
 from api.services.search import get_search_service
@@ -114,6 +115,14 @@ def build_coach_objective_context(
     objectives = load_objectives(db, ident)
     focus = pick_focus(objectives, date.today())
     obj_ctx = _to_objective_ctx(focus)
+    # Attach the focus objective's training milestones (its sub-objectives) so the
+    # coach periodizes a mini-taper/retest around each benchmark inside the block.
+    if obj_ctx is not None and focus is not None:
+        obj_ctx.milestones = [
+            c
+            for m in milestones_for(objectives, focus.id)
+            if (c := _to_objective_ctx(m)) is not None
+        ]
     timeline = [_to_objective_ctx(o) for o in dated_timeline(objectives)]
     constraints = db.scalars(
         select(Constraint)
