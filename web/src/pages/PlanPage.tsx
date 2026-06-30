@@ -361,6 +361,8 @@ function CalendarGrid({
               (e.kind === 'planned' && e.status === 'completed'),
           )
           const active = es.some((e) => e.kind === 'session' && e.status === 'in_progress')
+          const peak = es.some((e) => e.kind === 'objective')
+          const inBlock = es.some((e) => e.kind === 'objective_block')
           const isToday = sameDay(d, today)
           return (
             <button
@@ -370,7 +372,7 @@ function CalendarGrid({
               className={`flex aspect-square flex-col items-center justify-center rounded-lg text-sm ${
                 inMonth ? 'text-slate-200' : 'text-slate-600'
               } ${isToday ? 'ring-1 ring-amber-500' : ''} ${
-                es.length ? 'bg-slate-800/60' : 'hover:bg-slate-800/40'
+                inBlock ? 'bg-fuchsia-500/10' : es.length ? 'bg-slate-800/60' : 'hover:bg-slate-800/40'
               }`}
             >
               <span>{d.getDate()}</span>
@@ -378,6 +380,7 @@ function CalendarGrid({
                 {planned && <Dot className="bg-amber-400" />}
                 {done && <Dot className="bg-emerald-400" />}
                 {active && <Dot className="bg-amber-400 animate-pulse" />}
+                {peak && <Dot className="bg-fuchsia-400" />}
               </span>
             </button>
           )
@@ -395,6 +398,9 @@ function Legend() {
       </span>
       <span className="flex items-center gap-1">
         <Dot className="bg-emerald-400" /> completed
+      </span>
+      <span className="flex items-center gap-1">
+        <Dot className="bg-fuchsia-400" /> objective
       </span>
     </div>
   )
@@ -453,11 +459,39 @@ function DaySheet({
 
   const planned = entries.filter((e) => e.kind === 'planned')
   const sessions = entries.filter((e) => e.kind === 'session')
+  // One objective chip per objective on this day: a peak/event marker wins over a
+  // bare block day (a day can be both — the peak day of a block).
+  const objectiveById = new Map<number, CalendarEntry>()
+  for (const e of entries) {
+    if (e.kind !== 'objective' && e.kind !== 'objective_block') continue
+    const prev = objectiveById.get(e.id)
+    if (!prev || e.kind === 'objective') objectiveById.set(e.id, e)
+  }
+  const objectives = [...objectiveById.values()]
+
+  const objectiveLabel = (e: CalendarEntry) =>
+    e.kind === 'objective'
+      ? e.status === 'peak'
+        ? '🎯 peak / target day'
+        : '🎯 event day'
+      : '🏋 training block'
 
   return (
     <Sheet open={!!date} onClose={onClose} title={title}>
       <div className="space-y-4">
         {entries.length === 0 && <EmptyState title="Nothing scheduled" hint="Schedule a routine below or ask the Coach." />}
+
+        {objectives.map((e) => (
+          <div
+            key={`o${e.id}`}
+            className="rounded-xl border border-fuchsia-700/40 bg-fuchsia-900/15 p-3"
+          >
+            <div className="text-sm font-semibold text-fuchsia-200">
+              {e.objective_name ?? e.name}
+            </div>
+            <div className="mt-0.5 text-xs text-fuchsia-300/80">{objectiveLabel(e)}</div>
+          </div>
+        ))}
 
         {planned.map((e) => (
           <PlannedCard

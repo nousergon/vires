@@ -105,6 +105,33 @@ describe('PlanPage', () => {
     expect(screen.getAllByText('Focus')).toHaveLength(1)
   })
 
+  it('renders a dated objective as an event on the calendar', async () => {
+    const iso = isoDate(new Date())
+    vi.spyOn(api, 'calendar').mockResolvedValue([
+      {
+        kind: 'objective',
+        date: iso,
+        id: 9,
+        name: 'Climb Baker',
+        status: 'peak',
+        objective_id: 9,
+        objective_name: 'Climb Baker',
+        exercise_count: 0,
+      },
+    ])
+    vi.spyOn(api, 'listPrograms').mockResolvedValue([])
+    vi.spyOn(api, 'listTemplates').mockResolvedValue([])
+    vi.spyOn(api, 'listObjectives').mockResolvedValue([])
+    vi.spyOn(api, 'activeObjective').mockResolvedValue(makeActiveObjective())
+    renderWithProviders(<PlanPage />)
+    // the legend documents the new objective marker
+    expect(await screen.findByText('objective')).toBeInTheDocument()
+    // tapping the peak day surfaces the objective in the day sheet
+    fireEvent.click(await screen.findByLabelText(iso))
+    expect(await screen.findByText('Climb Baker')).toBeInTheDocument()
+    expect(screen.getByText('🎯 peak / target day')).toBeInTheDocument()
+  })
+
   it('reviews a planned routine without starting it', async () => {
     const iso = isoDate(new Date())
     vi.spyOn(api, 'calendar').mockResolvedValue([

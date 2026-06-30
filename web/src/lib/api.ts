@@ -186,15 +186,19 @@ export interface ExerciseRecords {
 
 // ---- plan / calendar / coach ---------------------------------------------- //
 export interface CalendarEntry {
-  kind: 'session' | 'planned'
+  kind: 'session' | 'planned' | 'objective' | 'objective_block'
   date: string // YYYY-MM-DD
   id: number
   name: string | null
+  // session: completed|in_progress; planned: planned|completed|skipped;
+  // objective: peak|event; objective_block: block
   status: string
-  program_id: number | null
-  template_id: number | null
+  program_id?: number | null
+  template_id?: number | null
+  objective_id?: number | null
+  objective_name?: string | null
   exercise_count: number
-  session_id: number | null
+  session_id?: number | null
 }
 
 export interface PlannedExercise {
