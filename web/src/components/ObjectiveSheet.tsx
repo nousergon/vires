@@ -11,45 +11,70 @@ const DISC_DIRECTIVES =
   'anti-lateral-flexion trunk work and controlled eccentric (descent) work; defer rehab to PT'
 
 /**
- * Create/edit the single active *primary* objective + its constraints, directly
- * in the app (no CLI). The coach reverse-builds a plan toward this objective and
- * trains around the constraints. One primary per user — saving creates it or
- * updates the existing one.
+ * Create a new objective or edit an existing one (by ``objectiveId``), plus the
+ * user's global training constraints. A user may hold any number of concurrent
+ * objectives; the coach derives a *focus* across them (manual ``is_primary`` pin
+ * → next dated peak → standing goal) and periodizes a season toward it. Saving
+ * with no ``objectiveId`` always POSTs a NEW objective.
  */
 export default function ObjectiveSheet({
   open,
+  objectiveId,
   onClose,
   onSaved,
 }: {
   open: boolean
+  // The objective to edit; omit / null to create a brand-new one.
+  objectiveId?: number | null
   onClose: () => void
   onSaved: () => void
 }) {
   const qc = useQueryClient()
-  const { data: active, isLoading } = useQuery({
+  // All objectives — used to seed the edited row + derive its milestones (so the
+  // milestones editor works for ANY objective, not just the derived focus).
+  const { data: all = [], isLoading: loadingObjectives } = useQuery({
+    queryKey: ['objectives'],
+    queryFn: api.listObjectives,
+    enabled: open,
+  })
+  // Constraints are user-global (bounds on every objective) — fetched separately.
+  const { data: active, isLoading: loadingActive } = useQuery({
     queryKey: ['active-objective'],
     queryFn: api.activeObjective,
     enabled: open,
   })
-  const objective = active?.objective ?? null
+  const isLoading = loadingObjectives || loadingActive
+
+  const editing = objectiveId != null ? (all.find((o) => o.id === objectiveId) ?? null) : null
+  const milestones = objectiveId != null ? all.filter((o) => o.parent_objective_id === objectiveId) : []
+  const isSub = editing?.parent_objective_id != null
 
   const [name, setName] = useState('')
   const [kind, setKind] = useState<'dated' | 'open_ended'>('dated')
   const [targetDate, setTargetDate] = useState('')
+  const [eventEndDate, setEventEndDate] = useState('')
   const [sport, setSport] = useState('alpine')
+  const [priority, setPriority] = useState(0)
+  const [isPrimary, setIsPrimary] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Seed the form when the sheet opens / the loaded objective changes.
+  // Seed the form when the sheet opens / the edited objective changes.
   useEffect(() => {
     if (!open) return
     setError(null)
-    setName(objective?.name ?? '')
-    setKind(objective?.kind ?? 'dated')
-    setTargetDate(objective?.target_date ?? '')
-    setSport(objective?.sport ?? 'alpine')
-  }, [open, objective?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+    setName(editing?.name ?? '')
+    setKind(editing?.kind ?? 'dated')
+    setTargetDate(editing?.target_date ?? '')
+    setEventEndDate(editing?.event_end_date ?? '')
+    setSport(editing?.sport ?? 'alpine')
+    setPriority(editing?.priority ?? 0)
+    setIsPrimary(editing?.is_primary ?? false)
+  }, [open, editing?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const refresh = () => qc.invalidateQueries({ queryKey: ['active-objective'] })
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ['active-objective'] })
+    qc.invalidateQueries({ queryKey: ['objectives'] })
+  }
 
   const saveObjective = useMutation({
     mutationFn: async () => {
@@ -57,12 +82,13 @@ export default function ObjectiveSheet({
         name: name.trim(),
         kind,
         target_date: kind === 'dated' ? targetDate || null : null,
+        event_end_date: kind === 'dated' && eventEndDate ? eventEndDate : null,
         sport: sport.trim() || null,
-        is_primary: true,
+        priority,
+        // A sub-objective can never be the focus; never send is_primary for one.
+        ...(isSub ? {} : { is_primary: isPrimary }),
       }
-      return objective
-        ? api.updateObjective(objective.id, body)
-        : api.createObjective(body)
+      return editing ? api.updateObjective(editing.id, body) : api.createObjective(body)
     },
     onSuccess: () => {
       refresh()
@@ -72,10 +98,11 @@ export default function ObjectiveSheet({
   })
 
   const dateMissing = kind === 'dated' && !targetDate
-  const canSave = !!name.trim() && !dateMissing && !saveObjective.isPending
+  const eventEndInvalid = !!eventEndDate && !!targetDate && eventEndDate < targetDate
+  const canSave = !!name.trim() && !dateMissing && !eventEndInvalid && !saveObjective.isPending
 
   return (
-    <Sheet open={open} onClose={onClose} title="🎯 Objective">
+    <Sheet open={open} onClose={onClose} title={editing ? '🎯 Edit objective' : '🎯 New objective'}>
       {isLoading ? (
         <Spinner />
       ) : (
@@ -109,14 +136,29 @@ export default function ObjectiveSheet({
             </Field>
 
             {kind === 'dated' && (
-              <Field label="Target date" hint="the day you peak / taper to">
-                <input
-                  type="date"
-                  value={targetDate}
-                  onChange={(e) => setTargetDate(e.target.value)}
-                  className="input"
-                />
-              </Field>
+              <>
+                <Field label="Target date" hint="the day you peak / taper to">
+                  <input
+                    type="date"
+                    value={targetDate}
+                    onChange={(e) => setTargetDate(e.target.value)}
+                    className="input"
+                  />
+                </Field>
+
+                <Field
+                  label="Event ends"
+                  hint="optional — last day of a multi-day event (no training during it)"
+                >
+                  <input
+                    type="date"
+                    value={eventEndDate}
+                    min={targetDate || undefined}
+                    onChange={(e) => setEventEndDate(e.target.value)}
+                    className="input"
+                  />
+                </Field>
+              </>
             )}
 
             <Field label="Sport" hint="drives the needs-analysis (alpine is authored)">
@@ -128,6 +170,27 @@ export default function ObjectiveSheet({
               />
             </Field>
 
+            <Field label="Priority" hint="rank among concurrent objectives (higher = more important)">
+              <input
+                type="number"
+                value={priority}
+                onChange={(e) => setPriority(Number(e.target.value) || 0)}
+                className="input"
+              />
+            </Field>
+
+            {!isSub && (
+              <label className="flex items-center gap-2 text-sm text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={isPrimary}
+                  onChange={(e) => setIsPrimary(e.target.checked)}
+                  className="h-4 w-4 accent-amber-500"
+                />
+                Pin as my focus (override the auto-derived next peak)
+              </label>
+            )}
+
             {error && (
               <p className="rounded-lg border border-red-800/50 bg-red-900/20 px-3 py-2 text-sm text-red-300">
                 {error}
@@ -135,23 +198,24 @@ export default function ObjectiveSheet({
             )}
 
             <Button className="w-full" onClick={() => saveObjective.mutate()} disabled={!canSave}>
-              {saveObjective.isPending ? 'Saving…' : objective ? 'Update objective' : 'Set objective'}
+              {saveObjective.isPending
+                ? 'Saving…'
+                : editing
+                  ? 'Update objective'
+                  : 'Add objective'}
             </Button>
           </div>
 
-          {objective && objective.kind === 'dated' && (
-            <MilestonesEditor
-              parent={objective}
-              milestones={active?.milestones ?? []}
-              onChanged={refresh}
-            />
+          {editing && editing.kind === 'dated' && !isSub && (
+            <MilestonesEditor parent={editing} milestones={milestones} onChanged={refresh} />
           )}
 
           <ConstraintsEditor constraints={active?.constraints ?? []} onChanged={refresh} />
 
           <p className="text-xs text-slate-500">
-            The coach reverse-builds a periodized plan toward this objective and trains around your
-            constraints. It never prescribes treatment for an injury — defer that to your PT/physician.
+            The coach reverse-builds a periodized plan toward your focus objective and trains around
+            your constraints. It never prescribes treatment for an injury — defer that to your
+            PT/physician.
           </p>
         </div>
       )}

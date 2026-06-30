@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { screen, fireEvent } from '@testing-library/react'
-import { renderWithProviders, SETTINGS } from '../test/utils'
+import { renderWithProviders, SETTINGS, makeObjective, makeActiveObjective } from '../test/utils'
 import PlanPage from './PlanPage'
 import { api } from '../lib/api'
 import { isoDate } from '../lib/calendar'
@@ -11,6 +11,8 @@ function mockEmpty() {
   vi.spyOn(api, 'calendar').mockResolvedValue([])
   vi.spyOn(api, 'listPrograms').mockResolvedValue([])
   vi.spyOn(api, 'listTemplates').mockResolvedValue([])
+  vi.spyOn(api, 'activeObjective').mockResolvedValue(makeActiveObjective())
+  vi.spyOn(api, 'listObjectives').mockResolvedValue([])
 }
 
 describe('PlanPage', () => {
@@ -58,36 +60,49 @@ describe('PlanPage', () => {
     expect(screen.getByText('Ramp from 10 to 4 reps, deload week 4.')).toBeInTheDocument()
   })
 
-  it("shows the coach's strategy on the objective tile", async () => {
+  it("shows the coach's strategy on the focus objective tile", async () => {
     vi.spyOn(api, 'calendar').mockResolvedValue([])
     vi.spyOn(api, 'listTemplates').mockResolvedValue([])
     vi.spyOn(api, 'listPrograms').mockResolvedValue([])
-    vi.spyOn(api, 'activeObjective').mockResolvedValue({
-      objective: {
-        id: 1,
-        name: 'Climb Baker',
-        kind: 'dated',
-        target_date: '2026-09-05',
-        sport: 'alpine',
-        demands_profile: null,
-        is_primary: true,
-        parent_objective_id: null,
-        created_at: '',
-        updated_at: '',
-      },
-      milestones: [],
-      constraints: [],
-      active_program: {
-        program_id: 7,
-        name: 'Baker Block',
-        coach_summary: 'Base, then peak strength, then taper to the summit.',
-      },
-    })
+    vi.spyOn(api, 'listObjectives').mockResolvedValue([])
+    vi.spyOn(api, 'activeObjective').mockResolvedValue(
+      makeActiveObjective({
+        objective: makeObjective({ id: 1, name: 'Climb Baker' }),
+        active_program: {
+          program_id: 7,
+          name: 'Baker Block',
+          coach_summary: 'Base, then peak strength, then taper to the summit.',
+        },
+      }),
+    )
     renderWithProviders(<PlanPage />)
     expect(await screen.findByText("Coach's strategy")).toBeInTheDocument()
     expect(
       screen.getByText('Base, then peak strength, then taper to the summit.'),
     ).toBeInTheDocument()
+  })
+
+  it('lists multiple objectives with the focus marked and others as pins', async () => {
+    vi.spyOn(api, 'calendar').mockResolvedValue([])
+    vi.spyOn(api, 'listTemplates').mockResolvedValue([])
+    vi.spyOn(api, 'listPrograms').mockResolvedValue([])
+    const focus = makeObjective({ id: 1, name: 'Run a 50k', target_date: '2026-07-15' })
+    const later = makeObjective({
+      id: 2,
+      name: 'Climb Baker',
+      target_date: '2026-09-05',
+      is_primary: false,
+    })
+    vi.spyOn(api, 'listObjectives').mockResolvedValue([focus, later])
+    vi.spyOn(api, 'activeObjective').mockResolvedValue(
+      makeActiveObjective({ objective: focus, objectives: [focus, later] }),
+    )
+    renderWithProviders(<PlanPage />)
+    // both objectives are listed
+    expect(await screen.findByText('Run a 50k')).toBeInTheDocument()
+    expect(screen.getByText('Climb Baker')).toBeInTheDocument()
+    // exactly one Focus badge (the derived focus)
+    expect(screen.getAllByText('Focus')).toHaveLength(1)
   })
 
   it('reviews a planned routine without starting it', async () => {

@@ -334,9 +334,13 @@ export interface Objective {
   name: string
   kind: 'dated' | 'open_ended'
   target_date: string | null
+  // Last day of a multi-day event (>= target_date); null = single-day event.
+  event_end_date: string | null
   sport: string | null
   demands_profile: Record<string, unknown> | null
   is_primary: boolean
+  // Rank among concurrent objectives (higher = more important; tiebreak on dates).
+  priority: number
   // Parent objective this is a training milestone of (null = standalone peak).
   parent_objective_id: number | null
   created_at: string
@@ -361,7 +365,11 @@ export interface ProgramStrategy {
 }
 
 export interface ActiveObjective {
+  // The derived *focus* objective (manual pin → next dated peak → standing goal).
   objective: Objective | null
+  // All top-level objectives the user holds: dated peaks chronological, then
+  // open-ended standing goals by priority. Sub-objectives are NOT here.
+  objectives: Objective[]
   // The focus objective's training milestones (its sub-objectives), chronological.
   milestones: Objective[]
   constraints: Constraint[]
@@ -372,8 +380,12 @@ export interface ObjectiveInput {
   name: string
   kind?: 'dated' | 'open_ended'
   target_date?: string | null
+  // Last day of a multi-day event (>= target_date); omit for a single-day event.
+  event_end_date?: string | null
   sport?: string | null
   is_primary?: boolean
+  // Rank among concurrent objectives (higher = more important).
+  priority?: number
   // Set to nest under a parent (create a sub-objective); null/omit = standalone.
   parent_objective_id?: number | null
 }

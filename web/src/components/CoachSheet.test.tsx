@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { screen, fireEvent, waitFor } from '@testing-library/react'
-import { renderWithProviders } from '../test/utils'
+import { renderWithProviders, makeObjective, makeActiveObjective } from '../test/utils'
 import CoachSheet from './CoachSheet'
 import { api, type ProgramPreview } from '../lib/api'
 
@@ -97,57 +97,32 @@ describe('CoachSheet', () => {
   })
 
   it('shows the active objective + constraints banner in create mode', async () => {
-    vi.spyOn(api, 'activeObjective').mockResolvedValue({
-      objective: {
-        id: 1,
-        name: 'Climb Baker',
-        kind: 'dated',
-        target_date: '2026-09-05',
-        sport: 'alpine',
-        demands_profile: null,
-        is_primary: true,
-        parent_objective_id: null,
-        created_at: '',
-        updated_at: '',
-      },
-      milestones: [],
-      constraints: [
-        {
-          id: 2,
-          kind: 'injury',
-          label: 'recovering L4-L5 disc',
-          directives: null,
-          defer_to_professional: true,
-          is_active: true,
-          created_at: '',
-          updated_at: '',
-        },
-      ],
-      active_program: null,
-    })
+    vi.spyOn(api, 'activeObjective').mockResolvedValue(
+      makeActiveObjective({
+        objective: makeObjective({ id: 1, name: 'Climb Baker' }),
+        constraints: [
+          {
+            id: 2,
+            kind: 'injury',
+            label: 'recovering L4-L5 disc',
+            directives: null,
+            defer_to_professional: true,
+            is_active: true,
+            created_at: '',
+            updated_at: '',
+          },
+        ],
+      }),
+    )
     renderWithProviders(<CoachSheet open onClose={() => {}} onSaved={() => {}} />)
     expect(await screen.findByText(/Building toward: Climb Baker/)).toBeInTheDocument()
     expect(screen.getByText(/recovering L4-L5 disc/)).toBeInTheDocument()
     expect(screen.getByText(/defer to PT/)).toBeInTheDocument()
   })
 
-  const WITH_OBJECTIVE = {
-    objective: {
-      id: 1,
-      name: 'Climb Baker',
-      kind: 'dated' as const,
-      target_date: '2026-09-05',
-      sport: 'alpine',
-      demands_profile: null,
-      is_primary: true,
-      parent_objective_id: null,
-      created_at: '',
-      updated_at: '',
-    },
-    milestones: [],
-    constraints: [],
-    active_program: null,
-  }
+  const WITH_OBJECTIVE = makeActiveObjective({
+    objective: makeObjective({ id: 1, name: 'Climb Baker' }),
+  })
 
   it('auto-generates on open when launched with autoStart + an active objective', async () => {
     vi.spyOn(api, 'activeObjective').mockResolvedValue(WITH_OBJECTIVE)
