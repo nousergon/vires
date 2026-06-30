@@ -3,8 +3,10 @@ import { render } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import type {
+  ActiveObjective,
   Exercise,
   ExerciseBrief,
+  Objective,
   SearchHit,
   SessionExercise,
   SetEntry,
@@ -116,6 +118,37 @@ export function makeTemplate(over: Partial<Template> = {}): Template {
     created_at: '2026-06-20T00:00:00Z',
     updated_at: '2026-06-20T00:00:00Z',
     exercises: [],
+    ...over,
+  }
+}
+
+export function makeObjective(over: Partial<Objective> = {}): Objective {
+  return {
+    id: 1,
+    name: 'Climb Baker',
+    kind: 'dated',
+    target_date: '2026-09-05',
+    event_end_date: null,
+    sport: 'alpine',
+    demands_profile: null,
+    is_primary: true,
+    priority: 0,
+    parent_objective_id: null,
+    created_at: '',
+    updated_at: '',
+    ...over,
+  }
+}
+
+export function makeActiveObjective(over: Partial<ActiveObjective> = {}): ActiveObjective {
+  const objective = over.objective ?? null
+  return {
+    objective,
+    // Default the top-level list to the focus objective (if any) unless overridden.
+    objectives: objective ? [objective] : [],
+    milestones: [],
+    constraints: [],
+    active_program: null,
     ...over,
   }
 }

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, type CalendarEntry, type PlannedExercise } from '../lib/api'
+import { api, type CalendarEntry, type Objective, type PlannedExercise } from '../lib/api'
 import { Button, EmptyState, PageTitle, Sheet, Spinner } from '../components/ui'
 import CoachSheet from '../components/CoachSheet'
 import ObjectiveSheet from '../components/ObjectiveSheet'
@@ -24,8 +24,13 @@ export default function PlanPage() {
   const [selected, setSelected] = useState<Date | null>(null)
   const [coachOpen, setCoachOpen] = useState(false)
   const [coachAutoStart, setCoachAutoStart] = useState(false)
-  const [objectiveOpen, setObjectiveOpen] = useState(false)
+  // { open } with an optional id — id present = edit that objective, absent = add new.
+  const [objectiveSheet, setObjectiveSheet] = useState<{ open: boolean; id?: number }>({
+    open: false,
+  })
   const [modifyProgram, setModifyProgram] = useState<{ id: number; name: string } | null>(null)
+
+  const openObjective = (id?: number) => setObjectiveSheet({ open: true, id })
 
   const openCoach = (auto: boolean) => {
     setCoachAutoStart(auto)
@@ -86,7 +91,7 @@ export default function PlanPage() {
       <Legend />
 
       <ObjectiveSection
-        onEdit={() => setObjectiveOpen(true)}
+        onEdit={openObjective}
         onGenerate={() => openCoach(true)}
       />
 
@@ -100,8 +105,9 @@ export default function PlanPage() {
         onStarted={onStarted}
       />
       <ObjectiveSheet
-        open={objectiveOpen}
-        onClose={() => setObjectiveOpen(false)}
+        open={objectiveSheet.open}
+        objectiveId={objectiveSheet.id}
+        onClose={() => setObjectiveSheet({ open: false })}
         onSaved={refresh}
       />
       <CoachSheet
@@ -121,76 +127,146 @@ export default function PlanPage() {
 }
 
 // --------------------------------------------------------------------------- //
-function ObjectiveSection({ onEdit, onGenerate }: { onEdit: () => void; onGenerate: () => void }) {
+function ObjectiveSection({
+  onEdit,
+  onGenerate,
+}: {
+  onEdit: (id?: number) => void
+  onGenerate: () => void
+}) {
+  const qc = useQueryClient()
   const { data: active } = useQuery({
     queryKey: ['active-objective'],
     queryFn: api.activeObjective,
   })
+  // All objectives — to count each top-level objective's training milestones.
+  const { data: all = [] } = useQuery({ queryKey: ['objectives'], queryFn: api.listObjectives })
   const { data: programs = [] } = useQuery({ queryKey: ['programs'], queryFn: api.listPrograms })
-  const o = active?.objective ?? null
+
+  const objectives = active?.objectives ?? []
+  const focusId = active?.objective?.id ?? null
   const hasActivePlan = programs.some((p) => p.status === 'active')
+
+  const milestoneCount = (id: number) =>
+    all.filter((o) => o.parent_objective_id === id).length
+
+  async function remove(o: Objective) {
+    if (
+      !confirm(
+        `Delete "${o.name}"? Its plans + history stay; any training milestones become standalone objectives.`,
+      )
+    )
+      return
+    await api.deleteObjective(o.id)
+    qc.invalidateQueries({ queryKey: ['active-objective'] })
+    qc.invalidateQueries({ queryKey: ['objectives'] })
+  }
 
   return (
     <div className="mt-6">
       <div className="mb-2 flex items-center justify-between">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Objective</h2>
-        <button className="text-sm text-amber-300 hover:text-amber-200" onClick={onEdit}>
-          {o ? 'Edit' : 'Set objective'}
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Objectives</h2>
+        <button className="text-sm text-amber-300 hover:text-amber-200" onClick={() => onEdit()}>
+          + Add
         </button>
       </div>
-      {o ? (
-        <div className="rounded-xl border border-amber-700/40 bg-amber-900/15 p-3">
-          <button onClick={onEdit} className="block w-full text-left">
-            <div className="flex items-center gap-2 text-sm font-semibold text-amber-200">
-              <span>🎯</span>
-              <span className="truncate">{o.name}</span>
-            </div>
-            <div className="mt-0.5 text-xs text-amber-300/80">
-              {o.kind === 'dated' && o.target_date ? objectiveDateLabel(o.target_date) : 'open-ended'}
-              {o.sport && ` · ${o.sport}`}
-            </div>
-            {(active?.constraints.length ?? 0) > 0 && (
-              <div className="mt-1 text-xs text-slate-400">
-                Training around: {active!.constraints.map((c) => c.label).join(', ')}
-              </div>
-            )}
-          </button>
 
-          {active?.active_program?.coach_summary && (
-            <div className="mt-2 rounded-lg border border-slate-700/60 bg-slate-800/40 p-2.5">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                Coach&apos;s strategy
-              </p>
-              <p className="mt-0.5 text-xs leading-relaxed text-slate-300">
-                {active.active_program.coach_summary}
-              </p>
-            </div>
-          )}
-
-          <Button className="mt-3 w-full" onClick={onGenerate}>
-            {hasActivePlan ? '✨ Regenerate plan' : '✨ Generate plan'}
-          </Button>
-          <p className="mt-1.5 text-center text-[11px] text-slate-500">
-            The coach builds &amp; periodizes a plan toward this objective.
-          </p>
-        </div>
-      ) : (
+      {objectives.length === 0 ? (
         <button
-          onClick={onEdit}
+          onClick={() => onEdit()}
           className="block w-full rounded-xl border border-dashed border-slate-700 p-3 text-left text-sm text-slate-400 hover:bg-slate-800/40"
         >
           Set a goal (e.g. “Climb Baker”) — the coach will periodize a plan toward it.
         </button>
+      ) : (
+        <div className="space-y-2">
+          {objectives.map((o) => {
+            const isFocus = o.id === focusId
+            const ms = milestoneCount(o.id)
+            return (
+              <div
+                key={o.id}
+                className={`rounded-xl border p-3 ${
+                  isFocus
+                    ? 'border-amber-700/40 bg-amber-900/15'
+                    : 'border-slate-800 bg-slate-800/40'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <button onClick={() => onEdit(o.id)} className="block min-w-0 flex-1 text-left">
+                    <div
+                      className={`flex items-center gap-2 text-sm font-semibold ${
+                        isFocus ? 'text-amber-200' : 'text-slate-100'
+                      }`}
+                    >
+                      <span>{isFocus ? '🎯' : '📌'}</span>
+                      <span className="truncate">{o.name}</span>
+                      {isFocus && (
+                        <span className="shrink-0 rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-300">
+                          Focus
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-0.5 text-xs text-slate-400">
+                      {o.kind === 'dated' && o.target_date
+                        ? objectiveDateLabel(o.target_date, o.event_end_date)
+                        : 'open-ended'}
+                      {o.sport && ` · ${o.sport}`}
+                      {ms > 0 && ` · ${ms} milestone${ms === 1 ? '' : 's'}`}
+                    </div>
+                  </button>
+                  <button
+                    className="shrink-0 text-slate-600 hover:text-red-400"
+                    onClick={() => remove(o)}
+                    aria-label={`Delete ${o.name}`}
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {isFocus && (active?.constraints.length ?? 0) > 0 && (
+                  <div className="mt-1 text-xs text-slate-400">
+                    Training around: {active!.constraints.map((c) => c.label).join(', ')}
+                  </div>
+                )}
+
+                {isFocus && active?.active_program?.coach_summary && (
+                  <div className="mt-2 rounded-lg border border-slate-700/60 bg-slate-800/40 p-2.5">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                      Coach&apos;s strategy
+                    </p>
+                    <p className="mt-0.5 text-xs leading-relaxed text-slate-300">
+                      {active.active_program.coach_summary}
+                    </p>
+                  </div>
+                )}
+
+                {isFocus && (
+                  <>
+                    <Button className="mt-3 w-full" onClick={onGenerate}>
+                      {hasActivePlan ? '✨ Regenerate plan' : '✨ Generate plan'}
+                    </Button>
+                    <p className="mt-1.5 text-center text-[11px] text-slate-500">
+                      The coach builds &amp; periodizes a plan toward your focus objective.
+                    </p>
+                  </>
+                )}
+              </div>
+            )
+          })}
+        </div>
       )}
     </div>
   )
 }
 
-function objectiveDateLabel(iso: string): string {
+function objectiveDateLabel(iso: string, eventEnd?: string | null): string {
   const d = new Date(iso + 'T00:00:00')
-  const label = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+  const fmt = (x: Date) =>
+    x.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
   const weeks = Math.max(0, Math.round((d.getTime() - Date.now()) / (7 * 864e5)))
-  return `${label} · ~${weeks} wk${weeks === 1 ? '' : 's'} out`
+  const range = eventEnd ? `${fmt(d)} – ${fmt(new Date(eventEnd + 'T00:00:00'))}` : fmt(d)
+  return `${range} · ~${weeks} wk${weeks === 1 ? '' : 's'} out`
 }
 
 // --------------------------------------------------------------------------- //
