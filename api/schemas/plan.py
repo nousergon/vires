@@ -10,13 +10,17 @@ from api.schemas.exercise import ExerciseBrief
 
 
 class CalendarEntry(BaseModel):
-    """One dot on the calendar — a past session or a future planned workout."""
+    """One entry on the calendar — a past session, a future planned workout, or a
+    dated objective's own event (its peak / multi-day event window, or its
+    training-block band). Objective entries are per-day, clipped to the query
+    window; ``id`` is the objective id and may repeat across its span."""
 
-    kind: str  # 'session' | 'planned'
+    kind: str  # 'session' | 'planned' | 'objective' | 'objective_block'
     date: date
     id: int
     name: str | None = None
-    # session: 'completed' | 'in_progress'; planned: 'planned' | 'completed' | 'skipped'
+    # session: 'completed' | 'in_progress'; planned: 'planned' | 'completed' | 'skipped';
+    # objective: 'peak' | 'event' (multi-day window day); objective_block: 'block'
     status: str
     program_id: int | None = None
     template_id: int | None = None

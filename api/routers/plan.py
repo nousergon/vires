@@ -8,10 +8,10 @@ workout seeds a live session from its prescription and links the two.
 from __future__ import annotations
 
 import secrets
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from api.db.identity import Identity, current_identity, get_or_create_settings
@@ -73,6 +73,16 @@ def _objective_name_map(db: Session, ident: Identity) -> dict[int, str]:
         )
     ).all()
     return {oid: name for oid, name in rows}
+
+
+def _days_clipped(span_start: date, span_end: date, lo: date, hi: date) -> list[date]:
+    """Each day in ``[span_start, span_end]`` that also falls within ``[lo, hi]``
+    (inclusive), in order. Empty when the span doesn't intersect the window — the
+    chokepoint that keeps multi-week objective bands bounded to the visible grid."""
+    a, b = max(span_start, lo), min(span_end, hi)
+    if b < a:
+        return []
+    return [a + timedelta(days=i) for i in range((b - a).days + 1)]
 
 
 # --------------------------------------------------------------------------- #
@@ -142,6 +152,65 @@ def calendar(
                 session_id=pw.session_id,
             )
         )
+
+    # Dated objectives as their OWN events — in-app parity with the ICS feed:
+    # a peak marker on target_date (a multi-day band across event_end_date), and a
+    # training-block band over the prep span (the days with attributed planned
+    # work). Per-day, clipped to [start, end] so multi-week bands stay bounded.
+    objectives = db.scalars(
+        select(Objective).where(
+            Objective.tenant_id == ident.tenant_id,
+            Objective.user_id == ident.user_id,
+            Objective.kind == "dated",
+            Objective.target_date.is_not(None),
+        )
+    ).all()
+    # True block span per objective = first..last attributed planned day (over ALL
+    # of the user's planned work, not just the window — so a band that started
+    # earlier still renders correctly at the window edge).
+    block_rows = db.execute(
+        select(
+            PlannedWorkout.objective_id,
+            func.min(PlannedWorkout.scheduled_date),
+            func.max(PlannedWorkout.scheduled_date),
+        )
+        .where(
+            PlannedWorkout.tenant_id == ident.tenant_id,
+            PlannedWorkout.user_id == ident.user_id,
+            PlannedWorkout.objective_id.is_not(None),
+        )
+        .group_by(PlannedWorkout.objective_id)
+    ).all()
+    block_start = {oid: lo_d for oid, lo_d, _hi in block_rows}
+    for o in objectives:
+        # Peak + (when set) the multi-day event window.
+        for d in _days_clipped(o.target_date, o.event_end_date or o.target_date, start, end):
+            entries.append(
+                CalendarEntry(
+                    kind="objective",
+                    date=d,
+                    id=o.id,
+                    name=o.name,
+                    status="peak" if d == o.target_date else "event",
+                    objective_id=o.id,
+                    objective_name=o.name,
+                )
+            )
+        # Training-block band over the prep span (only when work is attributed).
+        start_day = block_start.get(o.id)
+        if start_day is not None and start_day < o.target_date:
+            for d in _days_clipped(start_day, o.target_date, start, end):
+                entries.append(
+                    CalendarEntry(
+                        kind="objective_block",
+                        date=d,
+                        id=o.id,
+                        name=o.name,
+                        status="block",
+                        objective_id=o.id,
+                        objective_name=o.name,
+                    )
+                )
 
     entries.sort(key=lambda e: (e.date, 0 if e.kind == "session" else 1))
     return entries

@@ -64,6 +64,85 @@ def test_calendar_rejects_inverted_range(client):
     assert r.status_code == 400
 
 
+# --------------------------------------------------------------------------- #
+# Objectives as calendar events (ICS-feed parity)
+# --------------------------------------------------------------------------- #
+def _cal(client, start: str, end: str) -> list[dict]:
+    return client.get("/api/plan/calendar", params={"start": start, "end": end}).json()
+
+
+def test_calendar_emits_objective_peak(client):
+    o = client.post(
+        "/api/objectives",
+        json={"name": "Climb Baker", "kind": "dated", "target_date": "2026-09-05"},
+    ).json()
+    cal = _cal(client, "2026-09-01", "2026-09-30")
+    peaks = [c for c in cal if c["kind"] == "objective"]
+    assert len(peaks) == 1
+    assert peaks[0]["status"] == "peak"
+    assert peaks[0]["objective_id"] == o["id"]
+    assert peaks[0]["date"] == "2026-09-05"
+
+
+def test_calendar_emits_multi_day_event_window(client):
+    client.post(
+        "/api/objectives",
+        json={
+            "name": "Baker trip",
+            "kind": "dated",
+            "target_date": "2026-09-05",
+            "event_end_date": "2026-09-07",
+        },
+    ).json()
+    cal = _cal(client, "2026-09-01", "2026-09-30")
+    obj = sorted((c for c in cal if c["kind"] == "objective"), key=lambda c: c["date"])
+    # 3 days: peak (9/5) + two event-window days (9/6, 9/7)
+    assert [c["date"] for c in obj] == ["2026-09-05", "2026-09-06", "2026-09-07"]
+    assert [c["status"] for c in obj] == ["peak", "event", "event"]
+
+
+def test_calendar_emits_training_block_band(client):
+    # Attributed planned workouts (via a coach phase) form the block band.
+    e = client.get("/api/exercises/search", params={"q": "bench press"}).json()[0]["exercise"]["id"]
+    tpl = client.post(
+        "/api/templates",
+        json={"name": "Alpine", "exercises": [{"exercise_id": e, "target_sets": 3,
+              "target_reps": 5, "target_weight": 100}]},
+    ).json()
+    o = client.post(
+        "/api/objectives",
+        json={"name": "Baker", "kind": "dated", "target_date": "2030-07-09", "sport": "alpine"},
+    ).json()
+    spec = {
+        "name": "Season",
+        "phases": [
+            {"objective_id": o["id"], "start_date": "2030-06-01", "duration_weeks": 3,
+             "schedule": [{"template_id": tpl["id"], "weekday": "monday"}]},
+        ],
+    }
+    client.post("/api/coach/programs", json={"spec": spec})
+
+    cal = _cal(client, "2030-06-01", "2030-07-31")
+    blocks = [c for c in cal if c["kind"] == "objective_block"]
+    assert blocks, "expected a training-block band over the prep span"
+    assert all(c["objective_id"] == o["id"] and c["status"] == "block" for c in blocks)
+    # the band spans prep → peak (ends at target_date, inclusive — ICS parity), so
+    # some block days are strictly before the peak and none fall after it
+    assert all(c["date"] <= "2030-07-09" for c in blocks)
+    assert any(c["date"] < "2030-07-09" for c in blocks)
+    assert any(c["kind"] == "objective" and c["status"] == "peak" for c in cal)
+
+
+def test_calendar_objective_clipped_to_window(client):
+    client.post(
+        "/api/objectives",
+        json={"name": "Climb Baker", "kind": "dated", "target_date": "2026-09-05"},
+    ).json()
+    # Peak is outside this window -> no objective entries.
+    cal = _cal(client, "2026-07-01", "2026-07-31")
+    assert not any(c["kind"] in ("objective", "objective_block") for c in cal)
+
+
 def test_start_planned_seeds_session_from_prescription_and_links(client):
     tpl = _routine(client)
     pw = client.post(
