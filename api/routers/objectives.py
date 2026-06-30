@@ -32,7 +32,9 @@ from api.services.coach.objective_profiles import demands_profile_for_sport
 from api.services.objective_focus import (
     dated_timeline,
     load_objectives,
+    milestones_for,
     pick_focus,
+    top_level,
 )
 
 router = APIRouter(prefix="/objectives", tags=["objectives"])
@@ -60,6 +62,62 @@ def _demote_other_primaries(db: Session, ident: Identity, keep_id: int | None) -
     if keep_id is not None:
         stmt = stmt.where(Objective.id != keep_id)
     db.execute(stmt)
+
+
+def _validate_parent(
+    db: Session,
+    ident: Identity,
+    *,
+    parent_id: int,
+    child_id: int | None,
+    child_kind: str,
+    child_target_date: date | None,
+    child_is_primary: bool,
+) -> Objective:
+    """Enforce the sub-objective rules for nesting ``child`` under ``parent_id``.
+
+    A sub-objective is a *dated training milestone* inside a top-level dated
+    parent's block: one level deep, on/before the parent's peak, never the
+    primary. Raises HTTPException on any violation; returns the parent row."""
+    if child_id is not None and parent_id == child_id:
+        raise HTTPException(400, "An objective cannot be its own parent")
+    parent = db.get(Objective, parent_id)
+    if (
+        parent is None
+        or parent.tenant_id != ident.tenant_id
+        or parent.user_id != ident.user_id
+    ):
+        raise HTTPException(404, "Parent objective not found")
+    if parent.parent_objective_id is not None:
+        raise HTTPException(
+            400, "Sub-objectives are one level deep — the parent is itself a sub-objective"
+        )
+    if parent.kind != "dated" or parent.target_date is None:
+        raise HTTPException(400, "A parent objective must be dated (have a target_date)")
+    if child_kind != "dated" or child_target_date is None:
+        raise HTTPException(400, "A sub-objective must be dated (have a target_date)")
+    if child_is_primary:
+        raise HTTPException(400, "A sub-objective cannot be the primary objective")
+    parent_end = parent.event_end_date or parent.target_date
+    if child_target_date > parent_end:
+        raise HTTPException(
+            400,
+            "A sub-objective's target_date must be on or before the parent's peak",
+        )
+    return parent
+
+
+def _has_children(db: Session, objective_id: int) -> bool:
+    """Whether ``objective_id`` is already a parent — a parent may not itself
+    become a sub-objective (keeps nesting one level deep)."""
+    return (
+        db.scalar(
+            select(Objective.id).where(
+                Objective.parent_objective_id == objective_id
+            )
+        )
+        is not None
+    )
 
 
 @router.get("", response_model=list[ObjectiveOut])
@@ -93,14 +151,18 @@ def active_objective(
     the coach + the UI banner."""
     objectives = load_objectives(db, ident)
     primary = pick_focus(objectives, date.today())
-    # Dated peaks chronologically, then any open-ended standing goals.
+    # Top-level peaks chronologically, then any open-ended standing goals.
+    # Sub-objectives are excluded here — they're surfaced under ``milestones``.
+    tops = top_level(objectives)
     timeline = dated_timeline(objectives)
     timeline_ids = {o.id for o in timeline}
     standing = sorted(
-        (o for o in objectives if o.id not in timeline_ids),
+        (o for o in tops if o.id not in timeline_ids),
         key=lambda o: (-(o.priority or 0), -(o.id or 0)),
     )
     ordered = timeline + standing
+    # The focus objective's training milestones (its sub-objectives).
+    milestones = milestones_for(objectives, primary.id) if primary else []
     constraints = db.scalars(
         select(Constraint)
         .where(
@@ -134,6 +196,7 @@ def active_objective(
     return ActiveObjectiveOut(
         objective=ObjectiveOut.model_validate(primary) if primary else None,
         objectives=[ObjectiveOut.model_validate(o) for o in ordered],
+        milestones=[ObjectiveOut.model_validate(o) for o in milestones],
         constraints=[ConstraintOut.model_validate(c) for c in constraints],
         active_program=strategy,
     )
@@ -156,6 +219,16 @@ def create_objective(
 ) -> Objective:
     # Auto-fill the authored needs-analysis for the sport when not supplied.
     demands = body.demands_profile or demands_profile_for_sport(body.sport)
+    if body.parent_objective_id is not None:
+        _validate_parent(
+            db,
+            ident,
+            parent_id=body.parent_objective_id,
+            child_id=None,
+            child_kind=body.kind,
+            child_target_date=body.target_date,
+            child_is_primary=body.is_primary,
+        )
     if body.is_primary:
         _demote_other_primaries(db, ident, keep_id=None)
         db.flush()
@@ -170,6 +243,7 @@ def create_objective(
         demands_profile=demands,
         is_primary=body.is_primary,
         priority=body.priority,
+        parent_objective_id=body.parent_objective_id,
     )
     db.add(o)
     db.commit()
@@ -215,6 +289,32 @@ def update_objective(
             raise HTTPException(400, "event_end_date requires target_date")
         if o.event_end_date < o.target_date:
             raise HTTPException(400, "event_end_date must be on or after target_date")
+
+    # Re-parent (make a sub-objective) or detach (promote to standalone). Validate
+    # against the merged row + the intended primary state in this same request.
+    if "parent_objective_id" in data:
+        new_parent = data["parent_objective_id"]
+        if new_parent is not None:
+            if _has_children(db, o.id):
+                raise HTTPException(
+                    400,
+                    "An objective with its own milestones cannot become a sub-objective",
+                )
+            intended_primary = (
+                data["is_primary"]
+                if data.get("is_primary") is not None
+                else o.is_primary
+            )
+            _validate_parent(
+                db,
+                ident,
+                parent_id=new_parent,
+                child_id=o.id,
+                child_kind=o.kind,
+                child_target_date=o.target_date,
+                child_is_primary=bool(intended_primary),
+            )
+        o.parent_objective_id = new_parent
 
     if "is_primary" in data and data["is_primary"] is not None:
         if data["is_primary"]:

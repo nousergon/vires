@@ -203,3 +203,127 @@ def test_patch_event_end_date_validated_against_merged_row(client):
         f"/api/objectives/{o['id']}", json={"event_end_date": "2026-07-01"}
     )
     assert bad.status_code == 400  # before target_date, merged-row check
+
+
+# --------------------------------------------------------------------------- #
+# Sub-objectives (training milestones) — nesting rules + /active surfacing.
+# --------------------------------------------------------------------------- #
+def _mk_parent(client):
+    """A top-level dated parent (Climb Baker, peaks 9/5)."""
+    return _mk_objective(client, name="Climb Baker", target_date="2026-09-05").json()
+
+
+def _mk_sub(client, parent_id, **over):
+    body = {
+        "name": "Mailbox Peak",
+        "kind": "dated",
+        "target_date": "2026-08-01",
+        "sport": "alpine",
+        "is_primary": False,
+        "parent_objective_id": parent_id,
+    }
+    body.update(over)
+    return client.post("/api/objectives", json=body)
+
+
+def test_create_sub_objective_nests_under_parent(client):
+    parent = _mk_parent(client)
+    r = _mk_sub(client, parent["id"])
+    assert r.status_code == 201, r.text
+    assert r.json()["parent_objective_id"] == parent["id"]
+
+
+def test_sub_objective_does_not_appear_as_top_level_in_active(client):
+    parent = _mk_parent(client)
+    sub = _mk_sub(client, parent["id"]).json()
+    active = client.get("/api/objectives/active").json()
+    # focus stays the parent; the sub is surfaced under milestones, not objectives
+    assert active["objective"]["id"] == parent["id"]
+    top_ids = {o["id"] for o in active["objectives"]}
+    assert sub["id"] not in top_ids
+    assert [m["id"] for m in active["milestones"]] == [sub["id"]]
+
+
+def test_sub_objective_after_parent_peak_rejected(client):
+    parent = _mk_parent(client)  # peaks 2026-09-05
+    r = _mk_sub(client, parent["id"], target_date="2026-09-20")
+    assert r.status_code == 400, r.text
+
+
+def test_sub_objective_cannot_be_primary(client):
+    parent = _mk_parent(client)
+    r = _mk_sub(client, parent["id"], is_primary=True)
+    assert r.status_code == 400
+
+
+def test_sub_objective_must_be_dated(client):
+    parent = _mk_parent(client)
+    r = _mk_sub(client, parent["id"], kind="open_ended", target_date=None)
+    # schema requires target_date for dated; open_ended sub is rejected by router
+    assert r.status_code in (400, 422)
+
+
+def test_parent_must_be_dated(client):
+    open_parent = _mk_objective(
+        client, name="General health", kind="open_ended", target_date=None, sport=None
+    ).json()
+    r = _mk_sub(client, open_parent["id"])
+    assert r.status_code == 400
+
+
+def test_nesting_is_one_level_deep(client):
+    parent = _mk_parent(client)
+    sub = _mk_sub(client, parent["id"], target_date="2026-08-01").json()
+    # try to nest a grandchild under the sub-objective
+    r = _mk_sub(
+        client, sub["id"], name="Mailbox warmup", target_date="2026-07-15"
+    )
+    assert r.status_code == 400
+
+
+def test_parent_with_children_cannot_become_a_sub(client):
+    parent = _mk_parent(client)
+    _mk_sub(client, parent["id"]).json()
+    other = _mk_objective(client, name="Run a 50k", target_date="2026-10-01").json()
+    # parent already has a milestone -> it cannot itself be nested
+    r = client.patch(
+        f"/api/objectives/{parent['id']}",
+        json={"parent_objective_id": other["id"], "is_primary": False},
+    )
+    assert r.status_code == 400
+
+
+def test_objective_cannot_be_its_own_parent(client):
+    o = _mk_objective(client, name="Run a 50k", target_date="2026-10-01").json()
+    r = client.patch(
+        f"/api/objectives/{o['id']}", json={"parent_objective_id": o["id"]}
+    )
+    assert r.status_code == 400
+
+
+def test_parent_not_found_rejected(client):
+    r = _mk_sub(client, 999999)
+    assert r.status_code == 404
+
+
+def test_patch_detaches_sub_objective_to_standalone(client):
+    parent = _mk_parent(client)
+    sub = _mk_sub(client, parent["id"]).json()
+    r = client.patch(
+        f"/api/objectives/{sub['id']}", json={"parent_objective_id": None}
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["parent_objective_id"] is None
+    # now a standalone dated objective -> appears in the top-level timeline
+    active = client.get("/api/objectives/active").json()
+    assert sub["id"] in {o["id"] for o in active["objectives"]}
+    assert active["milestones"] == []
+
+
+def test_deleting_parent_leaves_sub_as_standalone(client):
+    parent = _mk_parent(client)
+    sub = _mk_sub(client, parent["id"]).json()
+    assert client.delete(f"/api/objectives/{parent['id']}").status_code == 204
+    got = client.get(f"/api/objectives/{sub['id']}")
+    assert got.status_code == 200
+    assert got.json()["parent_objective_id"] is None  # SET NULL on parent delete

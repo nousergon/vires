@@ -9,7 +9,12 @@ from __future__ import annotations
 from datetime import date
 
 from api.db.models import Objective
-from api.services.objective_focus import dated_timeline, pick_focus
+from api.services.objective_focus import (
+    dated_timeline,
+    milestones_for,
+    pick_focus,
+    top_level,
+)
 
 TODAY = date(2026, 6, 29)
 
@@ -22,6 +27,7 @@ def _obj(
     event_end_date: date | None = None,
     is_primary: bool = False,
     priority: int = 0,
+    parent_objective_id: int | None = None,
 ) -> Objective:
     return Objective(
         id=id,
@@ -31,6 +37,7 @@ def _obj(
         event_end_date=event_end_date,
         is_primary=is_primary,
         priority=priority,
+        parent_objective_id=parent_objective_id,
     )
 
 
@@ -98,3 +105,47 @@ def test_dated_timeline_is_chronological_and_excludes_open_ended():
     b = _obj(2, target_date=date(2026, 7, 1))
     c = _obj(3, kind="open_ended")
     assert [o.id for o in dated_timeline([a, b, c])] == [2, 1]
+
+
+# --------------------------------------------------------------------------- #
+# Sub-objectives (training milestones) — the crux: a sub-objective must NEVER
+# hijack the focus from its parent, even though its own date is sooner.
+# --------------------------------------------------------------------------- #
+def test_sub_objective_does_not_hijack_focus_from_parent():
+    # Parent peaks 7/9; the sub-objective (Mailbox Peak) is sooner at 7/5 but is
+    # nested under the parent — the parent stays the focus.
+    parent = _obj(1, target_date=date(2026, 7, 9))
+    sub = _obj(2, target_date=date(2026, 7, 5), parent_objective_id=1)
+    assert pick_focus([parent, sub], TODAY).id == 1
+
+
+def test_sub_objective_excluded_from_dated_timeline():
+    parent = _obj(1, target_date=date(2026, 7, 9))
+    sub = _obj(2, target_date=date(2026, 7, 5), parent_objective_id=1)
+    assert [o.id for o in dated_timeline([parent, sub])] == [1]
+
+
+def test_sub_objective_not_focus_even_when_only_objective():
+    # An orphan-ish sub (parent set but parent not in the set) is still excluded;
+    # a sub-objective is never a standalone focus.
+    sub = _obj(2, target_date=date(2026, 7, 5), parent_objective_id=99)
+    assert pick_focus([sub], TODAY) is None
+
+
+def test_top_level_filters_out_sub_objectives():
+    parent = _obj(1, target_date=date(2026, 7, 9))
+    sub = _obj(2, target_date=date(2026, 7, 5), parent_objective_id=1)
+    standing = _obj(3, kind="open_ended")
+    assert {o.id for o in top_level([parent, sub, standing])} == {1, 3}
+
+
+def test_milestones_for_returns_subs_chronologically():
+    parent = _obj(1, target_date=date(2026, 8, 1))
+    m_late = _obj(2, target_date=date(2026, 7, 20), parent_objective_id=1)
+    m_early = _obj(3, target_date=date(2026, 7, 5), parent_objective_id=1)
+    other = _obj(4, target_date=date(2026, 7, 6), parent_objective_id=99)
+    assert [o.id for o in milestones_for([parent, m_late, m_early, other], 1)] == [3, 2]
+
+
+def test_milestones_for_none_parent_is_empty():
+    assert milestones_for([_obj(1, target_date=date(2026, 8, 1))], None) == []

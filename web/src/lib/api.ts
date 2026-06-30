@@ -337,6 +337,8 @@ export interface Objective {
   sport: string | null
   demands_profile: Record<string, unknown> | null
   is_primary: boolean
+  // Parent objective this is a training milestone of (null = standalone peak).
+  parent_objective_id: number | null
   created_at: string
   updated_at: string
 }
@@ -360,6 +362,8 @@ export interface ProgramStrategy {
 
 export interface ActiveObjective {
   objective: Objective | null
+  // The focus objective's training milestones (its sub-objectives), chronological.
+  milestones: Objective[]
   constraints: Constraint[]
   active_program: ProgramStrategy | null
 }
@@ -370,6 +374,8 @@ export interface ObjectiveInput {
   target_date?: string | null
   sport?: string | null
   is_primary?: boolean
+  // Set to nest under a parent (create a sub-objective); null/omit = standalone.
+  parent_objective_id?: number | null
 }
 
 export interface ConstraintInput {

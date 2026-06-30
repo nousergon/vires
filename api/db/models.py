@@ -455,9 +455,33 @@ class Objective(Base):
     # Rank among concurrent objectives (higher = more important). Tiebreak when
     # two dated objectives peak on the same day; ordering key for open-ended ones.
     priority: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # Parent objective this is a *sub-objective* (training milestone) of. When set,
+    # the row is a dated benchmark inside the parent's block — NOT a focus-eligible
+    # peak of its own (see api.services.objective_focus): it never hijacks the
+    # focus, the coach periodizes a mini-taper/retest around it, and completing it
+    # counts as training credit toward the parent. SET NULL so deleting the parent
+    # leaves the milestone as a standalone objective rather than destroying history.
+    # Nesting is one level deep — a sub-objective may not itself be a parent
+    # (enforced in the write path).
+    parent_objective_id: Mapped[int | None] = mapped_column(
+        ForeignKey("objectives.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         UTCDateTime(), default=_utcnow, onupdate=_utcnow
+    )
+
+    # Sub-objectives nested under this one (the parent's training milestones).
+    # ``remote_side`` disambiguates the self-referential join; no cascade — a
+    # parent delete nulls the FK (SET NULL above) rather than removing children.
+    children: Mapped[list[Objective]] = relationship(
+        back_populates="parent",
+        foreign_keys=lambda: [Objective.parent_objective_id],
+    )
+    parent: Mapped[Objective | None] = relationship(
+        back_populates="children",
+        remote_side=lambda: [Objective.id],
+        foreign_keys=lambda: [Objective.parent_objective_id],
     )
 
 

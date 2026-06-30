@@ -117,6 +117,45 @@ def test_single_objective_block_has_no_timeline_key():
     assert "timeline" not in block
 
 
+def _obj_ctx_with_milestone() -> CoachObjectiveContext:
+    """Focus objective (Climb Baker, 9/5) with one training milestone nested in
+    its block (Mailbox Peak, 8/1)."""
+    milestone = ObjectiveCtx(
+        id=30,
+        name="Mailbox Peak",
+        kind="dated",
+        target_date=date(2026, 8, 1),
+        sport="alpine",
+    )
+    focus = ObjectiveCtx(
+        id=20,
+        name="Climb Baker",
+        kind="dated",
+        target_date=date(2026, 9, 5),
+        sport="alpine",
+        demands_profile=ALPINE_DEMANDS_PROFILE,
+        milestones=[milestone],
+    )
+    return CoachObjectiveContext(objective=focus)
+
+
+def test_objective_block_renders_milestones_inside_the_block():
+    block = _objective_block(_obj_ctx_with_milestone(), date(2026, 6, 28))
+    # the milestone rides inside the focus objective, NOT as a separate peak
+    assert "timeline" not in block
+    ms = block["objective"]["milestones"]
+    assert [m["name"] for m in ms] == ["Mailbox Peak"]
+    assert ms[0]["objective_id"] == 30
+    assert ms[0]["weeks_until_target"] == 4  # 6/28 -> 8/1 = 34 days = 4 whole weeks
+    # the coach is told to treat it as a mid-block checkpoint, not the goal
+    assert "checkpoint" in ms[0]["note"]
+
+
+def test_objective_block_no_milestones_key_when_none():
+    block = _objective_block(_obj_ctx(), date(2026, 6, 28))
+    assert "milestones" not in block["objective"]
+
+
 def test_no_goal_key_when_objective_context_empty():
     block = json.loads(_context_block(_mat_ctx(), date(2026, 6, 28), None))
     assert "goal" not in block

@@ -6,7 +6,12 @@ import { api, type ActiveObjective, type Objective } from '../lib/api'
 
 beforeEach(() => vi.restoreAllMocks())
 
-const EMPTY: ActiveObjective = { objective: null, constraints: [], active_program: null }
+const EMPTY: ActiveObjective = {
+  objective: null,
+  milestones: [],
+  constraints: [],
+  active_program: null,
+}
 
 const OBJECTIVE: Objective = {
   id: 1,
@@ -16,6 +21,7 @@ const OBJECTIVE: Objective = {
   sport: 'alpine',
   demands_profile: null,
   is_primary: true,
+  parent_objective_id: null,
   created_at: '',
   updated_at: '',
 }
@@ -56,7 +62,7 @@ describe('ObjectiveSheet', () => {
   })
 
   it('updates an existing objective and prefills the form', async () => {
-    vi.spyOn(api, 'activeObjective').mockResolvedValue({ objective: OBJECTIVE, constraints: [], active_program: null })
+    vi.spyOn(api, 'activeObjective').mockResolvedValue({ objective: OBJECTIVE, milestones: [], constraints: [], active_program: null })
     const update = vi.spyOn(api, 'updateObjective').mockResolvedValue(OBJECTIVE)
     renderWithProviders(<ObjectiveSheet open onClose={() => {}} onSaved={() => {}} />)
 
@@ -67,7 +73,7 @@ describe('ObjectiveSheet', () => {
   })
 
   it('adds a constraint', async () => {
-    vi.spyOn(api, 'activeObjective').mockResolvedValue({ objective: OBJECTIVE, constraints: [], active_program: null })
+    vi.spyOn(api, 'activeObjective').mockResolvedValue({ objective: OBJECTIVE, milestones: [], constraints: [], active_program: null })
     const addC = vi.spyOn(api, 'createConstraint').mockResolvedValue({
       id: 9,
       kind: 'injury',
@@ -80,7 +86,10 @@ describe('ObjectiveSheet', () => {
     })
     renderWithProviders(<ObjectiveSheet open onClose={() => {}} onSaved={() => {}} />)
 
-    fireEvent.click(await screen.findByText('+ Add'))
+    // Two "+ Add" buttons now (milestones + constraints); the constraints one is
+    // rendered last. Open it via its section-specific placeholder below.
+    const addButtons = await screen.findAllByText('+ Add')
+    fireEvent.click(addButtons[addButtons.length - 1])
     fireEvent.change(screen.getByPlaceholderText(/recovering L4-L5 disc/), {
       target: { value: 'recovering L4-L5 disc' },
     })
@@ -90,5 +99,62 @@ describe('ObjectiveSheet', () => {
         expect.objectContaining({ kind: 'injury', label: 'recovering L4-L5 disc' }),
       ),
     )
+  })
+
+  it('adds a training milestone nested under the active objective', async () => {
+    vi.spyOn(api, 'activeObjective').mockResolvedValue({
+      objective: OBJECTIVE,
+      milestones: [],
+      constraints: [],
+      active_program: null,
+    })
+    const addM = vi.spyOn(api, 'createObjective').mockResolvedValue({
+      ...OBJECTIVE,
+      id: 5,
+      name: 'Mailbox Peak',
+      target_date: '2026-08-01',
+      parent_objective_id: OBJECTIVE.id,
+    })
+    renderWithProviders(<ObjectiveSheet open onClose={() => {}} onSaved={() => {}} />)
+
+    // The milestones section's "+ Add" is the first one (rendered before constraints).
+    const addButtons = await screen.findAllByText('+ Add')
+    fireEvent.click(addButtons[0])
+    fireEvent.change(screen.getByPlaceholderText(/Mailbox Peak/), {
+      target: { value: 'Mailbox Peak' },
+    })
+    // Two date inputs now (objective target + milestone target); the milestone's
+    // is rendered last.
+    const dateInputs = document.querySelectorAll('input[type="date"]')
+    fireEvent.change(dateInputs[dateInputs.length - 1], {
+      target: { value: '2026-08-01' },
+    })
+    fireEvent.click(screen.getByText('Add milestone'))
+
+    await waitFor(() =>
+      expect(addM).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'Mailbox Peak',
+          kind: 'dated',
+          target_date: '2026-08-01',
+          is_primary: false,
+          parent_objective_id: OBJECTIVE.id,
+        }),
+      ),
+    )
+  })
+
+  it('renders existing milestones under the objective', async () => {
+    vi.spyOn(api, 'activeObjective').mockResolvedValue({
+      objective: OBJECTIVE,
+      milestones: [
+        { ...OBJECTIVE, id: 5, name: 'Mailbox Peak', target_date: '2026-08-01', parent_objective_id: OBJECTIVE.id },
+      ],
+      constraints: [],
+      active_program: null,
+    })
+    renderWithProviders(<ObjectiveSheet open onClose={() => {}} onSaved={() => {}} />)
+    expect(await screen.findByText('Training milestones')).toBeInTheDocument()
+    expect(screen.getByText('Mailbox Peak')).toBeInTheDocument()
   })
 })

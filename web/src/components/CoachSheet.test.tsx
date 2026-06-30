@@ -106,9 +106,11 @@ describe('CoachSheet', () => {
         sport: 'alpine',
         demands_profile: null,
         is_primary: true,
+        parent_objective_id: null,
         created_at: '',
         updated_at: '',
       },
+      milestones: [],
       constraints: [
         {
           id: 2,
@@ -138,9 +140,11 @@ describe('CoachSheet', () => {
       sport: 'alpine',
       demands_profile: null,
       is_primary: true,
+      parent_objective_id: null,
       created_at: '',
       updated_at: '',
     },
+    milestones: [],
     constraints: [],
     active_program: null,
   }
