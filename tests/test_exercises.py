@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from unittest import mock
+
+import numpy as np
+import pytest
+
 
 def test_search_keyword_acronym(client):
     # Curated alias RDL -> Romanian Deadlift, resolved via BM25.
@@ -44,6 +49,58 @@ def test_create_novel_multiword_exercise_not_blocked(client):
     # and it persists / is findable
     hits = client.get("/api/exercises/search", params={"q": "lunge dumbbell overhead"}).json()
     assert new_id in [h["exercise"]["id"] for h in hits]
+
+
+def test_create_with_similar_hint_never_blocks(client):
+    # A near-duplicate name must still create on the spot (never gated) and
+    # surface the match as a non-blocking hint alongside the new exercise.
+    from api.services.search import get_search_service
+
+    svc = get_search_service()
+    existing = client.get(
+        "/api/exercises/search", params={"q": "Barbell Deadlift"}
+    ).json()[0]["exercise"]
+
+    # Force a deterministic hint: pin the existing exercise's name-only vector
+    # to unit-x and the candidate embedding to the same direction, independent
+    # of the real embedding model's behavior on this particular string pair.
+    v = np.zeros(svc.settings.embed_dim, dtype=np.float32)
+    v[0] = 1.0
+    svc.name_vec.set(str(existing["id"]), v)
+    try:
+        with mock.patch("api.services.search.embed", return_value=v * 0.95):
+            r = client.post("/api/exercises", json={"name": "Barbell Deadlift Variant XYZ"})
+    finally:
+        svc.name_vec.delete(str(existing["id"]))
+        svc.name_vec.save()
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["created"] is True
+    assert body["reason"] == "created"
+    assert body["similar_to"]["id"] == existing["id"]
+    assert body["similar_to_similarity"] == pytest.approx(1.0)
+
+
+def test_find_similar_hint_respects_threshold(client):
+    from api.services.search import get_search_service
+
+    svc = get_search_service()
+    v = np.zeros(svc.settings.embed_dim, dtype=np.float32)
+    v[0] = 1.0
+    svc.name_vec.set("999999", v)
+    try:
+        with mock.patch("api.services.search.embed", return_value=v * 0.95):
+            hit = svc.find_similar_hint("close variant")
+        assert hit == (999999, pytest.approx(1.0))
+
+        orthogonal = np.zeros(svc.settings.embed_dim, dtype=np.float32)
+        orthogonal[1] = 1.0
+        with mock.patch("api.services.search.embed", return_value=orthogonal):
+            assert svc.find_similar_hint("unrelated exercise") is None
+    finally:
+        svc.name_vec.delete("999999")
+        svc.name_vec.save()
 
 
 def test_create_new_exercise_then_searchable(client):

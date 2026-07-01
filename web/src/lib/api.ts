@@ -46,10 +46,12 @@ export interface SearchHit {
 
 export interface CreateResult {
   created: boolean
-  reason: 'created' | 'exact' | 'similar'
+  reason: 'created' | 'exact'
   exercise: Exercise | null
   duplicate_of: Exercise | null
-  similarity: number | null
+  // Non-blocking "similar exercise" hint, set alongside a successful create.
+  similar_to: Exercise | null
+  similar_to_similarity: number | null
 }
 
 export interface PerformedSet {

@@ -23,11 +23,17 @@ class Settings(BaseSettings):
     embed_dim: int = 384
     fastembed_cache_dir: str = ".fastembed_cache"
     vector_store_path: str = "data/exercises.npz"
+    # Separate name-only embedding index for the add-exercise dedup hint. Kept
+    # apart from the search index above (name+keywords) because that diluted
+    # signal clustered any shared word ~0.8+ and produced confident false
+    # positives (e.g. "lunge dumbbell overhead" -> "Incline Dumbbell Flyes" @
+    # 0.85); a name-only index is the higher-precision signal the hint needs.
+    name_vector_store_path: str = "data/exercise_names.npz"
     rrf_k: int = 60
-    # cosine >= this => advisory "did you mean?" on add-exercise (name+keywords
-    # embeddings cluster name-variants ~0.8+, so this is a suggestion, not a
-    # hard block; exact normalized-name matches are caught lexically first).
-    dedup_threshold: float = 0.82
+    # cosine >= this => non-blocking "similar exercise" hint alongside a
+    # successful create (never gates the create itself; exact normalized-name
+    # matches are caught lexically first, above, and remain a hard block).
+    dedup_hint_threshold: float = 0.90
     search_limit: int = 25
 
     # Single-user MVP identity (schema-ready multitenancy).

@@ -50,11 +50,15 @@ class ExerciseCreate(BaseModel):
 
 class ExerciseCreateResult(BaseModel):
     created: bool
-    # 'created' (new row), 'exact' (normalized-name match), 'similar' (advisory)
+    # 'created' (new row) or 'exact' (blocked: normalized-name match).
     reason: str
     exercise: ExerciseOut | None = None
     duplicate_of: ExerciseOut | None = None
-    similarity: float | None = None
+    # Non-blocking "similar exercise" hint, populated alongside a successful
+    # create when the name-only index finds a close catalog neighbor. Never
+    # gates creation — advisory only.
+    similar_to: ExerciseOut | None = None
+    similar_to_similarity: float | None = None
 
 
 class AliasCreate(BaseModel):

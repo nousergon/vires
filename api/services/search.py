@@ -6,9 +6,10 @@ Fuses two retrievers over the catalog:
   ("the hamstring curl where your feet are held down").
 
 Results are combined with Reciprocal Rank Fusion (each covers the other's blind
-spot). The *same* embedding index backs near-duplicate detection on
-add-exercise (``find_duplicate``), so synonyms collapse to a canonical entry
-instead of inflating the catalog (brief §5c/§5d).
+spot). A *separate* name-only embedding index backs the add-exercise "similar
+exercise" hint (``find_similar_hint``) — kept apart from the name+keywords
+search index above, because that diluted signal clustered any shared word
+~0.8+ and produced confident false positives (brief §5c/§5d).
 
 Everything sits behind ``SearchService`` so the eventual pgvector + Postgres-FTS
 swap (multi-tenant scale) is a contained change.
@@ -63,6 +64,7 @@ class SearchService:
     def __init__(self, settings: Settings):
         self.settings = settings
         self.vec = VecStore(settings.vector_store_path, dim=settings.embed_dim)
+        self.name_vec = VecStore(settings.name_vector_store_path, dim=settings.embed_dim)
 
     # -- retrieval -------------------------------------------------------- #
     def _bm25(self, session: Session, query: str, limit: int) -> list[int]:
@@ -127,19 +129,25 @@ class SearchService:
         )
         self.vec.set(str(exercise.id), embed(txt))
         self.vec.save()
+        self.name_vec.set(str(exercise.id), embed(exercise.name))
+        self.name_vec.save()
 
     def remove_exercise(self, exercise_id: int) -> None:
         if self.vec.delete(str(exercise_id)):
             self.vec.save()
+        if self.name_vec.delete(str(exercise_id)):
+            self.name_vec.save()
 
     def reindex(self, session: Session) -> int:
         """Rebuild the entire vector index from the catalog (skips alias rows)."""
         self.vec.clear()
+        self.name_vec.clear()
         exercises = list(
             session.scalars(select(Exercise).where(Exercise.canonical_exercise_id.is_(None)))
         )
         if not exercises:
             self.vec.save()
+            self.name_vec.save()
             return 0
         texts = [
             _embed_text(
@@ -149,20 +157,24 @@ class SearchService:
         ]
         for e, v in zip(exercises, embed_batch(texts), strict=True):
             self.vec.set(str(e.id), v)
+        for e, v in zip(exercises, embed_batch([e.name for e in exercises]), strict=True):
+            self.name_vec.set(str(e.id), v)
         self.vec.save()
+        self.name_vec.save()
         return len(exercises)
 
-    # -- dedup ------------------------------------------------------------ #
-    def find_duplicate(
+    # -- dedup hint --------------------------------------------------------- #
+    def find_similar_hint(
         self, name: str, *, threshold: float | None = None
     ) -> tuple[int, float] | None:
         """Return ``(exercise_id, similarity)`` of the nearest catalog entry above
-        the dedup threshold, else ``None``. Used to suggest an alias link rather
-        than creating a near-duplicate."""
-        # Dedup is symmetric (name <-> indexed name+keywords): embed the candidate
-        # as a passage, NOT with the asymmetric query prefix.
-        threshold = self.settings.dedup_threshold if threshold is None else threshold
-        hits = self.vec.search(embed(name), k=5)
+        the dedup-hint threshold on the name-only index, else ``None``. Advisory
+        only — callers must never use this to block a create; the exact
+        normalized-name check is the only hard gate."""
+        # Symmetric (name <-> indexed name): embed the candidate as a passage,
+        # NOT with the asymmetric query prefix.
+        threshold = self.settings.dedup_hint_threshold if threshold is None else threshold
+        hits = self.name_vec.search(embed(name), k=5)
         for h in hits:
             if h["similarity"] >= threshold:
                 return int(h["id"]), h["similarity"]
@@ -181,7 +193,10 @@ def main() -> None:
     svc = get_search_service()
     with SessionLocal() as session:
         n = svc.reindex(session)
-    print(f"Reindexed {n} exercises -> {svc.settings.vector_store_path}")
+    print(
+        f"Reindexed {n} exercises -> {svc.settings.vector_store_path} "
+        f"+ {svc.settings.name_vector_store_path}"
+    )
 
 
 if __name__ == "__main__":
