@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json
 import logging
-import urllib.error
 import urllib.request
 
 from api.services.geo.measure import GeoPoint
@@ -39,7 +38,9 @@ def _fetch_batch(batch: list[GeoPoint], *, opener=urllib.request.urlopen) -> lis
             log.warning("open-meteo elevation: unexpected shape (%s pts)", len(batch))
             return None
         return [float(e) for e in elevations]
-    except (urllib.error.URLError, TimeoutError, ValueError, KeyError) as e:
+    except (OSError, ValueError, KeyError) as e:
+        # OSError subsumes URLError + read-phase TimeoutError + socket errors —
+        # a URLError-only catch misses bare TimeoutError from getresponse().
         log.warning("open-meteo elevation fetch failed, degrading to manual: %s", e)
         return None
 

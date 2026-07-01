@@ -4,6 +4,21 @@ import { renderWithProviders, SETTINGS, makeSession } from '../test/utils'
 import { api } from '../lib/api'
 import RuckForm from './RuckForm'
 
+// The Leaflet map is browser-only (WebGL/DOM); stub it so the draw-mode flow is
+// testable — the stub adds two waypoints via the real onAddPoint callback.
+vi.mock('./RouteDrawMap', () => ({
+  default: ({ onAddPoint }: { onAddPoint: (lat: number, lon: number) => void }) => (
+    <button
+      onClick={() => {
+        onAddPoint(47.6, -121.6)
+        onAddPoint(47.62, -121.6)
+      }}
+    >
+      stub-add-2-points
+    </button>
+  ),
+}))
+
 beforeEach(() => {
   vi.restoreAllMocks()
   localStorage.clear()
@@ -92,9 +107,9 @@ describe('RuckForm', () => {
     const [pack, body] = await screen.findAllByRole('spinbutton')
     fireEvent.change(pack, { target: { value: '45' } })
     fireEvent.change(body, { target: { value: '180' } })
-    fireEvent.click(screen.getByText('Find a trail'))
-    fireEvent.change(screen.getByLabelText('trail name'), { target: { value: 'Mailbox Peak' } })
     fireEvent.click(screen.getByText('Search'))
+    fireEvent.change(screen.getByLabelText('trail name'), { target: { value: 'Mailbox Peak' } })
+    fireEvent.click(screen.getByText('Find'))
     fireEvent.click(await screen.findByText('Mailbox Peak Trail'))
 
     // Distance field (3rd spinbutton: pack, body, distance) auto-fills to 5 mi.
@@ -104,6 +119,31 @@ describe('RuckForm', () => {
     fireEvent.click(screen.getByText('Log ruck'))
     await waitFor(() => expect(log).toHaveBeenCalled())
     expect(log.mock.calls[0][0].source).toBe('route_search')
+  })
+
+  it('draw-on-map measures the traced route and logs source route_draw', async () => {
+    const measure = vi.spyOn(api, 'measureRoute').mockResolvedValue({
+      distance_m: 8046, elevation_gain_m: 305, point_count: 2, duration_s: null,
+    })
+    const log = vi.spyOn(api, 'logRuck').mockResolvedValue(ruckResult(4184))
+    renderWithProviders(<RuckForm open onClose={() => {}} />)
+
+    const [pack, body] = await screen.findAllByRole('spinbutton')
+    fireEvent.change(pack, { target: { value: '45' } })
+    fireEvent.change(body, { target: { value: '180' } })
+    fireEvent.click(screen.getByText('Draw'))
+    // The mocked map stub drops two waypoints when clicked.
+    fireEvent.click(screen.getByText('stub-add-2-points'))
+    fireEvent.click(screen.getByText(/Measure route \(2 pts\)/))
+
+    await waitFor(() => expect(measure).toHaveBeenCalledTimes(1))
+    expect(measure.mock.calls[0][0]).toHaveLength(2)
+    await waitFor(() =>
+      expect((screen.getAllByRole('spinbutton')[2] as HTMLInputElement).value).toBe('5'),
+    )
+    fireEvent.click(screen.getByText('Log ruck'))
+    await waitFor(() => expect(log).toHaveBeenCalled())
+    expect(log.mock.calls[0][0].source).toBe('route_draw')
   })
 
   it('gpx import fills distance + duration and logs source gpx', async () => {
@@ -116,7 +156,7 @@ describe('RuckForm', () => {
     const [pack, body] = await screen.findAllByRole('spinbutton')
     fireEvent.change(pack, { target: { value: '45' } })
     fireEvent.change(body, { target: { value: '180' } })
-    fireEvent.click(screen.getByText('Import GPX'))
+    fireEvent.click(screen.getByText('GPX'))
     const file = new File(['<gpx></gpx>'], 'hike.gpx', { type: 'application/gpx+xml' })
     fireEvent.change(screen.getByLabelText('gpx file'), { target: { files: [file] } })
 

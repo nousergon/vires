@@ -26,6 +26,12 @@ def _opener_raising(_req, timeout=None):
     raise urllib.error.URLError("provider down")
 
 
+def _opener_timeout(_req, timeout=None):
+    # Read-phase timeouts surface as a BARE TimeoutError (an OSError), not wrapped
+    # in URLError — the case the OSError catch must still handle fail-soft.
+    raise TimeoutError("read timed out")
+
+
 # --- elevation.fill_elevations -------------------------------------------- #
 def test_fill_elevations_populates_missing():
     pts = [GeoPoint(47.6, -122.3), GeoPoint(47.61, -122.3)]
@@ -45,6 +51,12 @@ def test_fill_elevations_failsoft_returns_unchanged():
     pts = [GeoPoint(47.6, -122.3), GeoPoint(47.61, -122.3)]
     filled = elevation.fill_elevations(pts, opener=_opener_raising)
     assert all(p.ele_m is None for p in filled)  # degrades, does not raise
+
+
+def test_fill_elevations_failsoft_on_readphase_timeout():
+    pts = [GeoPoint(47.6, -122.3), GeoPoint(47.61, -122.3)]
+    filled = elevation.fill_elevations(pts, opener=_opener_timeout)
+    assert all(p.ele_m is None for p in filled)  # bare TimeoutError still caught
 
 
 # --- overpass.search_trails ----------------------------------------------- #
@@ -76,3 +88,7 @@ def test_search_trails_short_query_skips():
 
 def test_search_trails_failsoft_returns_empty():
     assert overpass.search_trails("Mailbox Peak", opener=_opener_raising) == []
+
+
+def test_search_trails_failsoft_on_readphase_timeout():
+    assert overpass.search_trails("Mailbox Peak", opener=_opener_timeout) == []
