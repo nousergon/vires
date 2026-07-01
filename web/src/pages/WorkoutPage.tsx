@@ -9,6 +9,7 @@ import { useSettings } from '../lib/useSettings'
 import { Button, Card, EmptyState, PageTitle, Spinner } from '../components/ui'
 import ExercisePicker from '../components/ExercisePicker'
 import RuckForm from '../components/RuckForm'
+import PlateCalculatorSheet from '../components/PlateCalculatorSheet'
 
 export const ACTIVE_KEY = 'vires.activeWorkout'
 
@@ -453,6 +454,10 @@ function ExerciseBlock({
   const [restInput, setRestInput] = useState(String(restSecs))
   const holdSecs = se.target_duration_seconds ?? 60
 
+  const [plateCalcOpen, setPlateCalcOpen] = useState(false)
+  const lastSetWeight = se.sets[se.sets.length - 1]?.weight
+  const plateCalcSeed = lastSetWeight ?? se.target_weight ?? prev?.sets[0]?.weight ?? null
+
   async function addSet() {
     const idx = se.sets.length
     const ghost = prev?.sets[idx] ?? prev?.sets[prev.sets.length - 1]
@@ -518,7 +523,22 @@ function ExerciseBlock({
         <ColToggle label="Weight" on={showWeight} onToggle={setShowWeight} />
         <ColToggle label="Reps" on={showReps} onToggle={setShowReps} />
         <ColToggle label="Timer" on={showTimer} onToggle={setShowTimer} />
+        {showWeight && (
+          <button
+            className="rounded-full bg-slate-800 px-2.5 py-1 text-xs text-slate-300"
+            onClick={() => setPlateCalcOpen(true)}
+            title="Plate calculator"
+          >
+            🏋 Plates
+          </button>
+        )}
       </div>
+      <PlateCalculatorSheet
+        open={plateCalcOpen}
+        onClose={() => setPlateCalcOpen(false)}
+        unit={settings.weight_unit}
+        initialWeight={plateCalcSeed}
+      />
 
       <label className="mt-1.5 flex items-center gap-2 text-xs text-slate-400">
         <input
