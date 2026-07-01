@@ -38,6 +38,7 @@ _USER_TABLES = [
     "template_exercises",
     "workout_templates",
     "programs",
+    "calendar_events",
     "objectives",
     "training_constraints",
     "push_subscriptions",
