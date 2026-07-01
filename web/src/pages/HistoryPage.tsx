@@ -9,7 +9,19 @@ import {
 } from '../lib/api'
 import { useSettings } from '../lib/useSettings'
 import { fmtClock } from '../lib/timer'
+import { fmtDistance, fmtElevation, fmtLoad, fmtPack } from '../lib/units'
+import type { WeightUnit } from '../lib/api'
 import { Button, Card, EmptyState, PageTitle, Sheet, Spinner } from '../components/ui'
+
+// One-line summary of a ruck's headline facts (pack · distance · load).
+function ruckLine(
+  ruck: { pack_weight_kg: number; distance_m: number | null; metabolic_cost_kj: number | null },
+  unit: WeightUnit,
+): string {
+  return [fmtPack(ruck.pack_weight_kg, unit), fmtDistance(ruck.distance_m, unit), fmtLoad(ruck.metabolic_cost_kj)]
+    .filter(Boolean)
+    .join(' · ')
+}
 
 type Tab = 'sessions' | 'records'
 
@@ -39,6 +51,7 @@ export default function HistoryPage() {
 // --------------------------------------------------------------------------- //
 function SessionsView() {
   const qc = useQueryClient()
+  const unit = useSettings().weight_unit
   const { data: workouts = [], isLoading } = useQuery({
     queryKey: ['workouts'],
     queryFn: api.listWorkouts,
@@ -138,15 +151,24 @@ function SessionsView() {
                 )}
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center justify-between">
-                    <span className="truncate font-semibold text-slate-100">{w.name || 'Workout'}</span>
+                    <span className="truncate font-semibold text-slate-100">
+                      {w.session_type === 'ruck' ? '🎒 ' : ''}
+                      {w.name || (w.session_type === 'ruck' ? 'Ruck' : 'Workout')}
+                    </span>
                     <span className="ml-2 shrink-0 text-xs text-slate-400">
                       {new Date(w.started_at).toLocaleDateString()}
                     </span>
                   </span>
                   <span className="mt-1 block text-xs text-slate-400">
-                    {w.exercise_count} exercises · {w.set_count} sets
-                    {w.total_volume > 0 && ` · ${w.total_volume.toLocaleString()} vol`}
-                    {!w.ended_at && <span className="ml-2 text-amber-400">in progress</span>}
+                    {w.session_type === 'ruck' && w.ruck ? (
+                      ruckLine(w.ruck, unit)
+                    ) : (
+                      <>
+                        {w.exercise_count} exercises · {w.set_count} sets
+                        {w.total_volume > 0 && ` · ${w.total_volume.toLocaleString()} vol`}
+                        {!w.ended_at && <span className="ml-2 text-amber-400">in progress</span>}
+                      </>
+                    )}
                   </span>
                 </span>
               </button>
@@ -177,6 +199,38 @@ function SessionsView() {
         {detail && (
           <div className="space-y-4">
             <p className="text-sm text-slate-400">{new Date(detail.started_at).toLocaleString()}</p>
+            {detail.session_type === 'ruck' && detail.ruck && (
+              <dl className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <dt className="text-xs uppercase tracking-wide text-slate-500">Pack</dt>
+                  <dd className="font-semibold text-slate-100">{fmtPack(detail.ruck.pack_weight_kg, unit)}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs uppercase tracking-wide text-slate-500">Load</dt>
+                  <dd className="font-semibold text-amber-400">
+                    {fmtLoad(detail.ruck.metabolic_cost_kj) ?? '—'}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs uppercase tracking-wide text-slate-500">Distance</dt>
+                  <dd className="text-slate-200">{fmtDistance(detail.ruck.distance_m, unit) ?? '—'}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs uppercase tracking-wide text-slate-500">Elevation gain</dt>
+                  <dd className="text-slate-200">{fmtElevation(detail.ruck.elevation_gain_m, unit) ?? '—'}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs uppercase tracking-wide text-slate-500">Duration</dt>
+                  <dd className="text-slate-200">
+                    {detail.ruck.duration_s != null ? fmtClock(detail.ruck.duration_s) : '—'}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs uppercase tracking-wide text-slate-500">Terrain</dt>
+                  <dd className="capitalize text-slate-200">{detail.ruck.terrain}</dd>
+                </div>
+              </dl>
+            )}
             {detail.exercises.map((se) => (
               <div key={se.id}>
                 <h3 className="font-semibold text-slate-100">{se.exercise.name}</h3>

@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
 from api.schemas.exercise import ExerciseBrief, ExercisePerformance
+
+# Coarse terrain classes accepted for a ruck (→ Pandolf terrain factor server-side).
+Terrain = Literal["treadmill", "road", "trail", "offtrail", "snow"]
 
 
 class WorkoutStart(BaseModel):
@@ -89,18 +93,56 @@ class SessionExerciseOut(BaseModel):
     previous_performance: ExercisePerformance | None = None
 
 
+# --------------------------------------------------------------------------- #
+# Ruck (loaded-cardio) — Tier 0 quick-log
+# --------------------------------------------------------------------------- #
+class RuckLogIn(BaseModel):
+    """Quick-log a completed ruck. Numbers arrive in the USER'S display units
+    (weights in the account's ``weight_unit``; distance/elevation in mi/ft when
+    that unit is ``lb``, km/m when ``kg``). The router converts to canonical SI
+    once, at the boundary."""
+
+    pack_weight: float = Field(gt=0, description="Carried load, in the user's weight unit")
+    bodyweight: float = Field(gt=0, description="Body mass, in the user's weight unit")
+    distance: float | None = Field(default=None, ge=0)
+    elevation_gain: float | None = Field(default=None, ge=0)
+    duration_s: int | None = Field(default=None, ge=0)
+    terrain: Terrain = "trail"
+    name: str | None = None
+    # Optional backdate (e.g. logging yesterday's ruck). Defaults to now server-side.
+    started_at: datetime | None = None
+
+
+class RuckDetailOut(BaseModel):
+    """Canonical SI ruck detail + the derived metabolic cost. The frontend converts
+    back to the user's display units for rendering."""
+
+    pack_weight_kg: float
+    bodyweight_kg: float
+    distance_m: float | None = None
+    elevation_gain_m: float | None = None
+    duration_s: int | None = None
+    terrain: str = "trail"
+    metabolic_cost_kj: float | None = None
+    source: str = "manual"
+
+
 class WorkoutSessionOut(BaseModel):
     id: int
+    session_type: str = "strength"
     name: str | None = None
     started_at: datetime
     ended_at: datetime | None = None
     notes: str | None = None
     template_id: int | None = None
     exercises: list[SessionExerciseOut]
+    # Present only for session_type == 'ruck'.
+    ruck: RuckDetailOut | None = None
 
 
 class WorkoutSummary(BaseModel):
     id: int
+    session_type: str = "strength"
     name: str | None = None
     started_at: datetime
     ended_at: datetime | None = None
@@ -109,3 +151,5 @@ class WorkoutSummary(BaseModel):
     total_volume: float = Field(
         default=0.0, description="Sum of reps*weight over completed working sets"
     )
+    # Compact ruck facts for the history row (None for strength sessions).
+    ruck: RuckDetailOut | None = None

@@ -96,12 +96,14 @@ export function makeSessionExercise(over: Partial<SessionExercise> = {}): Sessio
 export function makeSession(over: Partial<WorkoutSession> = {}): WorkoutSession {
   return {
     id: 10,
+    session_type: 'strength',
     name: 'Push Day',
     started_at: '2026-06-28T18:00:00Z',
     ended_at: null,
     notes: null,
     template_id: null,
     exercises: [makeSessionExercise()],
+    ruck: null,
     ...over,
   }
 }

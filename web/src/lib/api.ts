@@ -92,24 +92,55 @@ export interface SessionExercise {
   previous_performance: ExercisePerformance | null
 }
 
+export type SessionType = 'strength' | 'ruck'
+
+export type Terrain = 'treadmill' | 'road' | 'trail' | 'offtrail' | 'snow'
+
+// Canonical SI ruck detail (the API stores/returns SI; the UI converts for display).
+export interface RuckDetail {
+  pack_weight_kg: number
+  bodyweight_kg: number
+  distance_m: number | null
+  elevation_gain_m: number | null
+  duration_s: number | null
+  terrain: string
+  metabolic_cost_kj: number | null
+  source: string
+}
+
+// Quick-log payload — numbers in the account's DISPLAY units (server converts).
+export interface RuckLogInput {
+  pack_weight: number
+  bodyweight: number
+  distance?: number | null
+  elevation_gain?: number | null
+  duration_s?: number | null
+  terrain?: Terrain
+  name?: string | null
+}
+
 export interface WorkoutSession {
   id: number
+  session_type: SessionType
   name: string | null
   started_at: string
   ended_at: string | null
   notes: string | null
   template_id: number | null
   exercises: SessionExercise[]
+  ruck: RuckDetail | null
 }
 
 export interface WorkoutSummary {
   id: number
+  session_type: SessionType
   name: string | null
   started_at: string
   ended_at: string | null
   exercise_count: number
   set_count: number
   total_volume: number
+  ruck: RuckDetail | null
 }
 
 export interface TemplateExercise {
@@ -428,6 +459,8 @@ export const api = {
   // workouts
   startWorkout: (body: { template_id?: number | null; name?: string | null }) =>
     req<WorkoutSession>('/workouts', { method: 'POST', body: JSON.stringify(body) }),
+  logRuck: (body: RuckLogInput) =>
+    req<WorkoutSession>('/workouts/ruck', { method: 'POST', body: JSON.stringify(body) }),
   listWorkouts: () => req<WorkoutSummary[]>('/workouts'),
   getWorkout: (id: number) => req<WorkoutSession>(`/workouts/${id}`),
   finishWorkout: (id: number) => req<WorkoutSession>(`/workouts/${id}/finish`, { method: 'POST' }),
