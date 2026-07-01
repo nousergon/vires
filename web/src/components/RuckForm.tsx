@@ -10,8 +10,18 @@ import {
 } from '../lib/api'
 import { useSettings } from '../lib/useSettings'
 import { distanceUnit, elevationUnit, fmtLoad, metersToDistance, metersToElevation } from '../lib/units'
+import { isoDate } from '../lib/calendar'
 import { Button, Sheet } from './ui'
 import RouteDrawMap from './RouteDrawMap'
+
+// A backdated ruck keeps today's time-of-day but takes on the chosen day —
+// there's no real start/stop capture in Tier 0, so this is the closest sane
+// timestamp to "it happened on that day."
+function startedAtFor(dateStr: string): string {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const now = new Date()
+  return new Date(y, m - 1, d, now.getHours(), now.getMinutes(), now.getSeconds()).toISOString()
+}
 
 // Pack weight + bodyweight are remembered so the highest-friction inputs become
 // one tap ("same as last") on the next ruck — the load number is the only thing
@@ -65,6 +75,7 @@ export default function RuckForm({ open, onClose }: { open: boolean; onClose: ()
   const { weight_unit } = useSettings()
 
   const [mode, setMode] = useState<Mode>('manual')
+  const [date, setDate] = useState(() => isoDate(new Date()))
   const [pack, setPack] = useState(() => localStorage.getItem(LAST_PACK) ?? '')
   const [body, setBody] = useState(() => localStorage.getItem(LAST_BODY) ?? '')
   const [distance, setDistance] = useState('')
@@ -112,6 +123,7 @@ export default function RuckForm({ open, onClose }: { open: boolean; onClose: ()
         duration_s: durationS,
         terrain,
         source,
+        started_at: startedAtFor(date),
       })
     },
     onSuccess: (ws) => {
@@ -126,6 +138,7 @@ export default function RuckForm({ open, onClose }: { open: boolean; onClose: ()
   function reset() {
     setResult(null)
     setMode('manual')
+    setDate(isoDate(new Date()))
     setDistance('')
     setElevation('')
     setHours('')
@@ -168,6 +181,16 @@ export default function RuckForm({ open, onClose }: { open: boolean; onClose: ()
         </div>
       ) : (
         <div className="space-y-4">
+          <Field label="Date">
+            <input
+              className={inputCls}
+              type="date"
+              value={date}
+              max={isoDate(new Date())}
+              onChange={(e) => setDate(e.target.value)}
+            />
+          </Field>
+
           <Field label={`Pack weight (${weight_unit})`}>
             <input
               className={inputCls}

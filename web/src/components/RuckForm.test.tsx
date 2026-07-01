@@ -67,6 +67,24 @@ describe('RuckForm', () => {
     expect(await screen.findByText(/1,000 kcal/)).toBeInTheDocument()
   })
 
+  it('backdates started_at when a past date is chosen', async () => {
+    const log = vi.spyOn(api, 'logRuck').mockResolvedValue(ruckResult(4184))
+    renderWithProviders(<RuckForm open onClose={() => {}} />)
+
+    const dateInput = document.querySelector('input[type="date"]') as HTMLInputElement
+    fireEvent.change(dateInput, { target: { value: '2026-06-15' } })
+    const [packInput, bodyInput] = await screen.findAllByRole('spinbutton')
+    fireEvent.change(packInput, { target: { value: '45' } })
+    fireEvent.change(bodyInput, { target: { value: '180' } })
+    fireEvent.click(screen.getByText('Log ruck'))
+
+    await waitFor(() => expect(log).toHaveBeenCalledTimes(1))
+    const startedAt = log.mock.calls[0][0].started_at!
+    expect(new Date(startedAt).getFullYear()).toBe(2026)
+    expect(new Date(startedAt).getMonth()).toBe(5) // June (0-indexed)
+    expect(new Date(startedAt).getDate()).toBe(15)
+  })
+
   it('shows a nudge instead of a load when distance/time are omitted', async () => {
     vi.spyOn(api, 'logRuck').mockResolvedValue(ruckResult(null))
     renderWithProviders(<RuckForm open onClose={() => {}} />)
