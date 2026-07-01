@@ -1,10 +1,17 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, type CalendarEntry, type Objective, type PlannedExercise } from '../lib/api'
+import {
+  api,
+  type CalendarEntry,
+  type CalendarEventOccurrence,
+  type Objective,
+  type PlannedExercise,
+} from '../lib/api'
 import { Button, EmptyState, PageTitle, Sheet, Spinner } from '../components/ui'
 import CoachSheet from '../components/CoachSheet'
 import ObjectiveSheet from '../components/ObjectiveSheet'
+import CalendarEventSheet from '../components/CalendarEventSheet'
 import { useSettings } from '../lib/useSettings'
 import { ACTIVE_KEY } from './WorkoutPage'
 import {
@@ -28,9 +35,15 @@ export default function PlanPage() {
   const [objectiveSheet, setObjectiveSheet] = useState<{ open: boolean; id?: number }>({
     open: false,
   })
+  // { open } with an optional id — id present = edit that calendar event, absent = add
+  // new (optionally seeded with the tapped day via `date`).
+  const [eventSheet, setEventSheet] = useState<{ open: boolean; id?: number; date?: string }>({
+    open: false,
+  })
   const [modifyProgram, setModifyProgram] = useState<{ id: number; name: string } | null>(null)
 
   const openObjective = (id?: number) => setObjectiveSheet({ open: true, id })
+  const openEvent = (id?: number, date?: string) => setEventSheet({ open: true, id, date })
 
   const openCoach = (auto: boolean) => {
     setCoachAutoStart(auto)
@@ -46,14 +59,31 @@ export default function PlanPage() {
     queryFn: () => api.calendar(rangeStart, rangeEnd),
   })
 
+  // Athletic-calendar events (markers) — separate endpoint from objectives
+  // (bands); weekly recurrence is expanded server-side within [rangeStart, rangeEnd].
+  const { data: occurrences = [] } = useQuery({
+    queryKey: ['calendar-events-window', rangeStart, rangeEnd],
+    queryFn: () => api.calendarEventsWindow(rangeStart, rangeEnd),
+  })
+
   const byDate = useMemo(() => {
     const m = new Map<string, CalendarEntry[]>()
     entries.forEach((e) => m.set(e.date, [...(m.get(e.date) ?? []), e]))
     return m
   }, [entries])
 
+  const eventsByDate = useMemo(() => {
+    const m = new Map<string, CalendarEventOccurrence[]>()
+    occurrences.forEach((o) =>
+      m.set(o.occurrence_date, [...(m.get(o.occurrence_date) ?? []), o]),
+    )
+    return m
+  }, [occurrences])
+
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['calendar'] })
+    qc.invalidateQueries({ queryKey: ['calendar-events'] })
+    qc.invalidateQueries({ queryKey: ['calendar-events-window'] })
     qc.invalidateQueries({ queryKey: ['programs'] })
     qc.invalidateQueries({ queryKey: ['active-objective'] })
   }
@@ -85,7 +115,14 @@ export default function PlanPage() {
       {isLoading ? (
         <Spinner />
       ) : (
-        <CalendarGrid weeks={weeks} month={month} today={today} byDate={byDate} onPick={setSelected} />
+        <CalendarGrid
+          weeks={weeks}
+          month={month}
+          today={today}
+          byDate={byDate}
+          eventsByDate={eventsByDate}
+          onPick={setSelected}
+        />
       )}
 
       <Legend />
@@ -95,19 +132,31 @@ export default function PlanPage() {
         onGenerate={() => openCoach(true)}
       />
 
+      <EventsSection onAdd={() => openEvent()} />
+
       <ProgramsSection onModify={setModifyProgram} onChanged={refresh} />
 
       <DaySheet
         date={selected}
         entries={selected ? byDate.get(isoDate(selected)) ?? [] : []}
+        occurrences={selected ? eventsByDate.get(isoDate(selected)) ?? [] : []}
         onClose={() => setSelected(null)}
         onChanged={refresh}
         onStarted={onStarted}
+        onEditEvent={(id) => openEvent(id)}
+        onAddEvent={() => (selected ? openEvent(undefined, isoDate(selected)) : openEvent())}
       />
       <ObjectiveSheet
         open={objectiveSheet.open}
         objectiveId={objectiveSheet.id}
         onClose={() => setObjectiveSheet({ open: false })}
+        onSaved={refresh}
+      />
+      <CalendarEventSheet
+        open={eventSheet.open}
+        eventId={eventSheet.id}
+        defaultDate={eventSheet.date}
+        onClose={() => setEventSheet({ open: false })}
         onSaved={refresh}
       />
       <CoachSheet
@@ -270,6 +319,66 @@ function objectiveDateLabel(iso: string, eventEnd?: string | null): string {
 }
 
 // --------------------------------------------------------------------------- //
+// Athletic-calendar events: constraints the coach trains AROUND (races, weekly
+// league games, trips, rehab windows) — distinct from Objectives, which are
+// goals the coach peaks TOWARD. Listed here as a flat upcoming list; they also
+// render as markers on the month grid above (see CalendarGrid / DaySheet).
+function EventsSection({ onAdd }: { onAdd: () => void }) {
+  const { data: events = [] } = useQuery({
+    queryKey: ['calendar-events'],
+    queryFn: api.listCalendarEvents,
+  })
+
+  const todayIso = isoDate(new Date())
+  const upcoming = events
+    .filter((e) => e.recurrence === 'weekly' || e.event_date >= todayIso)
+    .sort((a, b) => a.event_date.localeCompare(b.event_date))
+
+  return (
+    <div className="mt-6">
+      <div className="mb-2 flex items-center justify-between">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
+          Athletic calendar
+        </h2>
+        <button className="text-sm text-amber-300 hover:text-amber-200" onClick={onAdd}>
+          + Add
+        </button>
+      </div>
+
+      {upcoming.length === 0 ? (
+        <button
+          onClick={onAdd}
+          className="block w-full rounded-xl border border-dashed border-slate-700 p-3 text-left text-sm text-slate-400 hover:bg-slate-800/40"
+        >
+          Add a race, league game, trip, or rehab window — the coach trains around it.
+        </button>
+      ) : (
+        <div className="space-y-2">
+          {upcoming.map((e) => (
+            <div
+              key={e.id}
+              className="flex items-center justify-between gap-2 rounded-xl border border-sky-700/40 bg-sky-900/15 p-3"
+            >
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-sm font-semibold text-sky-200">
+                  <span>📍</span>
+                  <span className="truncate">{e.name}</span>
+                </div>
+                <div className="mt-0.5 text-xs text-sky-300/70">
+                  {e.type}
+                  {e.recurrence === 'weekly' ? ' · weekly' : ` · ${e.event_date}`}
+                  {e.load && ` · ${e.load.regions}/${e.load.intensity}`}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// --------------------------------------------------------------------------- //
 function ProgramsSection({
   onModify,
   onChanged,
@@ -335,12 +444,14 @@ function CalendarGrid({
   month,
   today,
   byDate,
+  eventsByDate,
   onPick,
 }: {
   weeks: Date[][]
   month: Date
   today: Date
   byDate: Map<string, CalendarEntry[]>
+  eventsByDate: Map<string, CalendarEventOccurrence[]>
   onPick: (d: Date) => void
 }) {
   return (
@@ -353,7 +464,8 @@ function CalendarGrid({
       <div className="grid grid-cols-7 gap-1">
         {weeks.flat().map((d, i) => {
           const inMonth = d.getMonth() === month.getMonth()
-          const es = byDate.get(isoDate(d)) ?? []
+          const iso = isoDate(d)
+          const es = byDate.get(iso) ?? []
           const planned = es.some((e) => e.kind === 'planned' && e.status === 'planned')
           const done = es.some(
             (e) =>
@@ -363,18 +475,29 @@ function CalendarGrid({
           const active = es.some((e) => e.kind === 'session' && e.status === 'in_progress')
           const peak = es.some((e) => e.kind === 'objective')
           const inBlock = es.some((e) => e.kind === 'objective_block')
+          // Athletic-calendar events (constraints) render as a distinct point
+          // MARKER — a small hollow ring badge — never the filled objective
+          // "band" background, so events and objectives stay visually distinct.
+          const eventCount = (eventsByDate.get(iso) ?? []).length
           const isToday = sameDay(d, today)
           return (
             <button
               key={i}
               onClick={() => onPick(d)}
-              aria-label={isoDate(d)}
-              className={`flex aspect-square flex-col items-center justify-center rounded-lg text-sm ${
+              aria-label={iso}
+              className={`relative flex aspect-square flex-col items-center justify-center rounded-lg text-sm ${
                 inMonth ? 'text-slate-200' : 'text-slate-600'
               } ${isToday ? 'ring-1 ring-amber-500' : ''} ${
                 inBlock ? 'bg-fuchsia-500/10' : es.length ? 'bg-slate-800/60' : 'hover:bg-slate-800/40'
               }`}
             >
+              {eventCount > 0 && (
+                <span
+                  className="absolute right-0.5 top-0.5 h-2 w-2 rounded-full border border-sky-400 bg-transparent"
+                  aria-label="athletic event"
+                  title="athletic event"
+                />
+              )}
               <span>{d.getDate()}</span>
               <span className="mt-0.5 flex h-1.5 gap-0.5">
                 {planned && <Dot className="bg-amber-400" />}
@@ -392,7 +515,7 @@ function CalendarGrid({
 
 function Legend() {
   return (
-    <div className="mt-3 flex justify-center gap-4 text-[11px] text-slate-500">
+    <div className="mt-3 flex flex-wrap justify-center gap-4 text-[11px] text-slate-500">
       <span className="flex items-center gap-1">
         <Dot className="bg-amber-400" /> planned
       </span>
@@ -402,6 +525,10 @@ function Legend() {
       <span className="flex items-center gap-1">
         <Dot className="bg-fuchsia-400" /> objective
       </span>
+      <span className="flex items-center gap-1">
+        <span className="h-2 w-2 rounded-full border border-sky-400 bg-transparent" /> athletic
+        event
+      </span>
     </div>
   )
 }
@@ -410,15 +537,21 @@ function Legend() {
 function DaySheet({
   date,
   entries,
+  occurrences,
   onClose,
   onChanged,
   onStarted,
+  onEditEvent,
+  onAddEvent,
 }: {
   date: Date | null
   entries: CalendarEntry[]
+  occurrences: CalendarEventOccurrence[]
   onClose: () => void
   onChanged: () => void
   onStarted: (sessionId: number) => void
+  onEditEvent: (id: number) => void
+  onAddEvent: () => void
 }) {
   const { data: templates = [] } = useQuery({ queryKey: ['templates'], queryFn: api.listTemplates })
   const [busy, setBusy] = useState(false)
@@ -479,7 +612,9 @@ function DaySheet({
   return (
     <Sheet open={!!date} onClose={onClose} title={title}>
       <div className="space-y-4">
-        {entries.length === 0 && <EmptyState title="Nothing scheduled" hint="Schedule a routine below or ask the Coach." />}
+        {entries.length === 0 && occurrences.length === 0 && (
+          <EmptyState title="Nothing scheduled" hint="Schedule a routine below or ask the Coach." />
+        )}
 
         {objectives.map((e) => (
           <div
@@ -492,6 +627,34 @@ function DaySheet({
             <div className="mt-0.5 text-xs text-fuchsia-300/80">{objectiveLabel(e)}</div>
           </div>
         ))}
+
+        {/* Athletic-calendar events render as MARKER chips (point-in-time,
+            outlined) — visually distinct from the filled objective bands above. */}
+        {occurrences.map((o) => (
+          <button
+            key={`e${o.event.id}`}
+            onClick={() => onEditEvent(o.event.id)}
+            className="block w-full rounded-xl border border-sky-700/40 bg-sky-900/10 p-3 text-left"
+          >
+            <div className="flex items-center gap-2 text-sm font-semibold text-sky-200">
+              <span className="h-2 w-2 shrink-0 rounded-full border border-sky-400 bg-transparent" />
+              <span className="truncate">{o.event.name}</span>
+            </div>
+            <div className="mt-0.5 text-xs text-sky-300/70">
+              {o.event.type}
+              {o.event.recurrence === 'weekly' && ' · weekly'}
+              {o.event.load && ` · ${o.event.load.regions}/${o.event.load.intensity}`}
+              {o.event.load?.duration_min ? ` · ${o.event.load.duration_min}min` : ''}
+            </div>
+          </button>
+        ))}
+
+        <button
+          onClick={onAddEvent}
+          className="block w-full rounded-xl border border-dashed border-sky-800/60 p-2.5 text-center text-xs text-sky-300/80 hover:bg-sky-900/10"
+        >
+          + Add athletic event on this day
+        </button>
 
         {planned.map((e) => (
           <PlannedCard

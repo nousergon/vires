@@ -401,6 +401,57 @@ export interface ConstraintInput {
   defer_to_professional?: boolean | null
 }
 
+// ---- athletic calendar events ---------------------------------------------- //
+// A CalendarEvent is a training-load CONSTRAINT the coach trains *around*
+// (a race, a weekly league game, a trip, a rehab window) — distinct from
+// Objective, which is a goal the coach peaks *toward* (see vires-ops#30/#31).
+export type EventType = 'competition' | 'league' | 'recreation' | 'travel' | 'rehab'
+export type EventRecurrence = 'none' | 'weekly'
+export type LoadRegions = 'legs' | 'upper' | 'full' | 'core' | 'none'
+export type LoadIntensity = 'light' | 'moderate' | 'hard'
+
+export interface EventLoad {
+  regions: LoadRegions
+  intensity: LoadIntensity
+  duration_min?: number | null
+}
+
+export interface CalendarEvent {
+  id: number
+  name: string
+  sport: string | null
+  type: EventType
+  event_date: string
+  // Last day of a multi-day event (>= event_date); null = single-day event.
+  event_end_date: string | null
+  recurrence: EventRecurrence
+  load: EventLoad | null
+  notes: string | null
+  objective_id: number | null
+  created_at: string
+  updated_at: string
+}
+
+export interface CalendarEventInput {
+  name: string
+  sport?: string | null
+  type: EventType
+  event_date: string
+  event_end_date?: string | null
+  recurrence?: EventRecurrence
+  load?: EventLoad | null
+  notes?: string | null
+  objective_id?: number | null
+}
+
+/** One concrete occurrence of a (possibly recurring) event within a queried
+ * window — the server-side expansion of recurrence='weekly' events. */
+export interface CalendarEventOccurrence {
+  event: CalendarEvent
+  occurrence_date: string
+  occurrence_end_date: string | null
+}
+
 // ---- endpoints ------------------------------------------------------------ //
 export const api = {
   // exercises
@@ -576,6 +627,16 @@ export const api = {
   updateConstraint: (id: number, body: Partial<ConstraintInput & { is_active: boolean }>) =>
     req<Constraint>(`/constraints/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   deleteConstraint: (id: number) => req<void>(`/constraints/${id}`, { method: 'DELETE' }),
+
+  // athletic calendar events (constraints the coach trains around, not toward)
+  listCalendarEvents: () => req<CalendarEvent[]>('/calendar-events'),
+  calendarEventsWindow: (start: string, end: string) =>
+    req<CalendarEventOccurrence[]>(`/calendar-events/window?start=${start}&end=${end}`),
+  createCalendarEvent: (body: CalendarEventInput) =>
+    req<CalendarEvent>('/calendar-events', { method: 'POST', body: JSON.stringify(body) }),
+  updateCalendarEvent: (id: number, body: Partial<CalendarEventInput>) =>
+    req<CalendarEvent>(`/calendar-events/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  deleteCalendarEvent: (id: number) => req<void>(`/calendar-events/${id}`, { method: 'DELETE' }),
 
   // web push
   pushPublicKey: () => req<{ key: string }>('/push/public-key'),

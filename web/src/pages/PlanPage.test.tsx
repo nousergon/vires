@@ -13,6 +13,8 @@ function mockEmpty() {
   vi.spyOn(api, 'listTemplates').mockResolvedValue([])
   vi.spyOn(api, 'activeObjective').mockResolvedValue(makeActiveObjective())
   vi.spyOn(api, 'listObjectives').mockResolvedValue([])
+  vi.spyOn(api, 'calendarEventsWindow').mockResolvedValue([])
+  vi.spyOn(api, 'listCalendarEvents').mockResolvedValue([])
 }
 
 describe('PlanPage', () => {
@@ -185,5 +187,44 @@ describe('PlanPage', () => {
     expect(screen.getByText('3×8 @ 95lb')).toBeInTheDocument()
     expect(getP).toHaveBeenCalledWith(5)
     expect(startSpy).not.toHaveBeenCalled() // reviewed, NOT started
+  })
+
+  it('renders an athletic-calendar event as a marker distinct from objectives', async () => {
+    mockEmpty()
+    const iso = isoDate(new Date())
+    vi.spyOn(api, 'calendarEventsWindow').mockResolvedValue([
+      {
+        event: {
+          id: 3,
+          name: 'Tuesday league game',
+          sport: 'soccer',
+          type: 'league',
+          event_date: iso,
+          event_end_date: null,
+          recurrence: 'weekly',
+          load: { regions: 'legs', intensity: 'hard', duration_min: 90 },
+          notes: null,
+          objective_id: null,
+          created_at: '',
+          updated_at: '',
+        },
+        occurrence_date: iso,
+        occurrence_end_date: null,
+      },
+    ])
+    renderWithProviders(<PlanPage />)
+    // the legend documents the distinct event marker
+    expect(await screen.findByText(/athletic event/)).toBeInTheDocument()
+    // tapping the day surfaces the event as a marker chip (not a fuchsia band)
+    fireEvent.click(await screen.findByLabelText(iso))
+    expect(await screen.findByText('Tuesday league game')).toBeInTheDocument()
+    expect(screen.getByText(/league · weekly · legs\/hard · 90min/)).toBeInTheDocument()
+  })
+
+  it('opens the new-event sheet from the Athletic calendar section', async () => {
+    mockEmpty()
+    renderWithProviders(<PlanPage />)
+    fireEvent.click(await screen.findByText(/Add a race, league game, trip/))
+    expect(await screen.findByText('📅 New event')).toBeInTheDocument()
   })
 })
