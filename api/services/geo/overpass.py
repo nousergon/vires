@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json
 import logging
-import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -73,7 +72,9 @@ def search_trails(
     try:
         with opener(req, timeout=_TIMEOUT_S) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-    except (urllib.error.URLError, TimeoutError, ValueError) as e:
+    except (OSError, ValueError) as e:
+        # OSError subsumes URLError + read-phase TimeoutError + socket errors —
+        # a URLError-only catch misses bare TimeoutError from getresponse().
         log.warning("overpass trail search failed, offering draw/manual: %s", e)
         return []
 

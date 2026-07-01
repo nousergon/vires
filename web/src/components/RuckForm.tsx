@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   api,
+  type RoutePoint,
   type RouteStats,
   type RuckSource,
   type Terrain,
@@ -10,6 +11,7 @@ import {
 import { useSettings } from '../lib/useSettings'
 import { distanceUnit, elevationUnit, fmtLoad, metersToDistance, metersToElevation } from '../lib/units'
 import { Button, Sheet } from './ui'
+import RouteDrawMap from './RouteDrawMap'
 
 // Pack weight + bodyweight are remembered so the highest-friction inputs become
 // one tap ("same as last") on the next ruck — the load number is the only thing
@@ -26,11 +28,12 @@ const TERRAINS: { key: Terrain; label: string }[] = [
 
 // The three flexible input modes. All populate the same editable fields below and
 // funnel through one log call, tagged with the corresponding source.
-type Mode = 'manual' | 'trail' | 'gpx'
+type Mode = 'manual' | 'trail' | 'draw' | 'gpx'
 const MODES: { key: Mode; label: string; source: RuckSource }[] = [
   { key: 'manual', label: 'Manual', source: 'manual' },
-  { key: 'trail', label: 'Find a trail', source: 'route_search' },
-  { key: 'gpx', label: 'Import GPX', source: 'gpx' },
+  { key: 'trail', label: 'Search', source: 'route_search' },
+  { key: 'draw', label: 'Draw', source: 'route_draw' },
+  { key: 'gpx', label: 'GPX', source: 'gpx' },
 ]
 
 const inputCls =
@@ -70,6 +73,7 @@ export default function RuckForm({ open, onClose }: { open: boolean; onClose: ()
   const [minutes, setMinutes] = useState('')
   const [terrain, setTerrain] = useState<Terrain>('trail')
   const [query, setQuery] = useState('')
+  const [drawPoints, setDrawPoints] = useState<RoutePoint[]>([])
   const [result, setResult] = useState<WorkoutSession | null>(null)
 
   const packPresets = weight_unit === 'kg' ? [10, 15, 20, 25] : [20, 30, 40, 50]
@@ -127,6 +131,7 @@ export default function RuckForm({ open, onClose }: { open: boolean; onClose: ()
     setHours('')
     setMinutes('')
     setQuery('')
+    setDrawPoints([])
     search.reset()
     measure.reset()
     gpx.reset()
@@ -229,7 +234,7 @@ export default function RuckForm({ open, onClose }: { open: boolean; onClose: ()
                     onClick={() => query.trim().length >= 3 && search.mutate(query.trim())}
                     disabled={search.isPending || query.trim().length < 3}
                   >
-                    {search.isPending ? '…' : 'Search'}
+                    {search.isPending ? '…' : 'Find'}
                   </Button>
                 </div>
                 {search.isSuccess && candidates.length === 0 && (
@@ -254,6 +259,42 @@ export default function RuckForm({ open, onClose }: { open: boolean; onClose: ()
               </div>
             )}
 
+            {mode === 'draw' && (
+              <div className="space-y-2">
+                <p className="text-xs text-slate-500">
+                  Tap the map to trace your route, then measure it.
+                </p>
+                <RouteDrawMap
+                  points={drawPoints}
+                  onAddPoint={(lat, lon) => setDrawPoints((p) => [...p, { lat, lon }])}
+                />
+                <div className="flex gap-2">
+                  <Button
+                    variant="secondary"
+                    className="flex-1"
+                    onClick={() => measure.mutate(drawPoints)}
+                    disabled={drawPoints.length < 2 || measure.isPending}
+                  >
+                    {measure.isPending ? 'Measuring…' : `Measure route (${drawPoints.length} pts)`}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => setDrawPoints((p) => p.slice(0, -1))}
+                    disabled={drawPoints.length === 0}
+                  >
+                    Undo
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => setDrawPoints([])}
+                    disabled={drawPoints.length === 0}
+                  >
+                    Clear
+                  </Button>
+                </div>
+              </div>
+            )}
+
             {mode === 'gpx' && (
               <div className="space-y-2">
                 <input
@@ -270,7 +311,7 @@ export default function RuckForm({ open, onClose }: { open: boolean; onClose: ()
               </div>
             )}
 
-            {(mode === 'trail' || mode === 'gpx') && (
+            {mode !== 'manual' && (
               <p className="mt-2 text-xs text-slate-500">
                 Auto-filled below — edit anything that looks off.
               </p>
