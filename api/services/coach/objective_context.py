@@ -42,6 +42,32 @@ class ConstraintCtx:
 
 
 @dataclass
+class EventOccurrenceCtx:
+    """One concrete occurrence of an athletic event the coach trains *around*
+    (a load constraint, never a goal — the load-accounting axis, #33).
+
+    Recurring (``weekly``) events are expanded server-side into one entry per
+    in-window occurrence, so every entry here is a single concrete date the
+    coach can schedule around."""
+
+    name: str
+    type: str  # 'competition' | 'league' | 'recreation' | 'travel' | 'rehab'
+    occurrence_date: date
+    # Last day of this occurrence (multi-day one-off events only; None otherwise).
+    occurrence_end_date: date | None = None
+    sport: str | None = None
+    # Coarse structured load estimate: {'regions','intensity','duration_min'}.
+    load: dict[str, Any] | None = None
+    # 'none' | 'weekly' — 'weekly' means this is one occurrence of a STANDING
+    # weekly commitment, so its debit belongs in the base weekly template.
+    recurrence: str = "none"
+    # Set when the event IS a peak target anchored to an objective — then it
+    # rides that objective's taper instead of being a pure load constraint.
+    objective_id: int | None = None
+    notes: str | None = None
+
+
+@dataclass
 class ExerciseCandidate:
     """A real catalog exercise the coach may use to AUTHOR a new routine. The
     pool is assembled from the objective's needs-analysis so the right movements
@@ -66,7 +92,12 @@ class CoachObjectiveContext:
     # is the focus (the soonest/next peak); ``timeline`` lets the coach periodize
     # toward the next peak while holding farther ones as base-building context.
     timeline: list[ObjectiveCtx] = field(default_factory=list)
+    # Upcoming athletic events (recurrence-expanded, within the planning window),
+    # in chronological order — load constraints the coach trains *around*.
+    events: list[EventOccurrenceCtx] = field(default_factory=list)
 
     @property
     def is_empty(self) -> bool:
-        return self.objective is None and not self.constraints
+        # Events alone (no objective, no constraints) still warrant grounding —
+        # the coach must account for their load even absent a goal.
+        return self.objective is None and not self.constraints and not self.events

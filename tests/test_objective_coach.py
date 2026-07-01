@@ -15,6 +15,7 @@ from api.services.coach.materialize import (
 from api.services.coach.objective_context import (
     CoachObjectiveContext,
     ConstraintCtx,
+    EventOccurrenceCtx,
     ObjectiveCtx,
 )
 from api.services.coach.objective_profiles import (
@@ -163,6 +164,100 @@ def test_no_goal_key_when_objective_context_empty():
         _context_block(_mat_ctx(), date(2026, 6, 28), CoachObjectiveContext())
     )
     assert "goal" not in empty
+
+
+# --------------------------------------------------------------------------- #
+# athletic-event load-accounting: events reach the model as load constraints (#33)
+# --------------------------------------------------------------------------- #
+def _event_ctx(**over) -> EventOccurrenceCtx:
+    kw = dict(
+        name="Tuesday pickup soccer",
+        type="league",
+        occurrence_date=date(2026, 7, 7),
+        sport="soccer",
+        load={"regions": "legs", "intensity": "moderate", "duration_min": 90},
+        recurrence="weekly",
+    )
+    kw.update(over)
+    return EventOccurrenceCtx(**kw)
+
+
+def test_objective_block_renders_events_as_load_constraints():
+    ctx = CoachObjectiveContext(events=[_event_ctx()])
+    block = _objective_block(ctx, date(2026, 6, 28))
+    assert block is not None  # events alone still ground the coach
+    ev = block["events"][0]
+    assert ev["name"] == "Tuesday pickup soccer"
+    assert ev["date"] == "2026-07-07"
+    assert ev["load"] == {"regions": "legs", "intensity": "moderate", "duration_min": 90}
+    assert ev["recurrence"] == "weekly"
+    assert ev["weeks_away"] == 1  # 6/28 -> 7/7 = 9 days = 1 whole week
+    # the coach is told this is trained-around load, not a goal
+    assert "around" in ev["note"].lower() and "recovery budget" in ev["note"].lower()
+
+
+def test_events_reach_the_grounding_context_even_without_an_objective():
+    ctx = CoachObjectiveContext(events=[_event_ctx()])
+    block = json.loads(_context_block(_mat_ctx(), date(2026, 6, 28), ctx))
+    assert block["goal"]["events"][0]["name"] == "Tuesday pickup soccer"
+    assert "objective" not in block["goal"]  # no goal, purely a load constraint
+
+
+def test_objective_anchored_event_carries_its_objective_id():
+    ctx = CoachObjectiveContext(events=[_event_ctx(recurrence="none", objective_id=42)])
+    block = _objective_block(ctx, date(2026, 6, 28))
+    assert block["events"][0]["objective_id"] == 42
+
+
+def test_no_events_key_when_none_present():
+    block = _objective_block(_obj_ctx(), date(2026, 6, 28))
+    assert "events" not in block
+
+
+def test_baseline_prompt_has_event_load_accounting_language():
+    from api.services.coach.prompt_loader import load_system_prompt
+
+    load_system_prompt.cache_clear()
+    text = load_system_prompt().lower()
+    try:
+        assert "events" in text  # events are grounded as load constraints
+        assert "load-accounting" in text or "load accounting" in text
+        assert "trained around" in text or "train around" in text or "around" in text
+        assert "already spent" in text  # fatigue-in accounting
+        assert "objective_id" in text  # peak/taper anchoring exception
+    finally:
+        load_system_prompt.cache_clear()
+
+
+# --------------------------------------------------------------------------- #
+# DB integration: a logged recurring event reaches the coach context expanded
+# --------------------------------------------------------------------------- #
+def test_recurring_event_is_expanded_into_coach_context(client, db):
+    from api.db.identity import current_identity
+    from api.services.coach.context import build_coach_objective_context
+
+    # A weekly leg-heavy commitment anchored on an in-window Tuesday.
+    r = client.post(
+        "/api/calendar-events",
+        json={
+            "name": "Wednesday hoops",
+            "type": "league",
+            "event_date": (date.today()).isoformat(),
+            "recurrence": "weekly",
+            "load": {"regions": "legs", "intensity": "hard", "duration_min": 60},
+        },
+    )
+    assert r.status_code == 201, r.text
+    ctx = build_coach_objective_context(db, current_identity())
+    assert ctx.events, "the recurring event should expand into the coach context"
+    # weekly cadence => multiple in-window occurrences, all the same series
+    assert {e.name for e in ctx.events} == {"Wednesday hoops"}
+    assert len(ctx.events) >= 2
+    assert all(e.recurrence == "weekly" for e in ctx.events)
+    # occurrences arrive soonest-first and 7 days apart
+    dates = [e.occurrence_date for e in ctx.events]
+    assert dates == sorted(dates)
+    assert (dates[1] - dates[0]).days == 7
 
 
 # --------------------------------------------------------------------------- #

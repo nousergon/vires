@@ -121,6 +121,37 @@ def _objective_block(obj_ctx: CoachObjectiveContext | None, today: date) -> dict
             }
             for c in obj_ctx.constraints
         ]
+    # Upcoming athletic events (recurrence-expanded, soonest first): load the
+    # coach debits from the week's recovery budget and schedules *around* — never
+    # a goal. An event anchored to an objective_id rides that objective's taper
+    # instead of counting as a separate load constraint.
+    if obj_ctx.events:
+        block["events"] = [
+            {
+                "name": e.name,
+                "type": e.type,
+                "sport": e.sport,
+                "date": e.occurrence_date.isoformat(),
+                "end_date": e.occurrence_end_date.isoformat()
+                if e.occurrence_end_date
+                else None,
+                "weeks_away": _weeks_until(e.occurrence_date, today),
+                "recurrence": e.recurrence,
+                "load": e.load,
+                "objective_id": e.objective_id,
+                "notes": e.notes,
+                "note": (
+                    "athletic event trained AROUND (a load constraint, not a "
+                    "goal): debit its load.regions from that week's recovery "
+                    "budget — do NOT stack heavy same-region work in the day or "
+                    "two on either side; auto-lighten or insert recovery "
+                    "adjacent to it. A 'weekly' recurrence is a standing weekly "
+                    "load — bake its debit into the base template. If "
+                    "objective_id is set, it rides that objective's taper."
+                ),
+            }
+            for e in obj_ctx.events
+        ]
     return block
 
 

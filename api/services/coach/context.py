@@ -7,13 +7,14 @@ and recent performance into the dataclasses the coach + materializer consume.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from api.db.identity import Identity, get_or_create_settings
 from api.db.models import (
+    CalendarEvent,
     Constraint,
     Exercise,
     Objective,
@@ -22,6 +23,7 @@ from api.db.models import (
     WorkoutSession,
     WorkoutTemplate,
 )
+from api.services.calendar_events import expand_occurrences
 from api.services.coach.materialize import (
     ExerciseMeta,
     MaterializeContext,
@@ -31,6 +33,7 @@ from api.services.coach.materialize import (
 from api.services.coach.objective_context import (
     CoachObjectiveContext,
     ConstraintCtx,
+    EventOccurrenceCtx,
     ExerciseCandidate,
     ObjectiveCtx,
 )
@@ -45,6 +48,18 @@ from api.services.search import get_search_service
 # Cap the candidate pool so the grounding context stays compact.
 _MAX_CANDIDATES = 60
 _HITS_PER_TERM = 4
+
+# The coach's event lookahead. Default one mesocycle out, but extend to cover the
+# full dated-objective season when it runs longer (so events near a far peak still
+# register), capped so a weekly event against a distant objective can't blow up
+# the grounding context.
+_EVENT_WINDOW_WEEKS = 16
+_EVENT_WINDOW_MAX_WEEKS = 52
+# Keep the expanded occurrence list compact regardless of how many events /
+# how far the window reaches — the coach needs the near pattern, not every future
+# instance of a standing weekly commitment.
+_MAX_OCCURRENCES_PER_EVENT = 26
+_MAX_EVENT_OCCURRENCES = 40
 
 
 def _last_logged_weights(db: Session, ident: Identity) -> dict[int, float]:
@@ -143,12 +158,74 @@ def build_coach_objective_context(
         for c in constraints
     ]
     candidates = _build_exercise_candidates(db, ident, obj_ctx)
+    events = _build_event_ctxs(db, ident, timeline, date.today())
     return CoachObjectiveContext(
         objective=obj_ctx,
         constraints=con_ctxs,
         candidates=candidates,
         timeline=timeline,
+        events=events,
     )
+
+
+def _event_window(
+    timeline: list[ObjectiveCtx], today: date
+) -> tuple[date, date]:
+    """The [start, end] date range over which upcoming events are expanded.
+
+    Starts today; runs a default mesocycle out, extended to reach the furthest
+    dated peak in the season (so events near a far objective still register),
+    hard-capped at ``_EVENT_WINDOW_MAX_WEEKS`` so a weekly event can't fan out
+    unbounded."""
+    window_end = today + timedelta(weeks=_EVENT_WINDOW_WEEKS)
+    peak_ends = [
+        (o.event_end_date or o.target_date)
+        for o in timeline
+        if o is not None and (o.event_end_date or o.target_date) is not None
+    ]
+    if peak_ends:
+        window_end = max(window_end, max(peak_ends))
+    hard_cap = today + timedelta(weeks=_EVENT_WINDOW_MAX_WEEKS)
+    return today, min(window_end, hard_cap)
+
+
+def _build_event_ctxs(
+    db: Session, ident: Identity, timeline: list[ObjectiveCtx], today: date
+) -> list[EventOccurrenceCtx]:
+    """Athletic events (recurrence-expanded within the planning window) the coach
+    must train *around* — the load-accounting axis (#33). Empty for users with no
+    events (the coach then behaves exactly as before)."""
+    events = db.scalars(
+        select(CalendarEvent)
+        .where(
+            CalendarEvent.tenant_id == ident.tenant_id,
+            CalendarEvent.user_id == ident.user_id,
+        )
+        .order_by(CalendarEvent.event_date)
+    ).all()
+    if not events:
+        return []
+    window_start, window_end = _event_window(timeline, today)
+    out: list[EventOccurrenceCtx] = []
+    for event in events:
+        occurrences = expand_occurrences(event, window_start, window_end)
+        for occ_date, occ_end in occurrences[:_MAX_OCCURRENCES_PER_EVENT]:
+            out.append(
+                EventOccurrenceCtx(
+                    name=event.name,
+                    type=event.type,
+                    occurrence_date=occ_date,
+                    occurrence_end_date=occ_end,
+                    sport=event.sport,
+                    load=event.load,
+                    recurrence=event.recurrence,
+                    objective_id=event.objective_id,
+                    notes=event.notes,
+                )
+            )
+    # Soonest first, and keep the list compact regardless of event count.
+    out.sort(key=lambda e: e.occurrence_date)
+    return out[:_MAX_EVENT_OCCURRENCES]
 
 
 def _to_objective_ctx(o: Objective | None) -> ObjectiveCtx | None:
