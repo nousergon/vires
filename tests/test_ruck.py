@@ -80,6 +80,26 @@ def test_ruck_rejects_nonpositive_weights(client):
     assert r.status_code == 422  # pack_weight must be > 0
 
 
+def test_ruck_records_input_source(client):
+    # A derived-mode log (e.g. GPX import) tags its source; default stays 'manual'.
+    r = client.post(
+        "/api/workouts/ruck",
+        json={"pack_weight": 40, "bodyweight": 180, "distance": 5, "source": "gpx"},
+    )
+    assert r.status_code == 201
+    assert r.json()["ruck"]["source"] == "gpx"
+    dflt = client.post("/api/workouts/ruck", json={"pack_weight": 40, "bodyweight": 180}).json()
+    assert dflt["ruck"]["source"] == "manual"
+
+
+def test_ruck_rejects_unknown_source(client):
+    r = client.post(
+        "/api/workouts/ruck",
+        json={"pack_weight": 40, "bodyweight": 180, "source": "strava"},
+    )
+    assert r.status_code == 422  # not in the RuckSource literal
+
+
 def test_heavier_pack_logs_higher_load(client):
     common = {"bodyweight": 180, "distance": 5, "elevation_gain": 500, "duration_s": 4500}
     light = client.post(

@@ -74,4 +74,59 @@ describe('RuckForm', () => {
     await waitFor(() => expect(localStorage.getItem('vires.ruck.lastPack')).toBe('45'))
     expect(localStorage.getItem('vires.ruck.lastBody')).toBe('180')
   })
+
+  it('trail search fills distance/elevation and logs source route_search', async () => {
+    vi.spyOn(api, 'searchTrails').mockResolvedValue({
+      candidates: [
+        { osm_id: 42, name: 'Mailbox Peak Trail', distance_m: 8046,
+          points: [{ lat: 47.6, lon: -121.6 }, { lat: 47.62, lon: -121.6 }] },
+      ],
+    })
+    // 8046 m ⇒ 5 mi, 305 m ⇒ ~1000 ft.
+    vi.spyOn(api, 'measureRoute').mockResolvedValue({
+      distance_m: 8046, elevation_gain_m: 305, point_count: 2, duration_s: null,
+    })
+    const log = vi.spyOn(api, 'logRuck').mockResolvedValue(ruckResult(4184))
+    renderWithProviders(<RuckForm open onClose={() => {}} />)
+
+    const [pack, body] = await screen.findAllByRole('spinbutton')
+    fireEvent.change(pack, { target: { value: '45' } })
+    fireEvent.change(body, { target: { value: '180' } })
+    fireEvent.click(screen.getByText('Find a trail'))
+    fireEvent.change(screen.getByLabelText('trail name'), { target: { value: 'Mailbox Peak' } })
+    fireEvent.click(screen.getByText('Search'))
+    fireEvent.click(await screen.findByText('Mailbox Peak Trail'))
+
+    // Distance field (3rd spinbutton: pack, body, distance) auto-fills to 5 mi.
+    await waitFor(() =>
+      expect((screen.getAllByRole('spinbutton')[2] as HTMLInputElement).value).toBe('5'),
+    )
+    fireEvent.click(screen.getByText('Log ruck'))
+    await waitFor(() => expect(log).toHaveBeenCalled())
+    expect(log.mock.calls[0][0].source).toBe('route_search')
+  })
+
+  it('gpx import fills distance + duration and logs source gpx', async () => {
+    vi.spyOn(api, 'importGpx').mockResolvedValue({
+      distance_m: 8046, elevation_gain_m: 305, point_count: 100, duration_s: 7200,
+    })
+    const log = vi.spyOn(api, 'logRuck').mockResolvedValue(ruckResult(4184))
+    renderWithProviders(<RuckForm open onClose={() => {}} />)
+
+    const [pack, body] = await screen.findAllByRole('spinbutton')
+    fireEvent.change(pack, { target: { value: '45' } })
+    fireEvent.change(body, { target: { value: '180' } })
+    fireEvent.click(screen.getByText('Import GPX'))
+    const file = new File(['<gpx></gpx>'], 'hike.gpx', { type: 'application/gpx+xml' })
+    fireEvent.change(screen.getByLabelText('gpx file'), { target: { files: [file] } })
+
+    // 8046 m ⇒ 5 mi distance; 7200 s ⇒ 2h.
+    await waitFor(() =>
+      expect((screen.getAllByRole('spinbutton')[2] as HTMLInputElement).value).toBe('5'),
+    )
+    expect((screen.getAllByRole('spinbutton')[4] as HTMLInputElement).value).toBe('2') // hours
+    fireEvent.click(screen.getByText('Log ruck'))
+    await waitFor(() => expect(log).toHaveBeenCalled())
+    expect(log.mock.calls[0][0].source).toBe('gpx')
+  })
 })

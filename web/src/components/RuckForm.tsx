@@ -1,8 +1,14 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { api, type Terrain, type WorkoutSession } from '../lib/api'
+import {
+  api,
+  type RouteStats,
+  type RuckSource,
+  type Terrain,
+  type WorkoutSession,
+} from '../lib/api'
 import { useSettings } from '../lib/useSettings'
-import { distanceUnit, elevationUnit, fmtLoad } from '../lib/units'
+import { distanceUnit, elevationUnit, fmtLoad, metersToDistance, metersToElevation } from '../lib/units'
 import { Button, Sheet } from './ui'
 
 // Pack weight + bodyweight are remembered so the highest-friction inputs become
@@ -18,12 +24,26 @@ const TERRAINS: { key: Terrain; label: string }[] = [
   { key: 'snow', label: 'Snow' },
 ]
 
+// The three flexible input modes. All populate the same editable fields below and
+// funnel through one log call, tagged with the corresponding source.
+type Mode = 'manual' | 'trail' | 'gpx'
+const MODES: { key: Mode; label: string; source: RuckSource }[] = [
+  { key: 'manual', label: 'Manual', source: 'manual' },
+  { key: 'trail', label: 'Find a trail', source: 'route_search' },
+  { key: 'gpx', label: 'Import GPX', source: 'gpx' },
+]
+
 const inputCls =
   'w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-base outline-none focus:border-amber-500'
 
 function num(v: string): number | null {
   const n = parseFloat(v)
   return Number.isFinite(n) ? n : null
+}
+
+function round(n: number, dp: number): number {
+  const f = 10 ** dp
+  return Math.round(n * f) / f
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -41,6 +61,7 @@ export default function RuckForm({ open, onClose }: { open: boolean; onClose: ()
   const qc = useQueryClient()
   const { weight_unit } = useSettings()
 
+  const [mode, setMode] = useState<Mode>('manual')
   const [pack, setPack] = useState(() => localStorage.getItem(LAST_PACK) ?? '')
   const [body, setBody] = useState(() => localStorage.getItem(LAST_BODY) ?? '')
   const [distance, setDistance] = useState('')
@@ -48,15 +69,37 @@ export default function RuckForm({ open, onClose }: { open: boolean; onClose: ()
   const [hours, setHours] = useState('')
   const [minutes, setMinutes] = useState('')
   const [terrain, setTerrain] = useState<Terrain>('trail')
+  const [query, setQuery] = useState('')
   const [result, setResult] = useState<WorkoutSession | null>(null)
 
-  const packPresets =
-    weight_unit === 'kg' ? [10, 15, 20, 25] : [20, 30, 40, 50]
+  const packPresets = weight_unit === 'kg' ? [10, 15, 20, 25] : [20, 30, 40, 50]
+
+  // Any derived mode lands its SI stats into the same editable display fields.
+  function applyStats(s: RouteStats) {
+    setDistance(String(round(metersToDistance(s.distance_m, weight_unit), 2)))
+    if (s.elevation_gain_m != null) {
+      setElevation(String(Math.round(metersToElevation(s.elevation_gain_m, weight_unit))))
+    }
+    if (s.duration_s != null) {
+      setHours(String(Math.floor(s.duration_s / 3600)))
+      setMinutes(String(Math.round((s.duration_s % 3600) / 60)))
+    }
+  }
+
+  const search = useMutation({ mutationFn: (q: string) => api.searchTrails(q) })
+  const measure = useMutation({
+    mutationFn: (pts: { lat: number; lon: number }[]) => api.measureRoute(pts),
+    onSuccess: applyStats,
+  })
+  const gpx = useMutation({
+    mutationFn: (text: string) => api.importGpx(text),
+    onSuccess: applyStats,
+  })
 
   const log = useMutation({
     mutationFn: () => {
-      const durationS =
-        (num(hours) ?? 0) * 3600 + (num(minutes) ?? 0) * 60 || null
+      const durationS = (num(hours) ?? 0) * 3600 + (num(minutes) ?? 0) * 60 || null
+      const source = MODES.find((m) => m.key === mode)!.source
       return api.logRuck({
         pack_weight: num(pack) ?? 0,
         bodyweight: num(body) ?? 0,
@@ -64,6 +107,7 @@ export default function RuckForm({ open, onClose }: { open: boolean; onClose: ()
         elevation_gain: num(elevation),
         duration_s: durationS,
         terrain,
+        source,
       })
     },
     onSuccess: (ws) => {
@@ -77,14 +121,25 @@ export default function RuckForm({ open, onClose }: { open: boolean; onClose: ()
 
   function reset() {
     setResult(null)
+    setMode('manual')
     setDistance('')
     setElevation('')
     setHours('')
     setMinutes('')
+    setQuery('')
+    search.reset()
+    measure.reset()
+    gpx.reset()
     log.reset()
     onClose()
   }
 
+  async function onGpxFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0]
+    if (f) gpx.mutate(await f.text())
+  }
+
+  const candidates = search.data?.candidates ?? []
   const canSubmit = (num(pack) ?? 0) > 0 && (num(body) ?? 0) > 0 && !log.isPending
 
   return (
@@ -140,6 +195,86 @@ export default function RuckForm({ open, onClose }: { open: boolean; onClose: ()
               onChange={(e) => setBody(e.target.value)}
               placeholder="0"
             />
+          </Field>
+
+          {/* How to fill distance/elevation: type it, find a trail, or import a GPX. */}
+          <Field label="Route">
+            <div className="mb-2 flex rounded-xl bg-slate-800 p-1 text-sm">
+              {MODES.map((m) => (
+                <button
+                  key={m.key}
+                  type="button"
+                  onClick={() => setMode(m.key)}
+                  className={`flex-1 rounded-lg py-1.5 transition ${
+                    mode === m.key ? 'bg-slate-700 text-amber-400' : 'text-slate-400'
+                  }`}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+
+            {mode === 'trail' && (
+              <div className="space-y-2">
+                <div className="flex gap-2">
+                  <input
+                    className={inputCls}
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="e.g. Mailbox Peak Trail"
+                    aria-label="trail name"
+                  />
+                  <Button
+                    variant="secondary"
+                    onClick={() => query.trim().length >= 3 && search.mutate(query.trim())}
+                    disabled={search.isPending || query.trim().length < 3}
+                  >
+                    {search.isPending ? '…' : 'Search'}
+                  </Button>
+                </div>
+                {search.isSuccess && candidates.length === 0 && (
+                  <p className="text-xs text-slate-500">
+                    No matching trails found — draw isn't available yet, so enter distance + elevation manually below.
+                  </p>
+                )}
+                {candidates.map((c) => (
+                  <button
+                    key={c.osm_id}
+                    type="button"
+                    onClick={() => measure.mutate(c.points)}
+                    className="block w-full rounded-lg bg-slate-800 px-3 py-2 text-left text-sm hover:bg-slate-700"
+                  >
+                    <span className="font-medium text-slate-100">{c.name}</span>
+                    <span className="ml-2 text-slate-400">
+                      {round(metersToDistance(c.distance_m, weight_unit), 1)} {distanceUnit(weight_unit)}
+                    </span>
+                  </button>
+                ))}
+                {measure.isPending && <p className="text-xs text-slate-400">Measuring route…</p>}
+              </div>
+            )}
+
+            {mode === 'gpx' && (
+              <div className="space-y-2">
+                <input
+                  type="file"
+                  accept=".gpx,application/gpx+xml,text/xml"
+                  onChange={onGpxFile}
+                  className="block w-full text-sm text-slate-300 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-700 file:px-3 file:py-2 file:text-slate-100"
+                  aria-label="gpx file"
+                />
+                {gpx.isPending && <p className="text-xs text-slate-400">Reading track…</p>}
+                {gpx.isError && (
+                  <p className="text-xs text-red-400">Couldn't read that GPX — enter values manually.</p>
+                )}
+              </div>
+            )}
+
+            {(mode === 'trail' || mode === 'gpx') && (
+              <p className="mt-2 text-xs text-slate-500">
+                Auto-filled below — edit anything that looks off.
+              </p>
+            )}
           </Field>
 
           <div className="grid grid-cols-2 gap-3">

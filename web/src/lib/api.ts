@@ -108,6 +108,8 @@ export interface RuckDetail {
   source: string
 }
 
+export type RuckSource = 'manual' | 'route_search' | 'route_draw' | 'gpx'
+
 // Quick-log payload — numbers in the account's DISPLAY units (server converts).
 export interface RuckLogInput {
   pack_weight: number
@@ -116,7 +118,30 @@ export interface RuckLogInput {
   elevation_gain?: number | null
   duration_s?: number | null
   terrain?: Terrain
+  source?: RuckSource
   name?: string | null
+}
+
+// ---- route derivation (trail search / draw / GPX) ------------------------- //
+export interface RoutePoint {
+  lat: number
+  lon: number
+  ele_m?: number | null
+}
+
+// Canonical SI route stats (the UI converts to display units to prefill fields).
+export interface RouteStats {
+  distance_m: number
+  elevation_gain_m: number | null
+  point_count: number
+  duration_s: number | null
+}
+
+export interface TrailCandidate {
+  osm_id: number
+  name: string
+  distance_m: number
+  points: RoutePoint[]
 }
 
 export interface WorkoutSession {
@@ -461,6 +486,13 @@ export const api = {
     req<WorkoutSession>('/workouts', { method: 'POST', body: JSON.stringify(body) }),
   logRuck: (body: RuckLogInput) =>
     req<WorkoutSession>('/workouts/ruck', { method: 'POST', body: JSON.stringify(body) }),
+  // route derivation — all three feed the same editable ruck fields
+  searchTrails: (q: string) =>
+    req<{ candidates: TrailCandidate[] }>(`/routes/search?q=${encodeURIComponent(q)}`),
+  measureRoute: (points: RoutePoint[]) =>
+    req<RouteStats>('/routes/measure', { method: 'POST', body: JSON.stringify({ points }) }),
+  importGpx: (gpxText: string) =>
+    req<RouteStats>('/routes/import-gpx', { method: 'POST', body: gpxText }),
   listWorkouts: () => req<WorkoutSummary[]>('/workouts'),
   getWorkout: (id: number) => req<WorkoutSession>(`/workouts/${id}`),
   finishWorkout: (id: number) => req<WorkoutSession>(`/workouts/${id}/finish`, { method: 'POST' }),
