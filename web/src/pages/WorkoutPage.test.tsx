@@ -48,6 +48,15 @@ describe('WorkoutPage — StartView (no active workout)', () => {
     renderWithProviders(<WorkoutPage />)
     expect(await screen.findByText('No routines yet')).toBeInTheDocument()
   })
+
+  it('opens the activity log sheet from "Log an activity"', async () => {
+    vi.spyOn(api, 'listTemplates').mockResolvedValue([])
+    vi.spyOn(api, 'listActivityTemplates').mockResolvedValue([])
+    renderWithProviders(<WorkoutPage />)
+    fireEvent.click(await screen.findByText('🏃 Log an activity'))
+    expect(await screen.findByText('Log an activity')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('e.g. Ultimate frisbee')).toBeInTheDocument()
+  })
 })
 
 describe('WorkoutPage — ActiveWorkout', () => {
