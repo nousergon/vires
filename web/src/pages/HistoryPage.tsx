@@ -23,6 +23,17 @@ function ruckLine(
     .join(' · ')
 }
 
+// One-line summary of a generic activity's headline facts (duration · regions · intensity).
+function activityLine(activity: { duration_s: number | null; regions: string; intensity: string }): string {
+  return [
+    activity.duration_s != null ? fmtClock(activity.duration_s) : null,
+    activity.regions !== 'none' ? activity.regions : null,
+    activity.intensity,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+}
+
 type Tab = 'sessions' | 'records'
 
 export default function HistoryPage() {
@@ -153,7 +164,13 @@ function SessionsView() {
                   <span className="flex items-center justify-between">
                     <span className="truncate font-semibold text-slate-100">
                       {w.session_type === 'ruck' ? '🎒 ' : ''}
-                      {w.name || (w.session_type === 'ruck' ? 'Ruck' : 'Workout')}
+                      {w.session_type === 'activity' ? '🏃 ' : ''}
+                      {w.name ||
+                        (w.session_type === 'ruck'
+                          ? 'Ruck'
+                          : w.session_type === 'activity'
+                            ? 'Activity'
+                            : 'Workout')}
                     </span>
                     <span className="ml-2 shrink-0 text-xs text-slate-400">
                       {new Date(w.started_at).toLocaleDateString()}
@@ -162,6 +179,8 @@ function SessionsView() {
                   <span className="mt-1 block text-xs text-slate-400">
                     {w.session_type === 'ruck' && w.ruck ? (
                       ruckLine(w.ruck, unit)
+                    ) : w.session_type === 'activity' && w.activity ? (
+                      activityLine(w.activity)
                     ) : (
                       <>
                         {w.exercise_count} exercises · {w.set_count} sets
@@ -228,6 +247,24 @@ function SessionsView() {
                 <div>
                   <dt className="text-xs uppercase tracking-wide text-slate-500">Terrain</dt>
                   <dd className="capitalize text-slate-200">{detail.ruck.terrain}</dd>
+                </div>
+              </dl>
+            )}
+            {detail.session_type === 'activity' && detail.activity && (
+              <dl className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <dt className="text-xs uppercase tracking-wide text-slate-500">Duration</dt>
+                  <dd className="text-slate-200">
+                    {detail.activity.duration_s != null ? fmtClock(detail.activity.duration_s) : '—'}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs uppercase tracking-wide text-slate-500">Intensity</dt>
+                  <dd className="capitalize text-slate-200">{detail.activity.intensity}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs uppercase tracking-wide text-slate-500">Regions worked</dt>
+                  <dd className="capitalize text-slate-200">{detail.activity.regions}</dd>
                 </div>
               </dl>
             )}
