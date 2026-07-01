@@ -25,6 +25,7 @@ from api.routers import (
     plan,
     push,
     records,
+    routes,
     templates,
     workouts,
 )
@@ -55,6 +56,7 @@ app.include_router(objectives.router, prefix="/api")
 app.include_router(constraints.router, prefix="/api")
 app.include_router(records.router, prefix="/api")
 app.include_router(push.router, prefix="/api")
+app.include_router(routes.router, prefix="/api")
 
 
 def _mount_spa() -> None:

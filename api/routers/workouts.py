@@ -283,7 +283,7 @@ def log_ruck(
             duration_s=body.duration_s,
             terrain=body.terrain,
             metabolic_cost_kj=cost_kj,
-            source="manual",
+            source=body.source,
         ),
     )
     db.add(ws)

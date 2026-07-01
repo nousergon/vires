@@ -12,6 +12,9 @@ from api.schemas.exercise import ExerciseBrief, ExercisePerformance
 # Coarse terrain classes accepted for a ruck (→ Pandolf terrain factor server-side).
 Terrain = Literal["treadmill", "road", "trail", "offtrail", "snow"]
 
+# How the route stats were entered — the flexible-input modes all land here.
+RuckSource = Literal["manual", "route_search", "route_draw", "gpx"]
+
 
 class WorkoutStart(BaseModel):
     template_id: int | None = None  # None => empty/ad-hoc workout
@@ -108,6 +111,9 @@ class RuckLogIn(BaseModel):
     elevation_gain: float | None = Field(default=None, ge=0)
     duration_s: int | None = Field(default=None, ge=0)
     terrain: Terrain = "trail"
+    # Which input mode produced these stats (manual entry, trail search, drawn
+    # route, or GPX import). Distance/elevation are always user-editable regardless.
+    source: RuckSource = "manual"
     name: str | None = None
     # Optional backdate (e.g. logging yesterday's ruck). Defaults to now server-side.
     started_at: datetime | None = None
