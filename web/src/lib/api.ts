@@ -122,6 +122,9 @@ export interface RuckLogInput {
   terrain?: Terrain
   source?: RuckSource
   name?: string | null
+  // ISO datetime — omit to default to now server-side; set to backdate (e.g.
+  // logging yesterday's ruck).
+  started_at?: string | null
 }
 
 // ---- route derivation (trail search / draw / GPX) ------------------------- //
