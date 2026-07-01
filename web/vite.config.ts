@@ -37,11 +37,21 @@ export default defineConfig({
         importScripts: ['/push-sw.js'],
         // App shell offline; API GETs cached network-first so history is
         // viewable offline (writes still need connectivity — MVP).
+        // `cacheableResponse` restricts what NetworkFirst is allowed to cache
+        // to real 200s — without it Workbox caches ANY response (404s, 500s,
+        // opaque errors) verbatim, so a transient backend error gets served
+        // back as the "offline fallback" indefinitely even after the API
+        // recovers (vires-ops#40). generateSW mode only accepts this via the
+        // declarative shorthand, not a constructed CacheableResponsePlugin.
         runtimeCaching: [
           {
             urlPattern: ({ url }) => url.pathname.startsWith('/api/'),
             handler: 'NetworkFirst',
-            options: { cacheName: 'vires-api', networkTimeoutSeconds: 5 },
+            options: {
+              cacheName: 'vires-api',
+              networkTimeoutSeconds: 5,
+              cacheableResponse: { statuses: [200] },
+            },
           },
         ],
       },

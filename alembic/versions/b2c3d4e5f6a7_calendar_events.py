@@ -1,7 +1,7 @@
 """Athletic calendar: calendar_events (vires-ops#31).
 
-Revision ID: a1b2c3d4e5f6
-Revises: f1a2b3c4d5e6
+Revision ID: b2c3d4e5f6a7
+Revises: a1b2c3d4e5f6
 Create Date: 2026-07-01
 
 Adds ``CalendarEvent``: an external athletic event (race, weekly league,
@@ -13,6 +13,12 @@ must not be merged). ``load`` is a small structured JSON sub-object
 single row; concrete occurrences are expanded server-side on read (never
 persisted — see ``api.services.calendar_events``), so this migration has no
 occurrence-table counterpart.
+
+Chained after ``a1b2c3d4e5f6`` (ruck_sessions, PR #59) rather than sharing its
+revision id — the two were scaffolded independently off the same parent
+(``f1a2b3c4d5e6``) with a copy-pasted placeholder id, producing two heads that
+broke every deploy from PR #56's merge onward (vires-ops#39). ruck_sessions
+merged to main first, so it stays the anchor.
 """
 
 from typing import Sequence, Union
@@ -20,8 +26,8 @@ from typing import Sequence, Union
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "a1b2c3d4e5f6"
-down_revision: Union[str, Sequence[str], None] = "f1a2b3c4d5e6"
+revision: str = "b2c3d4e5f6a7"
+down_revision: Union[str, Sequence[str], None] = "a1b2c3d4e5f6"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

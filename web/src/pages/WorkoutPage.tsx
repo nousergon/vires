@@ -165,7 +165,7 @@ function ActiveWorkout({ id, onClear }: { id: number; onClear: () => void }) {
     return () => document.removeEventListener('visibilitychange', onVisibility)
   }, [settings.timer_notification])
 
-  const { data: ws, isLoading, error } = useQuery({
+  const { data: ws, isLoading, error, refetch, isRefetching } = useQuery({
     queryKey: ['workout', id],
     queryFn: () => api.getWorkout(id),
     // A 404 means the active-workout pointer is stale (the session was deleted) —
@@ -242,7 +242,26 @@ function ActiveWorkout({ id, onClear }: { id: number; onClear: () => void }) {
   })
 
   if (missing) return null // stale pointer cleared; parent switches to the start view
-  if (isLoading || !ws) return <Spinner />
+  if (isLoading) return <Spinner />
+  // A settled non-404 error (network blip, 500, etc.) leaves `ws` permanently
+  // undefined with no automatic retry — surface an explicit error state with an
+  // escape hatch instead of spinning forever (the "wheel of death" bug).
+  if (error || !ws) {
+    return (
+      <div className="space-y-3">
+        <EmptyState
+          title="Couldn't load this workout"
+          hint="Check your connection, then retry — or clear it and start fresh."
+        />
+        <Button className="w-full" onClick={() => refetch()} disabled={isRefetching}>
+          Retry
+        </Button>
+        <button className="w-full py-2 text-sm text-red-400" onClick={onClear}>
+          Clear active workout
+        </button>
+      </div>
+    )
+  }
 
   return (
     <div>
