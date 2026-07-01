@@ -15,6 +15,9 @@ export default function ExercisePicker({
   const [q, setQ] = useState('')
   const [debounced, setDebounced] = useState('')
   const [suggestion, setSuggestion] = useState<CreateResult | null>(null)
+  // Non-blocking "similar exercise" hint: the exercise below is ALREADY
+  // created — this only asks which one the user wants to use right now.
+  const [hint, setHint] = useState<{ created: Exercise; similarTo: Exercise } | null>(null)
   const [creating, setCreating] = useState(false)
   const qc = useQueryClient()
 
@@ -29,6 +32,7 @@ export default function ExercisePicker({
       setQ('')
       setDebounced('')
       setSuggestion(null)
+      setHint(null)
     }
   }, [open])
 
@@ -51,9 +55,15 @@ export default function ExercisePicker({
       const res = await api.createExercise({ name: q.trim(), force })
       if (res.created && res.exercise) {
         qc.invalidateQueries({ queryKey: ['exerciseSearch'] })
-        pick(res.exercise)
+        if (res.similar_to) {
+          // Advisory only — the new exercise already exists; just ask which
+          // one the user wants to use right now. Never blocks the create.
+          setHint({ created: res.exercise, similarTo: res.similar_to })
+        } else {
+          pick(res.exercise)
+        }
       } else {
-        setSuggestion(res) // exact / similar -> ask the user
+        setSuggestion(res) // exact -> ask the user (real duplicate, hard block)
       }
     } finally {
       setCreating(false)
@@ -81,14 +91,28 @@ export default function ExercisePicker({
       {suggestion && suggestion.duplicate_of && (
         <div className="mt-3 rounded-xl border border-amber-700/50 bg-amber-900/20 p-3 text-sm">
           <p className="text-amber-200">
-            {suggestion.reason === 'exact' ? 'Already in your library:' : 'Did you mean'}{' '}
+            Already in your library:{' '}
             <span className="font-semibold">{suggestion.duplicate_of.name}</span>
-            {suggestion.reason === 'similar' ? '?' : ''}
           </p>
           <div className="mt-2 flex gap-2">
             <Button onClick={() => pick(exact(suggestion.duplicate_of!))}>Use it</Button>
             <Button variant="secondary" disabled={creating} onClick={() => create(true)}>
               Create “{q.trim()}” anyway
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {hint && (
+        <div className="mt-3 rounded-xl border border-sky-700/50 bg-sky-900/20 p-3 text-sm">
+          <p className="text-sky-200">
+            Added “{hint.created.name}”. Similar existing exercise:{' '}
+            <span className="font-semibold">{hint.similarTo.name}</span>
+          </p>
+          <div className="mt-2 flex gap-2">
+            <Button onClick={() => pick(exact(hint.created))}>Use new one</Button>
+            <Button variant="secondary" onClick={() => pick(exact(hint.similarTo))}>
+              Use “{hint.similarTo.name}” instead
             </Button>
           </div>
         </div>
@@ -114,7 +138,7 @@ export default function ExercisePicker({
         ))}
       </ul>
 
-      {debounced && !isFetching && !suggestion && (
+      {debounced && !isFetching && !suggestion && !hint && (
         <button
           disabled={creating}
           onClick={() => create(false)}

@@ -25,7 +25,8 @@ describe('ExercisePicker', () => {
       reason: 'created',
       exercise: makeExercise({ id: 9, name: 'Jefferson Curl' }),
       duplicate_of: null,
-      similarity: null,
+      similar_to: null,
+      similar_to_similarity: null,
     })
     const onSelect = vi.fn()
     renderWithProviders(<ExercisePicker open onClose={() => {}} onSelect={onSelect} />)
@@ -35,7 +36,7 @@ describe('ExercisePicker', () => {
     await waitFor(() => expect(onSelect).toHaveBeenCalled())
   })
 
-  it('surfaces a duplicate suggestion and lets you use it', async () => {
+  it('surfaces an exact duplicate and lets you use it (hard block)', async () => {
     vi.spyOn(api, 'searchExercises').mockResolvedValue([])
     const dup = makeExercise({ id: 1, name: 'Bench Press' })
     vi.spyOn(api, 'createExercise').mockResolvedValue({
@@ -43,7 +44,8 @@ describe('ExercisePicker', () => {
       reason: 'exact',
       exercise: null,
       duplicate_of: dup,
-      similarity: 1,
+      similar_to: null,
+      similar_to_similarity: null,
     })
     const onSelect = vi.fn()
     renderWithProviders(<ExercisePicker open onClose={() => {}} onSelect={onSelect} />)
@@ -52,5 +54,32 @@ describe('ExercisePicker', () => {
     expect(await screen.findByText('Already in your library:')).toBeInTheDocument()
     fireEvent.click(screen.getByText('Use it'))
     expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: 1, name: 'Bench Press' }))
+  })
+
+  it('creates the exercise AND surfaces a non-blocking similar-exercise hint', async () => {
+    vi.spyOn(api, 'searchExercises').mockResolvedValue([])
+    const created = makeExercise({ id: 9, name: 'Lunge Dumbbell Overhead' })
+    const similarTo = makeExercise({ id: 2, name: 'Overhead Lunge' })
+    vi.spyOn(api, 'createExercise').mockResolvedValue({
+      created: true,
+      reason: 'created',
+      exercise: created,
+      duplicate_of: null,
+      similar_to: similarTo,
+      similar_to_similarity: 0.93,
+    })
+    const onSelect = vi.fn()
+    const onClose = vi.fn()
+    renderWithProviders(<ExercisePicker open onClose={onClose} onSelect={onSelect} />)
+    fireEvent.change(screen.getByPlaceholderText(/Search/), {
+      target: { value: 'Lunge Dumbbell Overhead' },
+    })
+    fireEvent.click(await screen.findByRole('button', { name: /Add .* as a new exercise/i }))
+    // The exercise was already created — the hint never blocked it.
+    expect(await screen.findByText(/Similar existing exercise:/)).toBeInTheDocument()
+    expect(onSelect).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByText('Use new one'))
+    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: 9 }))
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 })

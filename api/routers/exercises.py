@@ -50,12 +50,12 @@ def create_exercise(
     name = body.name.strip()
     cn = normalize_name(name)
 
-    # Only block on an EXACT normalized-name match (precise, prevents literal
-    # re-adds). The semantic "did you mean?" check was removed: with the
+    # Only BLOCK on an EXACT normalized-name match (precise, prevents literal
+    # re-adds). A semantic "did you mean?" block was tried and removed: with
     # keyword-diluted embeddings it produced confident false positives (e.g.
     # "lunge dumbbell overhead" -> "Incline Dumbbell Flyes" @ 0.85), blocking
-    # legitimate on-the-spot additions. Users see real matches via the typeahead
-    # before choosing "add new"; collapsing true synonyms is handled by aliases.
+    # legitimate on-the-spot additions. The name-only hint below replaces it —
+    # advisory only, never gates the create.
     if not body.force:
         exact = db.scalar(
             select(Exercise).where(
@@ -68,6 +68,19 @@ def create_exercise(
             return ExerciseCreateResult(
                 created=False, reason="exact", duplicate_of=to_out(exact)
             )
+
+    # Non-blocking "similar exercise" hint on the higher-precision name-only
+    # index, checked BEFORE this exercise is indexed (so it can't match itself).
+    search_service = get_search_service()
+    hint = search_service.find_similar_hint(name)
+    similar_to = None
+    similarity = None
+    if hint is not None:
+        hint_id, hint_similarity = hint
+        candidate = db.get(Exercise, hint_id)
+        if _visible(candidate, ident):
+            similar_to = to_out(candidate)
+            similarity = hint_similarity
 
     ex = Exercise(
         tenant_id=ident.tenant_id,
@@ -86,8 +99,14 @@ def create_exercise(
     db.flush()
     fts_sync_exercise(db, ex)
     db.commit()
-    get_search_service().index_exercise(ex)
-    return ExerciseCreateResult(created=True, reason="created", exercise=to_out(ex))
+    search_service.index_exercise(ex)
+    return ExerciseCreateResult(
+        created=True,
+        reason="created",
+        exercise=to_out(ex),
+        similar_to=similar_to,
+        similar_to_similarity=similarity,
+    )
 
 
 @router.get("/{exercise_id}", response_model=ExerciseOut)

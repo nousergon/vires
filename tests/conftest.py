@@ -14,6 +14,7 @@ import tempfile
 _TMP = tempfile.mkdtemp(prefix="vires-test-")
 os.environ["VIRES_DATABASE_URL"] = f"sqlite:///{_TMP}/test.db"
 os.environ["VIRES_VECTOR_STORE_PATH"] = f"{_TMP}/test.npz"
+os.environ["VIRES_NAME_VECTOR_STORE_PATH"] = f"{_TMP}/test_names.npz"
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
