@@ -68,6 +68,20 @@ class EventOccurrenceCtx:
 
 
 @dataclass
+class ActivitySessionCtx:
+    """A recently logged generic activity (climbing, swimming, yoga, ...) —
+    already-absorbed training load the coach factors into today's fatigue/
+    recovery reasoning, distinct from ``EventOccurrenceCtx`` (upcoming load to
+    train *around*). Same coarse regions/intensity vocabulary as event load."""
+
+    name: str
+    session_date: date
+    regions: str
+    intensity: str
+    duration_min: int | None = None
+
+
+@dataclass
 class ExerciseCandidate:
     """A real catalog exercise the coach may use to AUTHOR a new routine. The
     pool is assembled from the objective's needs-analysis so the right movements
@@ -95,9 +109,17 @@ class CoachObjectiveContext:
     # Upcoming athletic events (recurrence-expanded, within the planning window),
     # in chronological order — load constraints the coach trains *around*.
     events: list[EventOccurrenceCtx] = field(default_factory=list)
+    # Recently logged generic activities (most recent first) — load already
+    # absorbed, distinct from `events` (upcoming load to train around).
+    recent_activities: list[ActivitySessionCtx] = field(default_factory=list)
 
     @property
     def is_empty(self) -> bool:
-        # Events alone (no objective, no constraints) still warrant grounding —
-        # the coach must account for their load even absent a goal.
-        return self.objective is None and not self.constraints and not self.events
+        # Events/activities alone (no objective, no constraints) still warrant
+        # grounding — the coach must account for their load even absent a goal.
+        return (
+            self.objective is None
+            and not self.constraints
+            and not self.events
+            and not self.recent_activities
+        )
