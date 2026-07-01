@@ -63,6 +63,19 @@ describe('WorkoutPage — ActiveWorkout', () => {
     await waitFor(() => expect(localStorage.getItem(ACTIVE_KEY)).toBeNull())
   })
 
+  it('shows a retry/clear error state (not an infinite spinner) on a non-404 failure', async () => {
+    // A transient/server error settles the query with no data and no automatic
+    // retry beyond the built-in 2 — without an explicit error branch this used
+    // to render <Spinner/> forever (the "wheel of death" bug, vires-ops#40).
+    vi.spyOn(api, 'getWorkout').mockRejectedValue(new Error('500: internal error'))
+    renderWithProviders(<WorkoutPage />)
+    // The query's own retry (2 retries, default backoff) runs before settling.
+    expect(await screen.findByText("Couldn't load this workout", {}, { timeout: 5000 })).toBeInTheDocument()
+    expect(screen.getByText('Retry')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('Clear active workout'))
+    await waitFor(() => expect(localStorage.getItem(ACTIVE_KEY)).toBeNull())
+  })
+
   it('renders the active session with its exercises and sets', async () => {
     vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession())
     renderWithProviders(<WorkoutPage />)
