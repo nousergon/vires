@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from api.config import get_settings
 from api.db.identity import Identity, current_identity, get_or_create_settings
 from api.db.models import (
+    ActivityDetail,
     PlannedWorkout,
     RuckDetail,
     SessionExercise,
@@ -22,6 +23,9 @@ from api.db.models import (
 from api.db.session import get_db
 from api.schemas.exercise import ExercisePerformance, PerformedSet
 from api.schemas.workout import (
+    ActivityDetailOut,
+    ActivityLogIn,
+    ActivityTemplateOut,
     RuckDetailOut,
     RuckLogIn,
     SessionExerciseIn,
@@ -35,6 +39,7 @@ from api.schemas.workout import (
     WorkoutSummary,
 )
 from api.serializers import to_exercise_brief
+from api.services.activity_templates import ACTIVITY_TEMPLATES
 from api.services.coach.autoregulate import autoregulate_after_session
 from api.services.load.pandolf import ruck_metabolic_cost_kj
 
@@ -129,6 +134,17 @@ def _ruck_out(rd: RuckDetail | None) -> RuckDetailOut | None:
     )
 
 
+def _activity_out(ad: ActivityDetail | None) -> ActivityDetailOut | None:
+    if ad is None:
+        return None
+    return ActivityDetailOut(
+        template_key=ad.template_key,
+        duration_s=ad.duration_s,
+        regions=ad.regions,
+        intensity=ad.intensity,
+    )
+
+
 def _session_out(db: Session, ident: Identity, ws: WorkoutSession) -> WorkoutSessionOut:
     return WorkoutSessionOut(
         id=ws.id,
@@ -140,6 +156,7 @@ def _session_out(db: Session, ident: Identity, ws: WorkoutSession) -> WorkoutSes
         template_id=ws.template_id,
         exercises=[_se_out(db, ident, se) for se in ws.exercises],
         ruck=_ruck_out(ws.ruck_detail),
+        activity=_activity_out(ws.activity_detail),
     )
 
 
@@ -292,6 +309,48 @@ def log_ruck(
     return _session_out(db, ident, ws)
 
 
+@router.get("/activity-templates", response_model=list[ActivityTemplateOut])
+def list_activity_templates() -> list[ActivityTemplateOut]:
+    """The fixed activity-template catalog the quick-log form offers as one-tap
+    starting points (see api.services.activity_templates)."""
+    return ACTIVITY_TEMPLATES
+
+
+@router.post("/activity", response_model=WorkoutSessionOut, status_code=201)
+def log_activity(
+    body: ActivityLogIn,
+    db: Session = Depends(get_db),
+    ident: Identity = Depends(current_identity),
+) -> WorkoutSessionOut:
+    """Quick-log a completed generic cross-training activity (climbing,
+    swimming, yoga, ...).
+
+    Tier 0: a coarse regions/intensity estimate (template-prefilled, always
+    user-editable) rather than a bespoke schema per activity — see
+    ``ActivityDetail`` for why. The session is created already-finished; like
+    a ruck, a generic activity has no set-by-set flow.
+    """
+    started = body.started_at or _now()
+    ws = WorkoutSession(
+        tenant_id=ident.tenant_id,
+        user_id=ident.user_id,
+        session_type="activity",
+        name=body.name,
+        started_at=started,
+        ended_at=started,  # quick-log records a completed activity
+        activity_detail=ActivityDetail(
+            template_key=body.template_key,
+            duration_s=body.duration_s,
+            regions=body.regions,
+            intensity=body.intensity,
+        ),
+    )
+    db.add(ws)
+    db.commit()
+    db.refresh(ws)
+    return _session_out(db, ident, ws)
+
+
 def _seed_planned_sets(db: Session, ident: Identity, se: SessionExercise) -> None:
     n = se.target_sets or 0
     if n <= 0 or se.sets:
@@ -355,6 +414,7 @@ def list_workouts(
                 set_count=set_count,
                 total_volume=round(volume, 2),
                 ruck=_ruck_out(ws.ruck_detail),
+                activity=_activity_out(ws.activity_detail),
             )
         )
     return out
