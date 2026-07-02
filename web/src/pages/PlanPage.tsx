@@ -1,12 +1,13 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   api,
   type CalendarEntry,
   type CalendarEventOccurrence,
   type Objective,
   type PlannedExercise,
+  type PlannedWorkout,
 } from '../lib/api'
 import { Button, EmptyState, PageTitle, Sheet, Spinner } from '../components/ui'
 import CoachSheet from '../components/CoachSheet'
@@ -47,6 +48,7 @@ export default function PlanPage() {
     open: false,
   })
   const [modifyProgram, setModifyProgram] = useState<{ id: number; name: string } | null>(null)
+  const [movedBanner, setMovedBanner] = useState<PlannedWorkout[]>([])
 
   const openObjective = (id?: number, date?: string) => setObjectiveSheet({ open: true, id, date })
   const openEvent = (id?: number, date?: string) => setEventSheet({ open: true, id, date })
@@ -56,6 +58,26 @@ export default function PlanPage() {
     setCoachAutoStart(auto)
     setCoachOpen(true)
   }
+
+  // Mechanically slides any missed workout onto the next fit-to-train-on day
+  // — no LLM, no confirmation. Fired once per mount; idempotent server-side,
+  // so a StrictMode dev double-invoke is a harmless extra no-op call.
+  const rescheduleMissed = useMutation({
+    mutationFn: api.rescheduleMissed,
+    onSuccess: (moved) => {
+      if (moved.length > 0) {
+        setMovedBanner(moved)
+        qc.invalidateQueries({ queryKey: ['calendar'] })
+      }
+    },
+  })
+  const checkedReschedule = useRef(false)
+  useEffect(() => {
+    if (checkedReschedule.current) return
+    checkedReschedule.current = true
+    rescheduleMissed.mutate()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const weeks = useMemo(() => monthMatrix(month.getFullYear(), month.getMonth()), [month])
   const rangeStart = isoDate(weeks[0][0])
@@ -103,6 +125,10 @@ export default function PlanPage() {
   return (
     <div>
       <PageTitle right={<Button onClick={() => openCoach(false)}>✨ Coach</Button>}>Plan</PageTitle>
+
+      {movedBanner.length > 0 && (
+        <RescheduleBanner moved={movedBanner} onDismiss={() => setMovedBanner([])} />
+      )}
 
       <div className="mb-3 flex items-center justify-between">
         <button className="px-2 py-1 text-slate-400" onClick={() => setMonth(addMonths(month, -1))}>
@@ -523,6 +549,53 @@ function CalendarGrid({
             </button>
           )
         })}
+      </div>
+    </div>
+  )
+}
+
+// A day is shown "moved from ..." → "..." in local weekday/month/day form —
+// dates arrive as plain YYYY-MM-DD, so parse at local midnight rather than
+// letting `new Date(iso)` interpret it as UTC (which can shift the day back
+// by a timezone offset).
+function fmtLocalDate(iso: string): string {
+  return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  })
+}
+
+function RescheduleBanner({
+  moved,
+  onDismiss,
+}: {
+  moved: PlannedWorkout[]
+  onDismiss: () => void
+}) {
+  return (
+    <div className="mb-4 rounded-xl border border-amber-700/40 bg-amber-900/15 p-3">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 text-sm text-amber-200">
+          <p className="font-semibold">
+            🧠 The coach moved {moved.length === 1 ? 'a missed workout' : `${moved.length} missed workouts`}
+          </p>
+          <ul className="mt-1 space-y-0.5 text-xs text-amber-300/80">
+            {moved.map((pw) => (
+              <li key={pw.id} className="truncate">
+                {pw.name} — {pw.rescheduled_from ? fmtLocalDate(pw.rescheduled_from) : '?'} →{' '}
+                {fmtLocalDate(pw.scheduled_date)}
+              </li>
+            ))}
+          </ul>
+        </div>
+        <button
+          className="shrink-0 text-amber-400/70 hover:text-amber-200"
+          onClick={onDismiss}
+          aria-label="Dismiss"
+        >
+          ✕
+        </button>
       </div>
     </div>
   )
