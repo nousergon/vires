@@ -8,7 +8,6 @@ import { schedulePush, cancelPush } from '../lib/push'
 import { useSettings } from '../lib/useSettings'
 import { Button, Card, EmptyState, PageTitle, Spinner } from '../components/ui'
 import ExercisePicker from '../components/ExercisePicker'
-import RuckForm from '../components/RuckForm'
 import PlateCalculatorSheet from '../components/PlateCalculatorSheet'
 import ActivityForm from '../components/ActivityForm'
 
