@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { screen, fireEvent } from '@testing-library/react'
-import { renderWithProviders, SETTINGS } from '../test/utils'
+import { screen, fireEvent, waitFor } from '@testing-library/react'
+import { renderWithProviders, SETTINGS, makeSession, makeSessionExercise, makeSet } from '../test/utils'
 import HistoryPage from './HistoryPage'
 import { api } from '../lib/api'
 
@@ -116,6 +116,31 @@ describe('HistoryPage', () => {
     fireEvent.click(await screen.findByText('Delete workout'))
     await new Promise((r) => setTimeout(r, 0))
     expect(del).toHaveBeenCalledWith(9)
+  })
+
+  it('edits a logged set weight/reps from the History detail sheet', async () => {
+    mockSettings()
+    vi.spyOn(api, 'listWorkouts').mockResolvedValue([
+      { id: 9, session_type: 'strength', name: 'Test D', started_at: '2026-06-28T18:00:00Z', ended_at: '2026-06-28T19:00:00Z', exercise_count: 1, set_count: 1, total_volume: 135, ruck: null, activity: null },
+    ])
+    vi.spyOn(api, 'records').mockResolvedValue([])
+    const session = makeSession({
+      id: 9,
+      name: 'Test D',
+      exercises: [makeSessionExercise({ sets: [makeSet({ id: 500, set_number: 1, weight: 135, reps: 8 })] })],
+    })
+    vi.spyOn(api, 'getWorkout').mockResolvedValue(session)
+    const update = vi.spyOn(api, 'updateSet').mockResolvedValue(makeSet({ id: 500, weight: 140, reps: 8 }))
+
+    renderWithProviders(<HistoryPage />)
+    fireEvent.click(await screen.findByText('Test D'))
+    fireEvent.click(await screen.findByText('Edit sets'))
+
+    const weightInput = await screen.findByLabelText(/set 1 weight/)
+    fireEvent.change(weightInput, { target: { value: '140' } })
+    fireEvent.blur(weightInput)
+
+    await waitFor(() => expect(update).toHaveBeenCalledWith(9, 100, 500, { weight: 140 }))
   })
 
   it('shows an empty state with no records', async () => {
