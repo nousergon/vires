@@ -241,8 +241,8 @@ def _build_event_ctxs(
 def _build_recent_activities(
     db: Session, ident: Identity, today: date
 ) -> list[ActivitySessionCtx]:
-    """Generic activity sessions (climbing, swimming, yoga, ...) logged within
-    the trailing window — load already absorbed, factored into today's
+    """Activity sessions (climbing, swimming, yoga, walk/run/hike, ...) logged
+    within the trailing window — load already absorbed, factored into today's
     fatigue/recovery reasoning. Empty for users who haven't logged one (the
     coach then behaves exactly as before)."""
     # WorkoutSession.started_at is a UTCDateTime column — compare against a
@@ -270,6 +270,8 @@ def _build_recent_activities(
             regions=ad.regions,
             intensity=ad.intensity,
             duration_min=ad.duration_s // 60 if ad.duration_s else None,
+            pack_weight_kg=ad.pack_weight_kg,
+            metabolic_cost_kj=ad.metabolic_cost_kj,
         )
         for ws, ad in rows
     ]

@@ -20,12 +20,15 @@ const DISC_DIRECTIVES =
 export default function ObjectiveSheet({
   open,
   objectiveId,
+  defaultDate,
   onClose,
   onSaved,
 }: {
   open: boolean
   // The objective to edit; omit / null to create a brand-new one.
   objectiveId?: number | null
+  // Seed target_date for a new dated objective (e.g. the tapped calendar day).
+  defaultDate?: string | null
   onClose: () => void
   onSaved: () => void
 }) {
@@ -64,12 +67,12 @@ export default function ObjectiveSheet({
     setError(null)
     setName(editing?.name ?? '')
     setKind(editing?.kind ?? 'dated')
-    setTargetDate(editing?.target_date ?? '')
+    setTargetDate(editing?.target_date ?? defaultDate ?? '')
     setEventEndDate(editing?.event_end_date ?? '')
     setSport(editing?.sport ?? 'alpine')
     setPriority(editing?.priority ?? 0)
     setIsPrimary(editing?.is_primary ?? false)
-  }, [open, editing?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, editing?.id, defaultDate]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['active-objective'] })

@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import type {
   ActiveObjective,
+  ActivityDetail,
   Exercise,
   ExerciseBrief,
   Objective,
@@ -93,6 +94,23 @@ export function makeSessionExercise(over: Partial<SessionExercise> = {}): Sessio
   }
 }
 
+export function makeActivityDetail(over: Partial<ActivityDetail> = {}): ActivityDetail {
+  return {
+    template_key: 'custom',
+    duration_s: 1800,
+    regions: 'full',
+    intensity: 'moderate',
+    pack_weight_kg: null,
+    bodyweight_kg: null,
+    distance_m: null,
+    elevation_gain_m: null,
+    terrain: 'trail',
+    metabolic_cost_kj: null,
+    source: 'manual',
+    ...over,
+  }
+}
+
 export function makeSession(over: Partial<WorkoutSession> = {}): WorkoutSession {
   return {
     id: 10,
@@ -103,7 +121,6 @@ export function makeSession(over: Partial<WorkoutSession> = {}): WorkoutSession 
     notes: null,
     template_id: null,
     exercises: [makeSessionExercise()],
-    ruck: null,
     activity: null,
     ...over,
   }

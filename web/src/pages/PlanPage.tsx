@@ -12,6 +12,7 @@ import { Button, EmptyState, PageTitle, Sheet, Spinner } from '../components/ui'
 import CoachSheet from '../components/CoachSheet'
 import ObjectiveSheet from '../components/ObjectiveSheet'
 import CalendarEventSheet from '../components/CalendarEventSheet'
+import ActivityForm from '../components/ActivityForm'
 import { useSettings } from '../lib/useSettings'
 import { ACTIVE_KEY } from './WorkoutPage'
 import {
@@ -31,8 +32,9 @@ export default function PlanPage() {
   const [selected, setSelected] = useState<Date | null>(null)
   const [coachOpen, setCoachOpen] = useState(false)
   const [coachAutoStart, setCoachAutoStart] = useState(false)
-  // { open } with an optional id — id present = edit that objective, absent = add new.
-  const [objectiveSheet, setObjectiveSheet] = useState<{ open: boolean; id?: number }>({
+  // { open } with an optional id — id present = edit that objective, absent = add
+  // new (optionally seeded with the tapped day via `date`, dated objectives only).
+  const [objectiveSheet, setObjectiveSheet] = useState<{ open: boolean; id?: number; date?: string }>({
     open: false,
   })
   // { open } with an optional id — id present = edit that calendar event, absent = add
@@ -40,10 +42,15 @@ export default function PlanPage() {
   const [eventSheet, setEventSheet] = useState<{ open: boolean; id?: number; date?: string }>({
     open: false,
   })
+  // Log-an-activity sheet, optionally seeded with the tapped calendar day.
+  const [activitySheet, setActivitySheet] = useState<{ open: boolean; date?: string }>({
+    open: false,
+  })
   const [modifyProgram, setModifyProgram] = useState<{ id: number; name: string } | null>(null)
 
-  const openObjective = (id?: number) => setObjectiveSheet({ open: true, id })
+  const openObjective = (id?: number, date?: string) => setObjectiveSheet({ open: true, id, date })
   const openEvent = (id?: number, date?: string) => setEventSheet({ open: true, id, date })
+  const openActivity = (date?: string) => setActivitySheet({ open: true, date })
 
   const openCoach = (auto: boolean) => {
     setCoachAutoStart(auto)
@@ -145,10 +152,13 @@ export default function PlanPage() {
         onStarted={onStarted}
         onEditEvent={(id) => openEvent(id)}
         onAddEvent={() => (selected ? openEvent(undefined, isoDate(selected)) : openEvent())}
+        onAddActivity={() => (selected ? openActivity(isoDate(selected)) : openActivity())}
+        onAddObjective={() => (selected ? openObjective(undefined, isoDate(selected)) : openObjective())}
       />
       <ObjectiveSheet
         open={objectiveSheet.open}
         objectiveId={objectiveSheet.id}
+        defaultDate={objectiveSheet.date}
         onClose={() => setObjectiveSheet({ open: false })}
         onSaved={refresh}
       />
@@ -158,6 +168,11 @@ export default function PlanPage() {
         defaultDate={eventSheet.date}
         onClose={() => setEventSheet({ open: false })}
         onSaved={refresh}
+      />
+      <ActivityForm
+        open={activitySheet.open}
+        defaultDate={activitySheet.date}
+        onClose={() => setActivitySheet({ open: false })}
       />
       <CoachSheet
         open={coachOpen}
@@ -543,6 +558,8 @@ function DaySheet({
   onStarted,
   onEditEvent,
   onAddEvent,
+  onAddActivity,
+  onAddObjective,
 }: {
   date: Date | null
   entries: CalendarEntry[]
@@ -552,6 +569,8 @@ function DaySheet({
   onStarted: (sessionId: number) => void
   onEditEvent: (id: number) => void
   onAddEvent: () => void
+  onAddActivity: () => void
+  onAddObjective: () => void
 }) {
   const { data: templates = [] } = useQuery({ queryKey: ['templates'], queryFn: api.listTemplates })
   const [busy, setBusy] = useState(false)
@@ -648,6 +667,21 @@ function DaySheet({
             </div>
           </button>
         ))}
+
+        <div className="flex gap-2">
+          <button
+            onClick={onAddActivity}
+            className="flex-1 rounded-xl border border-dashed border-slate-700 p-2.5 text-center text-xs text-slate-300 hover:bg-slate-800/40"
+          >
+            🏃 Log activity
+          </button>
+          <button
+            onClick={onAddObjective}
+            className="flex-1 rounded-xl border border-dashed border-fuchsia-800/60 p-2.5 text-center text-xs text-fuchsia-300/80 hover:bg-fuchsia-900/10"
+          >
+            🎯 New objective
+          </button>
+        </div>
 
         <button
           onClick={onAddEvent}

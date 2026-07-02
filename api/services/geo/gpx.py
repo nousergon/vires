@@ -46,7 +46,7 @@ def parse_gpx(data: bytes | str) -> GpxTrack:
 
     Raises :class:`GpxParseError` on malformed XML or when fewer than 2 usable
     trackpoints/routepoints are present — the caller surfaces that as a 422, not a
-    silent empty ruck.
+    silent empty route.
     """
     try:
         root = ET.fromstring(data)

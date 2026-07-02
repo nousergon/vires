@@ -69,8 +69,8 @@ class EventOccurrenceCtx:
 
 @dataclass
 class ActivitySessionCtx:
-    """A recently logged generic activity (climbing, swimming, yoga, ...) —
-    already-absorbed training load the coach factors into today's fatigue/
+    """A recently logged activity (climbing, swimming, yoga, walk/run/hike, ...)
+    — already-absorbed training load the coach factors into today's fatigue/
     recovery reasoning, distinct from ``EventOccurrenceCtx`` (upcoming load to
     train *around*). Same coarse regions/intensity vocabulary as event load."""
 
@@ -79,6 +79,12 @@ class ActivitySessionCtx:
     regions: str
     intensity: str
     duration_min: int | None = None
+    # Present only when this was a route-capable activity logged with a
+    # weighted pack — lets the coach weigh a loaded carry's fatigue cost above
+    # regions/intensity alone, which under-represent load-carriage (see
+    # api.services.load.pandolf).
+    pack_weight_kg: float | None = None
+    metabolic_cost_kj: float | None = None
 
 
 @dataclass
