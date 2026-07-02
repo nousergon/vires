@@ -28,6 +28,9 @@ class CalendarEntry(BaseModel):
     objective_name: str | None = None  # label for the block, e.g. "Kangaroo Temple"
     exercise_count: int = 0
     session_id: int | None = None  # planned -> the session that fulfilled it, if any
+    # planned only: set when api.services.reschedule auto-moved this day forward
+    # because it was missed — the date it moved FROM.
+    rescheduled_from: date | None = None
 
 
 class PlannedExerciseIn(BaseModel):
@@ -58,6 +61,9 @@ class PlannedWorkoutOut(BaseModel):
     template_id: int | None = None
     objective_id: int | None = None  # which objective's block this day prepares for
     scheduled_date: date
+    # Set when api.services.reschedule auto-moved this day forward because it
+    # was missed — the date it moved FROM.
+    rescheduled_from: date | None = None
     name: str
     notes: str | None = None
     week_index: int | None = None

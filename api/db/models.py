@@ -446,6 +446,11 @@ class PlannedWorkout(Base):
         ForeignKey("objectives.id", ondelete="SET NULL"), nullable=True, index=True
     )
     scheduled_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    # Set (to the PRIOR scheduled_date) when api.services.reschedule auto-moves
+    # this day forward because it was missed — lets the UI say "moved from Thu
+    # 7/2". Never cleared; overwritten with the most recent prior date if moved
+    # more than once. None for a day that has never been auto-rescheduled.
+    rescheduled_from: Mapped[date | None] = mapped_column(Date, nullable=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     week_index: Mapped[int | None] = mapped_column(Integer, nullable=True)  # display grouping
