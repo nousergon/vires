@@ -40,6 +40,7 @@ from api.schemas.plan import (
 from api.schemas.workout import WorkoutSessionOut
 from api.serializers import program_coach_summary, to_planned_workout_out
 from api.services.ics import IcsEvent, build_calendar
+from api.services.reschedule import reschedule_missed
 
 router = APIRouter(prefix="/plan", tags=["plan"])
 
@@ -150,6 +151,7 @@ def calendar(
                 objective_name=objective_names.get(pw.objective_id),
                 exercise_count=len(pw.exercises),
                 session_id=pw.session_id,
+                rescheduled_from=pw.rescheduled_from,
             )
         )
 
@@ -395,6 +397,30 @@ def start_planned(
     db.commit()
     db.refresh(ws)
     return _session_out(db, ident, ws)
+
+
+@router.post("/reschedule-missed", response_model=list[PlannedWorkoutOut])
+def reschedule_missed_workouts(
+    db: Session = Depends(get_db),
+    ident: Identity = Depends(current_identity),
+) -> list[PlannedWorkoutOut]:
+    """Mechanically slide missed workouts (planned, never started, date in
+    the past) onto the next day that's actually fit to train on — no LLM
+    call, no confirmation, always-on. "The coach" quietly keeps the calendar
+    current; see ``api.services.reschedule`` for the recovery-aware landing
+    logic (never adjacent to a hard athletic-calendar event, prefers spacing
+    from other planned workouts). Distinct from the macro replan flow
+    (``api.services.coach.replan``), which proposes restructuring a whole
+    season and requires explicit user confirm.
+
+    Idempotent: once a workout is moved to today-or-later it no longer
+    matches the "missed" predicate, so calling this repeatedly (React
+    StrictMode double-invoke, remounting the Plan tab) is a cheap no-op
+    after the first real move — the frontend calls it unconditionally on
+    every Plan-page mount.
+    """
+    moved = reschedule_missed(db, ident, date.today())
+    return [to_planned_workout_out(pw) for pw in moved]
 
 
 # --------------------------------------------------------------------------- #
