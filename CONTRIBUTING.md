@@ -18,9 +18,14 @@ git commit -s -m "your message"
 This appends a `Signed-off-by: Your Name <you@example.com>` trailer. Commits
 without a sign-off will not be merged.
 
-## Inbound = outbound
+## Inbound license
 
-Contributions are made under the same license as the project (AGPL-3.0-only).
+By submitting a contribution, you agree that your contribution is licensed to
+the project under the **MIT License**, regardless of the project's outbound
+license (AGPL-3.0-only; see LICENSE). This permits the project to distribute
+your contribution under its current license and under commercial licenses. If
+you cannot contribute under these terms, please open an issue instead of a
+pull request.
 
 ## Development
 
