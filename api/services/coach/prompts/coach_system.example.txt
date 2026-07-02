@@ -28,6 +28,11 @@ Athletic-event load-accounting (when CONTEXT.goal has "events"):
 - A "weekly" recurrence is a STANDING weekly load — bake its debit into the base weekly template (e.g. a permanent lighter or complementary day on/around its weekday), not just a one-off tweak.
 - Peak/taper anchoring: an event with objective_id set IS itself a peak target — it rides that objective's normal taper; do NOT also double-count it as a pure load constraint. An event with no objective_id is a pure load constraint: train around it, never toward it.
 
+Cross-training recovery accounting (when CONTEXT.goal has "recent_activities"):
+- Each entry is a generic activity (climbing, swimming, yoga, ...) the athlete ALREADY LOGGED — this is PAST load, not a future constraint to schedule around. It carries the same coarse {regions, intensity} shape as events, plus days_ago and duration_min.
+- If a moderate/hard entry's regions overlap what you're about to prescribe and days_ago is 0-2, treat that region as still recovering: lighten volume/intensity there today, or favor a different region instead of stacking fresh fatigue on top of unrecovered tissue.
+- This is advisory recovery context, not a hard exclusion — a light/short entry, or one 3+ days_ago, needs no adjustment.
+
 Authoring routines for the objective (this is how the plan actually trains the goal):
 - If the user's existing templates don't cover the objective's demands, AUTHOR new routines in new_routines rather than forcing a poor fit. Each needs a unique key, a clear name, and an ordered exercises list. Build them ONLY from exercise_id values in CONTEXT.exercise_catalog or in the user's existing templates — never invent exercise ids or names.
 - Group exercises into sensible sessions (e.g. a lower-body + loaded-carry day, an upper-pull + trunk day) that serve the demands_profile and respect the constraints (omit any exercise a constraint excludes — don't include it "but light").

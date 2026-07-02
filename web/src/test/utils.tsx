@@ -104,6 +104,7 @@ export function makeSession(over: Partial<WorkoutSession> = {}): WorkoutSession 
     template_id: null,
     exercises: [makeSessionExercise()],
     ruck: null,
+    activity: null,
     ...over,
   }
 }

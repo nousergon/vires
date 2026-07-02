@@ -94,7 +94,7 @@ export interface SessionExercise {
   previous_performance: ExercisePerformance | null
 }
 
-export type SessionType = 'strength' | 'ruck'
+export type SessionType = 'strength' | 'ruck' | 'activity'
 
 export type Terrain = 'treadmill' | 'road' | 'trail' | 'offtrail' | 'snow'
 
@@ -124,6 +124,36 @@ export interface RuckLogInput {
   name?: string | null
   // ISO datetime — omit to default to now server-side; set to backdate (e.g.
   // logging yesterday's ruck).
+  started_at?: string | null
+}
+
+// Activity load reuses LoadRegions/LoadIntensity (declared below alongside
+// CalendarEvent.load) rather than a parallel vocabulary, so the coach's
+// existing recovery-budget reasoning generalizes to logged activities for free.
+
+// One entry in the fixed activity-template catalog (GET /workouts/activity-templates).
+export interface ActivityTemplate {
+  key: string
+  label: string
+  regions: LoadRegions
+  intensity: LoadIntensity
+}
+
+export interface ActivityDetail {
+  template_key: string
+  duration_s: number | null
+  regions: LoadRegions
+  intensity: LoadIntensity
+}
+
+// Quick-log payload for a generic cross-training activity.
+export interface ActivityLogInput {
+  name: string
+  template_key?: string
+  duration_s?: number | null
+  regions: LoadRegions
+  intensity: LoadIntensity
+  // ISO datetime — omit to default to now server-side; set to backdate.
   started_at?: string | null
 }
 
@@ -159,6 +189,7 @@ export interface WorkoutSession {
   template_id: number | null
   exercises: SessionExercise[]
   ruck: RuckDetail | null
+  activity: ActivityDetail | null
 }
 
 export interface WorkoutSummary {
@@ -171,6 +202,7 @@ export interface WorkoutSummary {
   set_count: number
   total_volume: number
   ruck: RuckDetail | null
+  activity: ActivityDetail | null
 }
 
 export interface TemplateExercise {
@@ -542,6 +574,9 @@ export const api = {
     req<WorkoutSession>('/workouts', { method: 'POST', body: JSON.stringify(body) }),
   logRuck: (body: RuckLogInput) =>
     req<WorkoutSession>('/workouts/ruck', { method: 'POST', body: JSON.stringify(body) }),
+  listActivityTemplates: () => req<ActivityTemplate[]>('/workouts/activity-templates'),
+  logActivity: (body: ActivityLogInput) =>
+    req<WorkoutSession>('/workouts/activity', { method: 'POST', body: JSON.stringify(body) }),
   // route derivation — all three feed the same editable ruck fields
   searchTrails: (q: string) =>
     req<{ candidates: TrailCandidate[] }>(`/routes/search?q=${encodeURIComponent(q)}`),
