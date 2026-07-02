@@ -1,4 +1,4 @@
-// Unit conversion + display formatting for ruck (loaded-cardio) data.
+// Unit conversion + display formatting for activity route + pack-weight data.
 //
 // The API stores and returns canonical SI (kg / m / s); the account's
 // `weight_unit` drives how we render it. To avoid adding a separate
@@ -50,7 +50,8 @@ const round = (n: number, dp: number) => {
   return Math.round(n * f) / f
 }
 
-export function fmtPack(kg: number, w: WeightUnit): string {
+export function fmtPack(kg: number | null, w: WeightUnit): string | null {
+  if (kg == null) return null
   return `${round(kgToDisplay(kg, w), 1)} ${w}`
 }
 

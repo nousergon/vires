@@ -94,59 +94,45 @@ export interface SessionExercise {
   previous_performance: ExercisePerformance | null
 }
 
-export type SessionType = 'strength' | 'ruck' | 'activity'
+export type SessionType = 'strength' | 'activity'
 
 export type Terrain = 'treadmill' | 'road' | 'trail' | 'offtrail' | 'snow'
 
-// Canonical SI ruck detail (the API stores/returns SI; the UI converts for display).
-export interface RuckDetail {
-  pack_weight_kg: number
-  bodyweight_kg: number
-  distance_m: number | null
-  elevation_gain_m: number | null
-  duration_s: number | null
-  terrain: string
-  metabolic_cost_kj: number | null
-  source: string
-}
-
-export type RuckSource = 'manual' | 'route_search' | 'route_draw' | 'gpx'
-
-// Quick-log payload — numbers in the account's DISPLAY units (server converts).
-export interface RuckLogInput {
-  pack_weight: number
-  bodyweight: number
-  distance?: number | null
-  elevation_gain?: number | null
-  duration_s?: number | null
-  terrain?: Terrain
-  source?: RuckSource
-  name?: string | null
-  // ISO datetime — omit to default to now server-side; set to backdate (e.g.
-  // logging yesterday's ruck).
-  started_at?: string | null
-}
+export type RouteSource = 'manual' | 'route_search' | 'route_draw' | 'gpx'
 
 // Activity load reuses LoadRegions/LoadIntensity (declared below alongside
 // CalendarEvent.load) rather than a parallel vocabulary, so the coach's
 // existing recovery-budget reasoning generalizes to logged activities for free.
 
 // One entry in the fixed activity-template catalog (GET /workouts/activity-templates).
+// route_capable templates (walk/run/hike) additionally get the route-capture
+// UI + an optional pack-weight section.
 export interface ActivityTemplate {
   key: string
   label: string
   regions: LoadRegions
   intensity: LoadIntensity
+  route_capable: boolean
 }
 
+// Canonical SI (the API stores/returns SI; the UI converts for display).
+// pack_weight_kg/bodyweight_kg/distance_m/elevation_gain_m/metabolic_cost_kj
+// are only ever set on a route_capable template logged with that data.
 export interface ActivityDetail {
   template_key: string
   duration_s: number | null
   regions: LoadRegions
   intensity: LoadIntensity
+  pack_weight_kg: number | null
+  bodyweight_kg: number | null
+  distance_m: number | null
+  elevation_gain_m: number | null
+  terrain: string
+  metabolic_cost_kj: number | null
+  source: string
 }
 
-// Quick-log payload for a generic cross-training activity.
+// Quick-log payload — numbers in the account's DISPLAY units (server converts).
 export interface ActivityLogInput {
   name: string
   template_key?: string
@@ -155,6 +141,15 @@ export interface ActivityLogInput {
   intensity: LoadIntensity
   // ISO datetime — omit to default to now server-side; set to backdate.
   started_at?: string | null
+  // Route capture — optional for every template.
+  distance?: number | null
+  elevation_gain?: number | null
+  terrain?: Terrain
+  source?: RouteSource
+  // Load-carriage — never required. bodyweight is required IFF pack_weight
+  // is given (server-validated).
+  pack_weight?: number | null
+  bodyweight?: number | null
 }
 
 // ---- route derivation (trail search / draw / GPX) ------------------------- //
@@ -188,7 +183,6 @@ export interface WorkoutSession {
   notes: string | null
   template_id: number | null
   exercises: SessionExercise[]
-  ruck: RuckDetail | null
   activity: ActivityDetail | null
 }
 
@@ -201,7 +195,6 @@ export interface WorkoutSummary {
   exercise_count: number
   set_count: number
   total_volume: number
-  ruck: RuckDetail | null
   activity: ActivityDetail | null
 }
 
@@ -572,12 +565,10 @@ export const api = {
   // workouts
   startWorkout: (body: { template_id?: number | null; name?: string | null }) =>
     req<WorkoutSession>('/workouts', { method: 'POST', body: JSON.stringify(body) }),
-  logRuck: (body: RuckLogInput) =>
-    req<WorkoutSession>('/workouts/ruck', { method: 'POST', body: JSON.stringify(body) }),
   listActivityTemplates: () => req<ActivityTemplate[]>('/workouts/activity-templates'),
   logActivity: (body: ActivityLogInput) =>
     req<WorkoutSession>('/workouts/activity', { method: 'POST', body: JSON.stringify(body) }),
-  // route derivation — all three feed the same editable ruck fields
+  // route derivation — all three feed the same editable activity route fields
   searchTrails: (q: string) =>
     req<{ candidates: TrailCandidate[] }>(`/routes/search?q=${encodeURIComponent(q)}`),
   measureRoute: (points: RoutePoint[]) =>

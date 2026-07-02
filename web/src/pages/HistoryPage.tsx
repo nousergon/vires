@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   api,
+  type ActivityDetail,
   type ExerciseRecords,
   type RecordMetric,
   type RecordWindow,
@@ -13,25 +14,23 @@ import { fmtDistance, fmtElevation, fmtLoad, fmtPack } from '../lib/units'
 import type { WeightUnit } from '../lib/api'
 import { Button, Card, EmptyState, PageTitle, Sheet, Spinner } from '../components/ui'
 
-// One-line summary of a ruck's headline facts (pack · distance · load).
-function ruckLine(
-  ruck: { pack_weight_kg: number; distance_m: number | null; metabolic_cost_kj: number | null },
-  unit: WeightUnit,
-): string {
-  return [fmtPack(ruck.pack_weight_kg, unit), fmtDistance(ruck.distance_m, unit), fmtLoad(ruck.metabolic_cost_kj)]
-    .filter(Boolean)
-    .join(' · ')
-}
-
-// One-line summary of a generic activity's headline facts (duration · regions · intensity).
-function activityLine(activity: { duration_s: number | null; regions: string; intensity: string }): string {
-  return [
-    activity.duration_s != null ? fmtClock(activity.duration_s) : null,
-    activity.regions !== 'none' ? activity.regions : null,
-    activity.intensity,
-  ]
-    .filter(Boolean)
-    .join(' · ')
+// One-line summary of an activity's headline facts. A route-capable entry
+// with a distance leads with pack (if any)/distance/load; everything else
+// falls back to duration · regions · intensity.
+function activityLine(activity: ActivityDetail, unit: WeightUnit): string {
+  const parts =
+    activity.distance_m != null || activity.pack_weight_kg != null
+      ? [
+          activity.pack_weight_kg != null ? fmtPack(activity.pack_weight_kg, unit) : null,
+          fmtDistance(activity.distance_m, unit),
+          fmtLoad(activity.metabolic_cost_kj),
+        ]
+      : [
+          activity.duration_s != null ? fmtClock(activity.duration_s) : null,
+          activity.regions !== 'none' ? activity.regions : null,
+          activity.intensity,
+        ]
+  return parts.filter(Boolean).join(' · ')
 }
 
 type Tab = 'sessions' | 'records'
@@ -163,24 +162,16 @@ function SessionsView() {
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center justify-between">
                     <span className="truncate font-semibold text-slate-100">
-                      {w.session_type === 'ruck' ? '🎒 ' : ''}
-                      {w.session_type === 'activity' ? '🏃 ' : ''}
-                      {w.name ||
-                        (w.session_type === 'ruck'
-                          ? 'Ruck'
-                          : w.session_type === 'activity'
-                            ? 'Activity'
-                            : 'Workout')}
+                      {w.activity?.pack_weight_kg != null ? '🎒 ' : w.session_type === 'activity' ? '🏃 ' : ''}
+                      {w.name || (w.session_type === 'activity' ? 'Activity' : 'Workout')}
                     </span>
                     <span className="ml-2 shrink-0 text-xs text-slate-400">
                       {new Date(w.started_at).toLocaleDateString()}
                     </span>
                   </span>
                   <span className="mt-1 block text-xs text-slate-400">
-                    {w.session_type === 'ruck' && w.ruck ? (
-                      ruckLine(w.ruck, unit)
-                    ) : w.session_type === 'activity' && w.activity ? (
-                      activityLine(w.activity)
+                    {w.session_type === 'activity' && w.activity ? (
+                      activityLine(w.activity, unit)
                     ) : (
                       <>
                         {w.exercise_count} exercises · {w.set_count} sets
@@ -218,38 +209,6 @@ function SessionsView() {
         {detail && (
           <div className="space-y-4">
             <p className="text-sm text-slate-400">{new Date(detail.started_at).toLocaleString()}</p>
-            {detail.session_type === 'ruck' && detail.ruck && (
-              <dl className="grid grid-cols-2 gap-3 text-sm">
-                <div>
-                  <dt className="text-xs uppercase tracking-wide text-slate-500">Pack</dt>
-                  <dd className="font-semibold text-slate-100">{fmtPack(detail.ruck.pack_weight_kg, unit)}</dd>
-                </div>
-                <div>
-                  <dt className="text-xs uppercase tracking-wide text-slate-500">Load</dt>
-                  <dd className="font-semibold text-amber-400">
-                    {fmtLoad(detail.ruck.metabolic_cost_kj) ?? '—'}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-xs uppercase tracking-wide text-slate-500">Distance</dt>
-                  <dd className="text-slate-200">{fmtDistance(detail.ruck.distance_m, unit) ?? '—'}</dd>
-                </div>
-                <div>
-                  <dt className="text-xs uppercase tracking-wide text-slate-500">Elevation gain</dt>
-                  <dd className="text-slate-200">{fmtElevation(detail.ruck.elevation_gain_m, unit) ?? '—'}</dd>
-                </div>
-                <div>
-                  <dt className="text-xs uppercase tracking-wide text-slate-500">Duration</dt>
-                  <dd className="text-slate-200">
-                    {detail.ruck.duration_s != null ? fmtClock(detail.ruck.duration_s) : '—'}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-xs uppercase tracking-wide text-slate-500">Terrain</dt>
-                  <dd className="capitalize text-slate-200">{detail.ruck.terrain}</dd>
-                </div>
-              </dl>
-            )}
             {detail.session_type === 'activity' && detail.activity && (
               <dl className="grid grid-cols-2 gap-3 text-sm">
                 <div>
@@ -266,6 +225,44 @@ function SessionsView() {
                   <dt className="text-xs uppercase tracking-wide text-slate-500">Regions worked</dt>
                   <dd className="capitalize text-slate-200">{detail.activity.regions}</dd>
                 </div>
+                {/* Route rows for any route-capable entry with a distance logged. */}
+                {detail.activity.distance_m != null && (
+                  <>
+                    <div>
+                      <dt className="text-xs uppercase tracking-wide text-slate-500">Distance</dt>
+                      <dd className="text-slate-200">
+                        {fmtDistance(detail.activity.distance_m, unit) ?? '—'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs uppercase tracking-wide text-slate-500">Elevation gain</dt>
+                      <dd className="text-slate-200">
+                        {fmtElevation(detail.activity.elevation_gain_m, unit) ?? '—'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs uppercase tracking-wide text-slate-500">Terrain</dt>
+                      <dd className="capitalize text-slate-200">{detail.activity.terrain}</dd>
+                    </div>
+                  </>
+                )}
+                {/* Pack/load rows only when a pack weight was actually logged. */}
+                {detail.activity.pack_weight_kg != null && (
+                  <>
+                    <div>
+                      <dt className="text-xs uppercase tracking-wide text-slate-500">Pack</dt>
+                      <dd className="font-semibold text-slate-100">
+                        {fmtPack(detail.activity.pack_weight_kg, unit)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs uppercase tracking-wide text-slate-500">Load</dt>
+                      <dd className="font-semibold text-amber-400">
+                        {fmtLoad(detail.activity.metabolic_cost_kj) ?? '—'}
+                      </dd>
+                    </div>
+                  </>
+                )}
               </dl>
             )}
             {detail.exercises.map((se) => (
