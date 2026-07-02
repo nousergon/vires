@@ -1,17 +1,19 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   api,
   type CalendarEntry,
   type CalendarEventOccurrence,
   type Objective,
   type PlannedExercise,
+  type PlannedWorkout,
 } from '../lib/api'
 import { Button, EmptyState, PageTitle, Sheet, Spinner } from '../components/ui'
 import CoachSheet from '../components/CoachSheet'
 import ObjectiveSheet from '../components/ObjectiveSheet'
 import CalendarEventSheet from '../components/CalendarEventSheet'
+import ActivityForm from '../components/ActivityForm'
 import { useSettings } from '../lib/useSettings'
 import { ACTIVE_KEY } from './WorkoutPage'
 import {
@@ -31,8 +33,9 @@ export default function PlanPage() {
   const [selected, setSelected] = useState<Date | null>(null)
   const [coachOpen, setCoachOpen] = useState(false)
   const [coachAutoStart, setCoachAutoStart] = useState(false)
-  // { open } with an optional id — id present = edit that objective, absent = add new.
-  const [objectiveSheet, setObjectiveSheet] = useState<{ open: boolean; id?: number }>({
+  // { open } with an optional id — id present = edit that objective, absent = add
+  // new (optionally seeded with the tapped day via `date`, dated objectives only).
+  const [objectiveSheet, setObjectiveSheet] = useState<{ open: boolean; id?: number; date?: string }>({
     open: false,
   })
   // { open } with an optional id — id present = edit that calendar event, absent = add
@@ -40,15 +43,41 @@ export default function PlanPage() {
   const [eventSheet, setEventSheet] = useState<{ open: boolean; id?: number; date?: string }>({
     open: false,
   })
+  // Log-an-activity sheet, optionally seeded with the tapped calendar day.
+  const [activitySheet, setActivitySheet] = useState<{ open: boolean; date?: string }>({
+    open: false,
+  })
   const [modifyProgram, setModifyProgram] = useState<{ id: number; name: string } | null>(null)
+  const [movedBanner, setMovedBanner] = useState<PlannedWorkout[]>([])
 
-  const openObjective = (id?: number) => setObjectiveSheet({ open: true, id })
+  const openObjective = (id?: number, date?: string) => setObjectiveSheet({ open: true, id, date })
   const openEvent = (id?: number, date?: string) => setEventSheet({ open: true, id, date })
+  const openActivity = (date?: string) => setActivitySheet({ open: true, date })
 
   const openCoach = (auto: boolean) => {
     setCoachAutoStart(auto)
     setCoachOpen(true)
   }
+
+  // Mechanically slides any missed workout onto the next fit-to-train-on day
+  // — no LLM, no confirmation. Fired once per mount; idempotent server-side,
+  // so a StrictMode dev double-invoke is a harmless extra no-op call.
+  const rescheduleMissed = useMutation({
+    mutationFn: api.rescheduleMissed,
+    onSuccess: (moved) => {
+      if (moved.length > 0) {
+        setMovedBanner(moved)
+        qc.invalidateQueries({ queryKey: ['calendar'] })
+      }
+    },
+  })
+  const checkedReschedule = useRef(false)
+  useEffect(() => {
+    if (checkedReschedule.current) return
+    checkedReschedule.current = true
+    rescheduleMissed.mutate()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const weeks = useMemo(() => monthMatrix(month.getFullYear(), month.getMonth()), [month])
   const rangeStart = isoDate(weeks[0][0])
@@ -96,6 +125,10 @@ export default function PlanPage() {
   return (
     <div>
       <PageTitle right={<Button onClick={() => openCoach(false)}>✨ Coach</Button>}>Plan</PageTitle>
+
+      {movedBanner.length > 0 && (
+        <RescheduleBanner moved={movedBanner} onDismiss={() => setMovedBanner([])} />
+      )}
 
       <div className="mb-3 flex items-center justify-between">
         <button className="px-2 py-1 text-slate-400" onClick={() => setMonth(addMonths(month, -1))}>
@@ -145,10 +178,13 @@ export default function PlanPage() {
         onStarted={onStarted}
         onEditEvent={(id) => openEvent(id)}
         onAddEvent={() => (selected ? openEvent(undefined, isoDate(selected)) : openEvent())}
+        onAddActivity={() => (selected ? openActivity(isoDate(selected)) : openActivity())}
+        onAddObjective={() => (selected ? openObjective(undefined, isoDate(selected)) : openObjective())}
       />
       <ObjectiveSheet
         open={objectiveSheet.open}
         objectiveId={objectiveSheet.id}
+        defaultDate={objectiveSheet.date}
         onClose={() => setObjectiveSheet({ open: false })}
         onSaved={refresh}
       />
@@ -158,6 +194,11 @@ export default function PlanPage() {
         defaultDate={eventSheet.date}
         onClose={() => setEventSheet({ open: false })}
         onSaved={refresh}
+      />
+      <ActivityForm
+        open={activitySheet.open}
+        defaultDate={activitySheet.date}
+        onClose={() => setActivitySheet({ open: false })}
       />
       <CoachSheet
         open={coachOpen}
@@ -513,6 +554,53 @@ function CalendarGrid({
   )
 }
 
+// A day is shown "moved from ..." → "..." in local weekday/month/day form —
+// dates arrive as plain YYYY-MM-DD, so parse at local midnight rather than
+// letting `new Date(iso)` interpret it as UTC (which can shift the day back
+// by a timezone offset).
+function fmtLocalDate(iso: string): string {
+  return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  })
+}
+
+function RescheduleBanner({
+  moved,
+  onDismiss,
+}: {
+  moved: PlannedWorkout[]
+  onDismiss: () => void
+}) {
+  return (
+    <div className="mb-4 rounded-xl border border-amber-700/40 bg-amber-900/15 p-3">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 text-sm text-amber-200">
+          <p className="font-semibold">
+            🧠 The coach moved {moved.length === 1 ? 'a missed workout' : `${moved.length} missed workouts`}
+          </p>
+          <ul className="mt-1 space-y-0.5 text-xs text-amber-300/80">
+            {moved.map((pw) => (
+              <li key={pw.id} className="truncate">
+                {pw.name} — {pw.rescheduled_from ? fmtLocalDate(pw.rescheduled_from) : '?'} →{' '}
+                {fmtLocalDate(pw.scheduled_date)}
+              </li>
+            ))}
+          </ul>
+        </div>
+        <button
+          className="shrink-0 text-amber-400/70 hover:text-amber-200"
+          onClick={onDismiss}
+          aria-label="Dismiss"
+        >
+          ✕
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function Legend() {
   return (
     <div className="mt-3 flex flex-wrap justify-center gap-4 text-[11px] text-slate-500">
@@ -543,6 +631,8 @@ function DaySheet({
   onStarted,
   onEditEvent,
   onAddEvent,
+  onAddActivity,
+  onAddObjective,
 }: {
   date: Date | null
   entries: CalendarEntry[]
@@ -552,6 +642,8 @@ function DaySheet({
   onStarted: (sessionId: number) => void
   onEditEvent: (id: number) => void
   onAddEvent: () => void
+  onAddActivity: () => void
+  onAddObjective: () => void
 }) {
   const { data: templates = [] } = useQuery({ queryKey: ['templates'], queryFn: api.listTemplates })
   const [busy, setBusy] = useState(false)
@@ -648,6 +740,21 @@ function DaySheet({
             </div>
           </button>
         ))}
+
+        <div className="flex gap-2">
+          <button
+            onClick={onAddActivity}
+            className="flex-1 rounded-xl border border-dashed border-slate-700 p-2.5 text-center text-xs text-slate-300 hover:bg-slate-800/40"
+          >
+            🏃 Log activity
+          </button>
+          <button
+            onClick={onAddObjective}
+            className="flex-1 rounded-xl border border-dashed border-fuchsia-800/60 p-2.5 text-center text-xs text-fuchsia-300/80 hover:bg-fuchsia-900/10"
+          >
+            🎯 New objective
+          </button>
+        </div>
 
         <button
           onClick={onAddEvent}

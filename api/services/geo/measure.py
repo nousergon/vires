@@ -1,6 +1,6 @@
 """Route geometry → distance + elevation gain.
 
-The shared engine behind every derived ruck input mode. Distance is the haversine
+The shared engine behind every derived activity route-input mode. Distance is the haversine
 sum over the polyline. Elevation gain is the sum of positive point-to-point rises
 after light smoothing (raw DEM/GPS elevation is noisy and naive summing wildly
 over-counts gain). When a route's points carry no elevation (e.g. a drawn or

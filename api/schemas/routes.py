@@ -1,7 +1,8 @@
 """Schemas for the route-derivation endpoints (trail search / draw / GPX).
 
-Every derived ruck input mode resolves to route stats (distance + elevation, plus
-duration when a GPX carries timestamps) that prefill the editable ruck fields.
+Every derived activity route-input mode resolves to route stats (distance +
+elevation, plus duration when a GPX carries timestamps) that prefill the
+editable activity route fields.
 """
 
 from __future__ import annotations

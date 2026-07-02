@@ -152,8 +152,8 @@ def _objective_block(obj_ctx: CoachObjectiveContext | None, today: date) -> dict
             }
             for e in obj_ctx.events
         ]
-    # Recently logged generic activities (climbing, swimming, yoga, ...), most
-    # recent first: load ALREADY ABSORBED (distinct from `events`, which is
+    # Recently logged activities (climbing, swimming, yoga, walk/run/hike, ...),
+    # most recent first: load ALREADY ABSORBED (distinct from `events`, which is
     # upcoming load to train around) — factor into today's fatigue/recovery.
     if obj_ctx.recent_activities:
         block["recent_activities"] = [
@@ -164,13 +164,24 @@ def _objective_block(obj_ctx: CoachObjectiveContext | None, today: date) -> dict
                 "regions": a.regions,
                 "intensity": a.intensity,
                 "duration_min": a.duration_min,
+                # Present only when logged with a weighted pack — regions/
+                # intensity alone under-represent load-carriage cost.
+                **(
+                    {"carried_pack_kg": round(a.pack_weight_kg, 1)}
+                    if a.pack_weight_kg is not None
+                    else {}
+                ),
                 "note": (
-                    "cross-training already performed (past load, not a "
-                    "constraint to schedule around): if `regions` overlaps "
-                    "today's planned work and it was logged in the last 1-2 "
-                    "days at 'moderate'/'hard' intensity, that region may "
-                    "still be recovering — lighten volume/intensity there or "
-                    "prioritize a different region instead of stacking on top."
+                    "activity already performed (past load, not a constraint "
+                    "to schedule around): if `regions` overlaps today's "
+                    "planned work and it was logged in the last 1-2 days at "
+                    "'moderate'/'hard' intensity, that region may still be "
+                    "recovering — lighten volume/intensity there or "
+                    "prioritize a different region instead of stacking on "
+                    "top. A `carried_pack_kg` entry means this was a loaded "
+                    "carry (weighted walk/run/hike) — weigh its fatigue cost "
+                    "above what `intensity` alone implies, especially for "
+                    "legs/core."
                 ),
             }
             for a in obj_ctx.recent_activities
