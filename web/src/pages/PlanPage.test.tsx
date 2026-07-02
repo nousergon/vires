@@ -15,6 +15,7 @@ function mockEmpty() {
   vi.spyOn(api, 'listObjectives').mockResolvedValue([])
   vi.spyOn(api, 'calendarEventsWindow').mockResolvedValue([])
   vi.spyOn(api, 'listCalendarEvents').mockResolvedValue([])
+  vi.spyOn(api, 'rescheduleMissed').mockResolvedValue([])
 }
 
 describe('PlanPage', () => {
@@ -40,6 +41,7 @@ describe('PlanPage', () => {
   it('lists active programs from the API', async () => {
     vi.spyOn(api, 'calendar').mockResolvedValue([])
     vi.spyOn(api, 'listTemplates').mockResolvedValue([])
+    vi.spyOn(api, 'rescheduleMissed').mockResolvedValue([])
     vi.spyOn(api, 'listPrograms').mockResolvedValue([
       {
         id: 1,
@@ -65,6 +67,7 @@ describe('PlanPage', () => {
   it("shows the coach's strategy on the focus objective tile", async () => {
     vi.spyOn(api, 'calendar').mockResolvedValue([])
     vi.spyOn(api, 'listTemplates').mockResolvedValue([])
+    vi.spyOn(api, 'rescheduleMissed').mockResolvedValue([])
     vi.spyOn(api, 'listPrograms').mockResolvedValue([])
     vi.spyOn(api, 'listObjectives').mockResolvedValue([])
     vi.spyOn(api, 'activeObjective').mockResolvedValue(
@@ -87,6 +90,7 @@ describe('PlanPage', () => {
   it('lists multiple objectives with the focus marked and others as pins', async () => {
     vi.spyOn(api, 'calendar').mockResolvedValue([])
     vi.spyOn(api, 'listTemplates').mockResolvedValue([])
+    vi.spyOn(api, 'rescheduleMissed').mockResolvedValue([])
     vi.spyOn(api, 'listPrograms').mockResolvedValue([])
     const focus = makeObjective({ id: 1, name: 'Run a 50k', target_date: '2026-07-15' })
     const later = makeObjective({
@@ -125,6 +129,7 @@ describe('PlanPage', () => {
     vi.spyOn(api, 'listTemplates').mockResolvedValue([])
     vi.spyOn(api, 'listObjectives').mockResolvedValue([])
     vi.spyOn(api, 'activeObjective').mockResolvedValue(makeActiveObjective())
+    vi.spyOn(api, 'rescheduleMissed').mockResolvedValue([])
     renderWithProviders(<PlanPage />)
     // the legend documents the new objective marker
     expect(await screen.findByText('objective')).toBeInTheDocument()
@@ -152,11 +157,13 @@ describe('PlanPage', () => {
     vi.spyOn(api, 'listPrograms').mockResolvedValue([])
     vi.spyOn(api, 'listTemplates').mockResolvedValue([])
     vi.spyOn(api, 'getSettings').mockResolvedValue(SETTINGS)
+    vi.spyOn(api, 'rescheduleMissed').mockResolvedValue([])
     const getP = vi.spyOn(api, 'getPlanned').mockResolvedValue({
       id: 5,
       program_id: 1,
       template_id: 2,
       scheduled_date: iso,
+      rescheduled_from: null,
       name: 'Lower + Carry',
       notes: null,
       week_index: 1,
@@ -226,5 +233,59 @@ describe('PlanPage', () => {
     renderWithProviders(<PlanPage />)
     fireEvent.click(await screen.findByText(/Add a race, league game, trip/))
     expect(await screen.findByText('📅 New event')).toBeInTheDocument()
+  })
+
+  it('shows the reschedule banner and invalidates the calendar when a workout moves', async () => {
+    mockEmpty()
+    vi.spyOn(api, 'rescheduleMissed').mockResolvedValue([
+      {
+        id: 5,
+        program_id: null,
+        template_id: null,
+        scheduled_date: isoDate(new Date()),
+        rescheduled_from: '2026-07-02',
+        name: 'Upper Body',
+        notes: null,
+        week_index: null,
+        status: 'planned',
+        created_by: 'coach',
+        session_id: null,
+        exercises: [],
+      },
+    ])
+    renderWithProviders(<PlanPage />)
+    expect(await screen.findByText('🧠 The coach moved a missed workout')).toBeInTheDocument()
+    expect(screen.getByText(/Upper Body/)).toBeInTheDocument()
+  })
+
+  it('dismissing the reschedule banner removes it', async () => {
+    mockEmpty()
+    vi.spyOn(api, 'rescheduleMissed').mockResolvedValue([
+      {
+        id: 5,
+        program_id: null,
+        template_id: null,
+        scheduled_date: isoDate(new Date()),
+        rescheduled_from: '2026-07-02',
+        name: 'Upper Body',
+        notes: null,
+        week_index: null,
+        status: 'planned',
+        created_by: 'coach',
+        session_id: null,
+        exercises: [],
+      },
+    ])
+    renderWithProviders(<PlanPage />)
+    expect(await screen.findByText('🧠 The coach moved a missed workout')).toBeInTheDocument()
+    fireEvent.click(screen.getByLabelText('Dismiss'))
+    expect(screen.queryByText('🧠 The coach moved a missed workout')).not.toBeInTheDocument()
+  })
+
+  it('shows no banner when the reschedule check is a no-op', async () => {
+    mockEmpty()
+    renderWithProviders(<PlanPage />)
+    expect(await screen.findByText('Plan')).toBeInTheDocument()
+    expect(screen.queryByText(/The coach moved/)).not.toBeInTheDocument()
   })
 })

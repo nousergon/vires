@@ -285,6 +285,9 @@ export interface CalendarEntry {
   objective_name?: string | null
   exercise_count: number
   session_id?: number | null
+  // planned only: set when the coach auto-moved this day forward because it
+  // was missed — the date it moved FROM.
+  rescheduled_from?: string | null
 }
 
 export interface PlannedExercise {
@@ -304,6 +307,9 @@ export interface PlannedWorkout {
   program_id: number | null
   template_id: number | null
   scheduled_date: string
+  // Set when the coach auto-moved this day forward because it was missed —
+  // the date it moved FROM.
+  rescheduled_from: string | null
   name: string
   notes: string | null
   week_index: number | null
@@ -664,6 +670,10 @@ export const api = {
   deletePlanned: (id: number) => req<void>(`/plan/planned/${id}`, { method: 'DELETE' }),
   startPlanned: (id: number) =>
     req<WorkoutSession>(`/plan/planned/${id}/start`, { method: 'POST' }),
+  // Mechanically slides missed workouts onto the next fit-to-train-on day —
+  // no LLM, no confirmation, safe to call unconditionally on every Plan-page
+  // mount (idempotent: a no-op once nothing is missed).
+  rescheduleMissed: () => req<PlannedWorkout[]>('/plan/reschedule-missed', { method: 'POST' }),
   listPrograms: () => req<ProgramSummary[]>('/plan/programs'),
   deleteProgram: (id: number) => req<void>(`/plan/programs/${id}`, { method: 'DELETE' }),
   feedUrl: () => req<FeedUrl>('/plan/feed-url'),
