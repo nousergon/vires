@@ -14,7 +14,6 @@ from api.db.identity import Identity, current_identity, get_or_create_settings
 from api.db.models import (
     ActivityDetail,
     PlannedWorkout,
-    RuckDetail,
     SessionExercise,
     SetEntry,
     WorkoutSession,
@@ -26,8 +25,6 @@ from api.schemas.workout import (
     ActivityDetailOut,
     ActivityLogIn,
     ActivityTemplateOut,
-    RuckDetailOut,
-    RuckLogIn,
     SessionExerciseIn,
     SessionExerciseOut,
     SessionExerciseUpdate,
@@ -119,21 +116,6 @@ def _se_out(db: Session, ident: Identity, se: SessionExercise) -> SessionExercis
     )
 
 
-def _ruck_out(rd: RuckDetail | None) -> RuckDetailOut | None:
-    if rd is None:
-        return None
-    return RuckDetailOut(
-        pack_weight_kg=rd.pack_weight_kg,
-        bodyweight_kg=rd.bodyweight_kg,
-        distance_m=rd.distance_m,
-        elevation_gain_m=rd.elevation_gain_m,
-        duration_s=rd.duration_s,
-        terrain=rd.terrain,
-        metabolic_cost_kj=rd.metabolic_cost_kj,
-        source=rd.source,
-    )
-
-
 def _activity_out(ad: ActivityDetail | None) -> ActivityDetailOut | None:
     if ad is None:
         return None
@@ -142,6 +124,13 @@ def _activity_out(ad: ActivityDetail | None) -> ActivityDetailOut | None:
         duration_s=ad.duration_s,
         regions=ad.regions,
         intensity=ad.intensity,
+        pack_weight_kg=ad.pack_weight_kg,
+        bodyweight_kg=ad.bodyweight_kg,
+        distance_m=ad.distance_m,
+        elevation_gain_m=ad.elevation_gain_m,
+        terrain=ad.terrain,
+        metabolic_cost_kj=ad.metabolic_cost_kj,
+        source=ad.source,
     )
 
 
@@ -155,7 +144,6 @@ def _session_out(db: Session, ident: Identity, ws: WorkoutSession) -> WorkoutSes
         notes=ws.notes,
         template_id=ws.template_id,
         exercises=[_se_out(db, ident, se) for se in ws.exercises],
-        ruck=_ruck_out(ws.ruck_detail),
         activity=_activity_out(ws.activity_detail),
     )
 
@@ -163,7 +151,7 @@ def _session_out(db: Session, ident: Identity, ws: WorkoutSession) -> WorkoutSes
 # --------------------------------------------------------------------------- #
 # unit conversion — display units in → canonical SI. Distance/elevation unit is
 # keyed off the account's weight_unit ('lb' ⇒ imperial mi/ft, 'kg' ⇒ metric km/m)
-# so a ruck needs no separate distance-unit setting in Tier 0.
+# so a route-capable activity needs no separate distance-unit setting in Tier 0.
 # --------------------------------------------------------------------------- #
 _LB_TO_KG = 0.45359237
 _MILE_TO_M = 1609.344
@@ -253,62 +241,6 @@ def start_workout(
     return _session_out(db, ident, ws)
 
 
-@router.post("/ruck", response_model=WorkoutSessionOut, status_code=201)
-def log_ruck(
-    body: RuckLogIn,
-    db: Session = Depends(get_db),
-    ident: Identity = Depends(current_identity),
-) -> WorkoutSessionOut:
-    """Quick-log a completed ruck (loaded-cardio) session.
-
-    Tier 0 of the route-tracking arc: no GPS capture, no file import, no external
-    dependency — the user enters pack weight + a few aggregate metrics (the same
-    interaction cost as logging a lift), and the server computes the pack-weight-
-    adjusted metabolic cost (Pandolf). The session is created already-finished; a
-    ruck has no set-by-set flow and no double-progression autoregulation.
-    """
-    us = get_or_create_settings(db, ident)
-    unit = us.weight_unit
-
-    pack_kg = _weight_to_kg(body.pack_weight, unit)
-    body_kg = _weight_to_kg(body.bodyweight, unit)
-    distance_m = _distance_to_m(body.distance, unit)
-    elevation_m = _elevation_to_m(body.elevation_gain, unit)
-
-    cost_kj = ruck_metabolic_cost_kj(
-        bodyweight_kg=body_kg,
-        pack_weight_kg=pack_kg,
-        distance_m=distance_m,
-        elevation_gain_m=elevation_m,
-        duration_s=body.duration_s,
-        terrain=body.terrain,
-    )
-
-    started = body.started_at or _now()
-    ws = WorkoutSession(
-        tenant_id=ident.tenant_id,
-        user_id=ident.user_id,
-        session_type="ruck",
-        name=body.name or "Ruck",
-        started_at=started,
-        ended_at=started,  # quick-log records a completed activity
-        ruck_detail=RuckDetail(
-            pack_weight_kg=pack_kg,
-            bodyweight_kg=body_kg,
-            distance_m=distance_m,
-            elevation_gain_m=elevation_m,
-            duration_s=body.duration_s,
-            terrain=body.terrain,
-            metabolic_cost_kj=cost_kj,
-            source=body.source,
-        ),
-    )
-    db.add(ws)
-    db.commit()
-    db.refresh(ws)
-    return _session_out(db, ident, ws)
-
-
 @router.get("/activity-templates", response_model=list[ActivityTemplateOut])
 def list_activity_templates() -> list[ActivityTemplateOut]:
     """The fixed activity-template catalog the quick-log form offers as one-tap
@@ -322,14 +254,39 @@ def log_activity(
     db: Session = Depends(get_db),
     ident: Identity = Depends(current_identity),
 ) -> WorkoutSessionOut:
-    """Quick-log a completed generic cross-training activity (climbing,
-    swimming, yoga, ...).
+    """Quick-log a completed activity — cross-training (climbing, swimming,
+    yoga, ...) or locomotion (walk/run/hike), optionally with a route and/or
+    a weighted pack.
 
     Tier 0: a coarse regions/intensity estimate (template-prefilled, always
     user-editable) rather than a bespoke schema per activity — see
-    ``ActivityDetail`` for why. The session is created already-finished; like
-    a ruck, a generic activity has no set-by-set flow.
+    ``ActivityDetail`` for why. The session is created already-finished; no
+    set-by-set flow and no double-progression autoregulation.
+
+    Pack-weight-adjusted metabolic cost (Pandolf) is computed only when BOTH
+    pack weight and bodyweight are present — never with a synthetic 0kg pack,
+    so an unloaded walk/run/hike simply has no load number rather than a
+    fabricated one.
     """
+    us = get_or_create_settings(db, ident)
+    unit = us.weight_unit
+
+    distance_m = _distance_to_m(body.distance, unit)
+    elevation_m = _elevation_to_m(body.elevation_gain, unit)
+    pack_kg = _weight_to_kg(body.pack_weight, unit) if body.pack_weight is not None else None
+    body_kg = _weight_to_kg(body.bodyweight, unit) if body.bodyweight is not None else None
+
+    cost_kj = None
+    if pack_kg is not None and body_kg is not None:
+        cost_kj = ruck_metabolic_cost_kj(
+            bodyweight_kg=body_kg,
+            pack_weight_kg=pack_kg,
+            distance_m=distance_m,
+            elevation_gain_m=elevation_m,
+            duration_s=body.duration_s,
+            terrain=body.terrain,
+        )
+
     started = body.started_at or _now()
     ws = WorkoutSession(
         tenant_id=ident.tenant_id,
@@ -343,6 +300,13 @@ def log_activity(
             duration_s=body.duration_s,
             regions=body.regions,
             intensity=body.intensity,
+            pack_weight_kg=pack_kg,
+            bodyweight_kg=body_kg,
+            distance_m=distance_m,
+            elevation_gain_m=elevation_m,
+            terrain=body.terrain,
+            metabolic_cost_kj=cost_kj,
+            source=body.source,
         ),
     )
     db.add(ws)
@@ -413,7 +377,6 @@ def list_workouts(
                 exercise_count=len(ws.exercises),
                 set_count=set_count,
                 total_volume=round(volume, 2),
-                ruck=_ruck_out(ws.ruck_detail),
                 activity=_activity_out(ws.activity_detail),
             )
         )

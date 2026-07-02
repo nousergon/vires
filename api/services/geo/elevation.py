@@ -7,7 +7,7 @@ and skip this.
 
 Fail-soft contract: any provider/parse/network error leaves points UNCHANGED
 (elevations stay None ⇒ the caller reports elevation gain as None and the user
-enters it manually). We never raise into the ruck-logging path over a DEM outage —
+enters it manually). We never raise into the activity-logging path over a DEM outage —
 but we DO log a WARN so the degradation is visible, not silently swallowed.
 """
 

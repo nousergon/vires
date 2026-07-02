@@ -217,12 +217,13 @@ class WorkoutSession(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     name: Mapped[str | None] = mapped_column(String, nullable=True)
     # Discriminator for the kind of training this session records. 'strength' is
-    # the reps/weight/exercises MVP; 'ruck' is loaded-cardio (pack carry) whose
-    # type-specific data lives 1:1 in ``ruck_details``; 'activity' is generic
-    # cross-training (climbing, swimming, yoga, ...) whose coarse load lives 1:1
-    # in ``activity_details``. Kept as a plain column (single history/calendar/
-    # objective spine) rather than a parallel table, so any session type flows
-    # through the same session machinery as a lift.
+    # the reps/weight/exercises MVP; 'activity' is everything else — generic
+    # cross-training (climbing, swimming, yoga, ...) AND locomotion activities
+    # (walk/run/hike, optionally loaded with a pack) — whose coarse load and
+    # optional route/load-carriage detail lives 1:1 in ``activity_details``.
+    # Kept as a plain column (single history/calendar/objective spine) rather
+    # than a parallel table, so any session type flows through the same session
+    # machinery as a lift.
     session_type: Mapped[str] = mapped_column(
         String, nullable=False, server_default="strength", default="strength"
     )
@@ -243,13 +244,7 @@ class WorkoutSession(Base):
         cascade="all, delete-orphan",
         order_by="SessionExercise.order_index",
     )
-    # Type-specific detail for a loaded-cardio (ruck) session; None for strength.
-    ruck_detail: Mapped[RuckDetail | None] = relationship(
-        back_populates="session",
-        cascade="all, delete-orphan",
-        uselist=False,
-    )
-    # Type-specific detail for a generic activity session; None for strength/ruck.
+    # Type-specific detail for a non-strength session; None for strength.
     activity_detail: Mapped[ActivityDetail | None] = relationship(
         back_populates="session",
         cascade="all, delete-orphan",
@@ -301,68 +296,38 @@ class SetEntry(Base):
     session_exercise: Mapped[SessionExercise] = relationship(back_populates="sets")
 
 
-class RuckDetail(Base):
-    """Loaded-cardio (ruck / weighted hike) detail — 1:1 with a ``WorkoutSession``
-    whose ``session_type == 'ruck'``.
-
-    **Why a separate table, not columns on WorkoutSession:** the cardio detail set
-    grows (Tier 1 GPX adds a track reference + source; Tier 2 Strava adds an
-    external activity id), so isolating it here keeps the busy strength path free
-    of sparse nullable columns while the session itself still flows through the
-    shared history/calendar/objective spine.
-
-    **Units are canonical SI with explicit suffixes** (``_kg`` / ``_m`` / ``_s``).
-    The strength side stores weights denormalized in the user's display unit, but
-    ruck data has no such precedent and *must* be SI: the Pandolf load model is
-    defined in SI, and the Tier 1/2 import paths (GPX, Strava) deliver SI natively,
-    so canonical storage means zero conversion on ingest — the display layer
-    converts out. Conversion in happens once, at the API boundary.
-    """
-
-    __tablename__ = "ruck_details"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    session_id: Mapped[int] = mapped_column(
-        ForeignKey("workout_sessions.id", ondelete="CASCADE"), unique=True, index=True
-    )
-    # The differentiator no route app models: external load carried, in kg.
-    pack_weight_kg: Mapped[float] = mapped_column(Float, nullable=False)
-    # Body mass at time of ruck (drifts, so captured per session). Required by the
-    # Pandolf metabolic-cost model.
-    bodyweight_kg: Mapped[float] = mapped_column(Float, nullable=False)
-    distance_m: Mapped[float | None] = mapped_column(Float, nullable=True)
-    elevation_gain_m: Mapped[float | None] = mapped_column(Float, nullable=True)
-    duration_s: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # Coarse terrain class → Pandolf terrain factor η (see api.services.load.pandolf).
-    terrain: Mapped[str] = mapped_column(
-        String, nullable=False, server_default="trail", default="trail"
-    )
-    # Pandolf-derived total metabolic cost of the carry (kJ). None when distance or
-    # duration is absent — an honest "not enough input to compute", not a swallow.
-    metabolic_cost_kj: Mapped[float | None] = mapped_column(Float, nullable=True)
-    # How the route data arrived. 'manual' now; 'gpx'/'strava' in later tiers.
-    source: Mapped[str] = mapped_column(
-        String, nullable=False, server_default="manual", default="manual"
-    )
-    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
-
-    session: Mapped[WorkoutSession] = relationship(back_populates="ruck_detail")
-
-
 class ActivityDetail(Base):
-    """Generic cross-training activity detail — 1:1 with a ``WorkoutSession``
-    whose ``session_type == 'activity'``.
+    """Non-strength session detail — 1:1 with a ``WorkoutSession`` whose
+    ``session_type == 'activity'``. Covers both generic cross-training
+    (climbing, swimming, yoga, ...) and locomotion activities (walk/run/hike),
+    which may optionally carry a weighted pack.
 
-    **Why generic rather than a bespoke type per activity (climbing, swimming,
-    tennis, ...):** a dedicated table per sport doesn't scale and most
-    cross-training has no domain-specific physics model worth the schema cost
-    (contrast ``RuckDetail``, which earns its own table via the Pandolf load
-    model). Instead every activity — from a template or freeform — reduces to
-    the same coarse load shape already established for athletic-calendar
-    events (``CalendarEvent.load``, vires-ops#33): which body regions it taxes
-    and how hard. Reusing that vocabulary (rather than inventing a parallel
-    one) means the coach's existing recovery-budget reasoning generalizes to
-    logged activities for free — see ``api.services.coach.context``.
+    **Why generic rather than a bespoke type per activity:** a dedicated table
+    per sport doesn't scale, and most cross-training has no domain-specific
+    physics model worth the schema cost. Every activity — from a template or
+    freeform — reduces to the same coarse load shape already established for
+    athletic-calendar events (``CalendarEvent.load``, vires-ops#33): which body
+    regions it taxes and how hard. Reusing that vocabulary (rather than
+    inventing a parallel one) means the coach's existing recovery-budget
+    reasoning generalizes to logged activities for free — see
+    ``api.services.coach.context``.
+
+    **Route + load-carriage fields are optional on every template**, not a
+    separate physics-modeled type. Originally a "ruck" (loaded hike) was its
+    own ``session_type``/table with a mandatory pack weight; that distinction
+    didn't hold up — a light pack on a Walk or Run is exactly as physiologically
+    real as a heavy pack on a Hike, and users who don't care about the load
+    number shouldn't be forced to enter one. So ``pack_weight_kg`` /
+    ``bodyweight_kg`` / ``distance_m`` / ``elevation_gain_m`` / ``terrain`` /
+    ``metabolic_cost_kj`` / ``source`` now live here as nullable columns,
+    populated whenever a route-capable template (walk/run/hike — see
+    ``api.services.activity_templates``) is logged with that data. Merged from
+    the former ``ruck_details`` table (see the ``merge_ruck_into_activity``
+    migration) — units for the carried-over fields stay canonical SI with
+    explicit suffixes (``_kg`` / ``_m`` / ``_s``), matching the Pandolf load
+    model's units and the GPX/route-import paths, which deliver SI natively.
+    Conversion to/from the user's display unit happens once, at the API
+    boundary — never here.
     """
 
     __tablename__ = "activity_details"
@@ -371,8 +336,8 @@ class ActivityDetail(Base):
     session_id: Mapped[int] = mapped_column(
         ForeignKey("workout_sessions.id", ondelete="CASCADE"), unique=True, index=True
     )
-    # Template slug (e.g. 'climbing_indoor_toprope') or 'custom' for freeform entry.
-    # Display name is ``WorkoutSession.name``, not duplicated here.
+    # Template slug (e.g. 'climbing_indoor_toprope', 'hike') or 'custom' for
+    # freeform entry. Display name is ``WorkoutSession.name``, not duplicated here.
     template_key: Mapped[str] = mapped_column(String, nullable=False, default="custom")
     duration_s: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Coarse structured load — same vocabulary as CalendarEvent.load:
@@ -380,6 +345,31 @@ class ActivityDetail(Base):
     # {'light','moderate','hard'}. Template-prefilled, always user-editable.
     regions: Mapped[str] = mapped_column(String, nullable=False, default="full")
     intensity: Mapped[str] = mapped_column(String, nullable=False, default="moderate")
+    # Optional load-carriage — set only when the user weighs in a pack for a
+    # route-capable template. None means "no load estimate wanted"; it does NOT
+    # imply "unloaded" (an unloaded hike and a climbing session are equally
+    # None here — that distinction lives in the template's route_capable flag,
+    # a frontend/catalog concern, not a schema one).
+    pack_weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Body mass at time of the activity — required alongside pack_weight_kg to
+    # run the Pandolf metabolic-cost model (enforced in ActivityLogIn, not
+    # here: the DB stays permissive).
+    bodyweight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    distance_m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    elevation_gain_m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Coarse terrain class → Pandolf terrain factor η (see api.services.load.pandolf).
+    terrain: Mapped[str] = mapped_column(
+        String, nullable=False, server_default="trail", default="trail"
+    )
+    # Pandolf-derived total metabolic cost of the carry (kJ). None whenever
+    # pack_weight_kg is None, or when it's set but distance/duration are
+    # absent — an honest "not enough input to compute", never fabricated.
+    metabolic_cost_kj: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # How distance/elevation arrived: 'manual' | 'route_search' | 'route_draw' |
+    # 'gpx'. Meaningful for any route-capable template, not just a loaded one.
+    source: Mapped[str] = mapped_column(
+        String, nullable=False, server_default="manual", default="manual"
+    )
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
 
     session: Mapped[WorkoutSession] = relationship(back_populates="activity_detail")

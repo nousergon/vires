@@ -1,4 +1,4 @@
-"""Fixed catalog of generic cross-training activity templates.
+"""Fixed catalog of activity templates: cross-training + locomotion.
 
 Each entry is a starting point for the quick-log form — a label plus a coarse
 ``regions``/``intensity`` default the user can freely edit before saving. This
@@ -8,34 +8,44 @@ default), not user data, and it's cheap to extend by editing this file. A
 'custom' pseudo-entry (freeform name, no default) is always available via
 ``ActivityLogIn.template_key = "custom"`` and isn't listed here since it has
 no fixed label.
+
+``route_capable`` templates (Walk, Run, Hike) additionally get the frontend's
+route-capture UI (manual entry / trail search / draw / GPX import) plus an
+optional pack-weight + bodyweight section that unlocks the Pandolf
+metabolic-cost estimate — see ``api.db.models.ActivityDetail``. Every other
+template is a coarse regions/intensity estimate only, same as before.
 """
 
 from __future__ import annotations
 
 from api.schemas.workout import ActivityTemplateOut
 
-# (key, label, regions, intensity). regions: 'legs'|'upper'|'full'|'core'|'none';
-# intensity: 'light'|'moderate'|'hard' (see api.schemas.calendar_event).
-_CATALOG: list[tuple[str, str, str, str]] = [
-    ("climbing_indoor_toprope", "Indoor top-rope", "upper", "moderate"),
-    ("climbing_bouldering", "Bouldering", "upper", "hard"),
-    ("swimming", "Swimming", "full", "moderate"),
-    ("cycling", "Cycling", "legs", "moderate"),
-    ("running", "Running", "legs", "moderate"),
-    ("yoga", "Yoga", "full", "light"),
-    ("tennis", "Tennis", "full", "hard"),
-    ("basketball", "Basketball", "legs", "hard"),
-    ("soccer", "Soccer", "legs", "hard"),
-    ("hiking", "Hiking (unloaded)", "legs", "light"),
-    ("skiing", "Skiing / snowboarding", "legs", "hard"),
-    ("rowing", "Rowing (erg)", "full", "hard"),
-    ("martial_arts", "Martial arts", "full", "hard"),
-    ("mobility", "Mobility / stretching", "full", "light"),
+# (key, label, regions, intensity, route_capable). regions:
+# 'legs'|'upper'|'full'|'core'|'none'; intensity: 'light'|'moderate'|'hard'
+# (see api.schemas.calendar_event).
+_CATALOG: list[tuple[str, str, str, str, bool]] = [
+    ("walk", "Walk", "legs", "light", True),
+    ("run", "Run", "legs", "moderate", True),
+    ("hike", "Hike", "legs", "moderate", True),
+    ("climbing_indoor_toprope", "Indoor top-rope", "upper", "moderate", False),
+    ("climbing_bouldering", "Bouldering", "upper", "hard", False),
+    ("swimming", "Swimming", "full", "moderate", False),
+    ("cycling", "Cycling", "legs", "moderate", False),
+    ("yoga", "Yoga", "full", "light", False),
+    ("tennis", "Tennis", "full", "hard", False),
+    ("basketball", "Basketball", "legs", "hard", False),
+    ("soccer", "Soccer", "legs", "hard", False),
+    ("skiing", "Skiing / snowboarding", "legs", "hard", False),
+    ("rowing", "Rowing (erg)", "full", "hard", False),
+    ("martial_arts", "Martial arts", "full", "hard", False),
+    ("mobility", "Mobility / stretching", "full", "light", False),
 ]
 
 ACTIVITY_TEMPLATES: list[ActivityTemplateOut] = [
-    ActivityTemplateOut(key=key, label=label, regions=regions, intensity=intensity)
-    for key, label, regions, intensity in _CATALOG
+    ActivityTemplateOut(
+        key=key, label=label, regions=regions, intensity=intensity, route_capable=route_capable
+    )
+    for key, label, regions, intensity, route_capable in _CATALOG
 ]
 
 _BY_KEY = {t.key: t for t in ACTIVITY_TEMPLATES}

@@ -5,16 +5,17 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from api.schemas.calendar_event import LoadIntensity, LoadRegions
 from api.schemas.exercise import ExerciseBrief, ExercisePerformance
 
-# Coarse terrain classes accepted for a ruck (→ Pandolf terrain factor server-side).
+# Coarse terrain classes accepted for a route-capable activity (→ Pandolf
+# terrain factor server-side).
 Terrain = Literal["treadmill", "road", "trail", "offtrail", "snow"]
 
 # How the route stats were entered — the flexible-input modes all land here.
-RuckSource = Literal["manual", "route_search", "route_draw", "gpx"]
+RouteSource = Literal["manual", "route_search", "route_draw", "gpx"]
 
 
 class WorkoutStart(BaseModel):
@@ -97,64 +98,39 @@ class SessionExerciseOut(BaseModel):
     previous_performance: ExercisePerformance | None = None
 
 
-# --------------------------------------------------------------------------- #
-# Ruck (loaded-cardio) — Tier 0 quick-log
-# --------------------------------------------------------------------------- #
-class RuckLogIn(BaseModel):
-    """Quick-log a completed ruck. Numbers arrive in the USER'S display units
-    (weights in the account's ``weight_unit``; distance/elevation in mi/ft when
-    that unit is ``lb``, km/m when ``kg``). The router converts to canonical SI
-    once, at the boundary."""
-
-    pack_weight: float = Field(gt=0, description="Carried load, in the user's weight unit")
-    bodyweight: float = Field(gt=0, description="Body mass, in the user's weight unit")
-    distance: float | None = Field(default=None, ge=0)
-    elevation_gain: float | None = Field(default=None, ge=0)
-    duration_s: int | None = Field(default=None, ge=0)
-    terrain: Terrain = "trail"
-    # Which input mode produced these stats (manual entry, trail search, drawn
-    # route, or GPX import). Distance/elevation are always user-editable regardless.
-    source: RuckSource = "manual"
-    name: str | None = None
-    # Optional backdate (e.g. logging yesterday's ruck). Defaults to now server-side.
-    started_at: datetime | None = None
-
-
-class RuckDetailOut(BaseModel):
-    """Canonical SI ruck detail + the derived metabolic cost. The frontend converts
-    back to the user's display units for rendering."""
-
-    pack_weight_kg: float
-    bodyweight_kg: float
-    distance_m: float | None = None
-    elevation_gain_m: float | None = None
-    duration_s: int | None = None
-    terrain: str = "trail"
-    metabolic_cost_kj: float | None = None
-    source: str = "manual"
-
-
 class ActivityTemplateOut(BaseModel):
     """One entry in the fixed activity-template catalog (``GET
     /workouts/activity-templates``) — a starting point the quick-log form
-    prefills and the user can freely edit."""
+    prefills and the user can freely edit. ``route_capable`` templates
+    (walk/run/hike) additionally get the route-capture UI + optional
+    pack-weight section on the frontend."""
 
     key: str
     label: str
     regions: LoadRegions
     intensity: LoadIntensity
+    route_capable: bool = False
 
 
 # --------------------------------------------------------------------------- #
-# Generic activity (cross-training) — Tier 0 quick-log
+# Activity (cross-training + locomotion) — Tier 0 quick-log
 # --------------------------------------------------------------------------- #
 class ActivityLogIn(BaseModel):
-    """Quick-log a completed generic activity (climbing, swimming, yoga, ...).
+    """Quick-log a completed activity — cross-training (climbing, swimming,
+    yoga, ...) or locomotion (walk/run/hike). Route + load-carriage fields
+    are optional on every template: only walk/run/hike surface their picker
+    in the UI, but the backend doesn't gate on ``template_key`` (a custom
+    entry could plausibly carry a route too).
 
     ``regions``/``intensity`` are always present — a template prefills them,
     but 'custom' (freeform, no template) still requires the user to pick a
     coarse estimate rather than leaving it unset, since that's the whole
     point of logging this: giving the coach something to reason about.
+
+    Numbers arrive in the USER'S display units (weights in the account's
+    ``weight_unit``; distance/elevation in mi/ft when that unit is ``lb``,
+    km/m when ``kg``). The router converts to canonical SI once, at the
+    boundary.
     """
 
     name: str = Field(min_length=1, description="Display name, e.g. 'Indoor top-rope'")
@@ -165,12 +141,46 @@ class ActivityLogIn(BaseModel):
     # Optional backdate (e.g. logging yesterday's session). Defaults to now server-side.
     started_at: datetime | None = None
 
+    # Route capture — optional for every template.
+    distance: float | None = Field(default=None, ge=0)
+    elevation_gain: float | None = Field(default=None, ge=0)
+    terrain: Terrain = "trail"
+    # Which input mode produced the route stats (manual entry, trail search,
+    # drawn route, or GPX import). Distance/elevation are always user-editable
+    # regardless of source.
+    source: RouteSource = "manual"
+
+    # Optional load-carriage. Never required to submit — "i don't expect
+    # people with light packs to bother weighing their pack" is the product
+    # call here. bodyweight is required IFF pack_weight is given: Pandolf's
+    # load ratio (L/W) is undefined without body mass, but bodyweight alone
+    # with no pack is meaningless and simply ignored.
+    pack_weight: float | None = Field(
+        default=None, gt=0, description="Carried load, in the user's weight unit"
+    )
+    bodyweight: float | None = Field(
+        default=None, gt=0, description="Body mass, in the user's weight unit"
+    )
+
+    @model_validator(mode="after")
+    def _bodyweight_required_with_pack(self) -> ActivityLogIn:
+        if self.pack_weight is not None and self.bodyweight is None:
+            raise ValueError("bodyweight is required when pack_weight is given")
+        return self
+
 
 class ActivityDetailOut(BaseModel):
     template_key: str = "custom"
     duration_s: int | None = None
     regions: LoadRegions
     intensity: LoadIntensity
+    pack_weight_kg: float | None = None
+    bodyweight_kg: float | None = None
+    distance_m: float | None = None
+    elevation_gain_m: float | None = None
+    terrain: str = "trail"
+    metabolic_cost_kj: float | None = None
+    source: str = "manual"
 
 
 class WorkoutSessionOut(BaseModel):
@@ -182,8 +192,6 @@ class WorkoutSessionOut(BaseModel):
     notes: str | None = None
     template_id: int | None = None
     exercises: list[SessionExerciseOut]
-    # Present only for session_type == 'ruck'.
-    ruck: RuckDetailOut | None = None
     # Present only for session_type == 'activity'.
     activity: ActivityDetailOut | None = None
 
@@ -199,6 +207,5 @@ class WorkoutSummary(BaseModel):
     total_volume: float = Field(
         default=0.0, description="Sum of reps*weight over completed working sets"
     )
-    # Compact ruck/activity facts for the history row (None otherwise).
-    ruck: RuckDetailOut | None = None
+    # Compact activity facts for the history row (None otherwise).
     activity: ActivityDetailOut | None = None

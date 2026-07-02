@@ -1,12 +1,13 @@
-"""Route-derivation endpoints backing the flexible ruck input modes.
+"""Route-derivation endpoints backing the flexible activity route-input modes
+(walk/run/hike).
 
 - ``POST /routes/measure``   — a drawn/selected polyline → distance + elevation.
 - ``GET  /routes/search``    — named-trail search over OSM (Overpass).
 - ``POST /routes/import-gpx``— a GPX upload → distance + elevation + duration.
 
 All three produce ``RouteStatsOut`` that the client drops into the (always
-editable) ruck distance/elevation/duration fields, then logs via
-``POST /workouts/ruck``. Provider calls are fail-soft (see api.services.geo).
+editable) activity distance/elevation/duration fields, then logs via
+``POST /workouts/activity``. Provider calls are fail-soft (see api.services.geo).
 """
 
 from __future__ import annotations
