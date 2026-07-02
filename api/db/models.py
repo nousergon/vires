@@ -218,9 +218,11 @@ class WorkoutSession(Base):
     name: Mapped[str | None] = mapped_column(String, nullable=True)
     # Discriminator for the kind of training this session records. 'strength' is
     # the reps/weight/exercises MVP; 'ruck' is loaded-cardio (pack carry) whose
-    # type-specific data lives 1:1 in ``ruck_details``. Kept as a plain column
-    # (single history/calendar/objective spine) rather than a parallel table, so
-    # a ruck flows through the same session machinery as a lift.
+    # type-specific data lives 1:1 in ``ruck_details``; 'activity' is generic
+    # cross-training (climbing, swimming, yoga, ...) whose coarse load lives 1:1
+    # in ``activity_details``. Kept as a plain column (single history/calendar/
+    # objective spine) rather than a parallel table, so any session type flows
+    # through the same session machinery as a lift.
     session_type: Mapped[str] = mapped_column(
         String, nullable=False, server_default="strength", default="strength"
     )
@@ -243,6 +245,12 @@ class WorkoutSession(Base):
     )
     # Type-specific detail for a loaded-cardio (ruck) session; None for strength.
     ruck_detail: Mapped[RuckDetail | None] = relationship(
+        back_populates="session",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+    # Type-specific detail for a generic activity session; None for strength/ruck.
+    activity_detail: Mapped[ActivityDetail | None] = relationship(
         back_populates="session",
         cascade="all, delete-orphan",
         uselist=False,
@@ -339,6 +347,42 @@ class RuckDetail(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
 
     session: Mapped[WorkoutSession] = relationship(back_populates="ruck_detail")
+
+
+class ActivityDetail(Base):
+    """Generic cross-training activity detail — 1:1 with a ``WorkoutSession``
+    whose ``session_type == 'activity'``.
+
+    **Why generic rather than a bespoke type per activity (climbing, swimming,
+    tennis, ...):** a dedicated table per sport doesn't scale and most
+    cross-training has no domain-specific physics model worth the schema cost
+    (contrast ``RuckDetail``, which earns its own table via the Pandolf load
+    model). Instead every activity — from a template or freeform — reduces to
+    the same coarse load shape already established for athletic-calendar
+    events (``CalendarEvent.load``, vires-ops#33): which body regions it taxes
+    and how hard. Reusing that vocabulary (rather than inventing a parallel
+    one) means the coach's existing recovery-budget reasoning generalizes to
+    logged activities for free — see ``api.services.coach.context``.
+    """
+
+    __tablename__ = "activity_details"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[int] = mapped_column(
+        ForeignKey("workout_sessions.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    # Template slug (e.g. 'climbing_indoor_toprope') or 'custom' for freeform entry.
+    # Display name is ``WorkoutSession.name``, not duplicated here.
+    template_key: Mapped[str] = mapped_column(String, nullable=False, default="custom")
+    duration_s: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Coarse structured load — same vocabulary as CalendarEvent.load:
+    # regions in {'legs','upper','full','core','none'}, intensity in
+    # {'light','moderate','hard'}. Template-prefilled, always user-editable.
+    regions: Mapped[str] = mapped_column(String, nullable=False, default="full")
+    intensity: Mapped[str] = mapped_column(String, nullable=False, default="moderate")
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
+
+    session: Mapped[WorkoutSession] = relationship(back_populates="activity_detail")
 
 
 # --------------------------------------------------------------------------- #

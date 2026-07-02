@@ -152,6 +152,29 @@ def _objective_block(obj_ctx: CoachObjectiveContext | None, today: date) -> dict
             }
             for e in obj_ctx.events
         ]
+    # Recently logged generic activities (climbing, swimming, yoga, ...), most
+    # recent first: load ALREADY ABSORBED (distinct from `events`, which is
+    # upcoming load to train around) — factor into today's fatigue/recovery.
+    if obj_ctx.recent_activities:
+        block["recent_activities"] = [
+            {
+                "name": a.name,
+                "date": a.session_date.isoformat(),
+                "days_ago": (today - a.session_date).days,
+                "regions": a.regions,
+                "intensity": a.intensity,
+                "duration_min": a.duration_min,
+                "note": (
+                    "cross-training already performed (past load, not a "
+                    "constraint to schedule around): if `regions` overlaps "
+                    "today's planned work and it was logged in the last 1-2 "
+                    "days at 'moderate'/'hard' intensity, that region may "
+                    "still be recovering — lighten volume/intensity there or "
+                    "prioritize a different region instead of stacking on top."
+                ),
+            }
+            for a in obj_ctx.recent_activities
+        ]
     return block
 
 

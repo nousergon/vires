@@ -7,13 +7,14 @@ and recent performance into the dataclasses the coach + materializer consume.
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from api.db.identity import Identity, get_or_create_settings
 from api.db.models import (
+    ActivityDetail,
     CalendarEvent,
     Constraint,
     Exercise,
@@ -31,6 +32,7 @@ from api.services.coach.materialize import (
     TemplateExerciseCtx,
 )
 from api.services.coach.objective_context import (
+    ActivitySessionCtx,
     CoachObjectiveContext,
     ConstraintCtx,
     EventOccurrenceCtx,
@@ -60,6 +62,12 @@ _EVENT_WINDOW_MAX_WEEKS = 52
 # instance of a standing weekly commitment.
 _MAX_OCCURRENCES_PER_EVENT = 26
 _MAX_EVENT_OCCURRENCES = 40
+
+# How far back logged generic activities stay relevant to fatigue/recovery
+# reasoning — recent enough that a region's load is still "live," capped so a
+# prolific cross-trainer can't blow up the grounding context.
+_RECENT_ACTIVITY_WINDOW_DAYS = 7
+_MAX_RECENT_ACTIVITIES = 20
 
 
 def _last_logged_weights(db: Session, ident: Identity) -> dict[int, float]:
@@ -159,12 +167,14 @@ def build_coach_objective_context(
     ]
     candidates = _build_exercise_candidates(db, ident, obj_ctx)
     events = _build_event_ctxs(db, ident, timeline, date.today())
+    recent_activities = _build_recent_activities(db, ident, date.today())
     return CoachObjectiveContext(
         objective=obj_ctx,
         constraints=con_ctxs,
         candidates=candidates,
         timeline=timeline,
         events=events,
+        recent_activities=recent_activities,
     )
 
 
@@ -226,6 +236,43 @@ def _build_event_ctxs(
     # Soonest first, and keep the list compact regardless of event count.
     out.sort(key=lambda e: e.occurrence_date)
     return out[:_MAX_EVENT_OCCURRENCES]
+
+
+def _build_recent_activities(
+    db: Session, ident: Identity, today: date
+) -> list[ActivitySessionCtx]:
+    """Generic activity sessions (climbing, swimming, yoga, ...) logged within
+    the trailing window — load already absorbed, factored into today's
+    fatigue/recovery reasoning. Empty for users who haven't logged one (the
+    coach then behaves exactly as before)."""
+    # WorkoutSession.started_at is a UTCDateTime column — compare against a
+    # tz-aware datetime, not a bare date (UTCDateTime.process_bind_param
+    # requires .tzinfo).
+    window_start = datetime.combine(
+        today - timedelta(days=_RECENT_ACTIVITY_WINDOW_DAYS), time.min, tzinfo=UTC
+    )
+    rows = db.execute(
+        select(WorkoutSession, ActivityDetail)
+        .join(ActivityDetail, ActivityDetail.session_id == WorkoutSession.id)
+        .where(
+            WorkoutSession.tenant_id == ident.tenant_id,
+            WorkoutSession.user_id == ident.user_id,
+            WorkoutSession.session_type == "activity",
+            WorkoutSession.started_at >= window_start,
+        )
+        .order_by(WorkoutSession.started_at.desc())
+        .limit(_MAX_RECENT_ACTIVITIES)
+    ).all()
+    return [
+        ActivitySessionCtx(
+            name=ws.name or "Activity",
+            session_date=ws.started_at.date(),
+            regions=ad.regions,
+            intensity=ad.intensity,
+            duration_min=ad.duration_s // 60 if ad.duration_s else None,
+        )
+        for ws, ad in rows
+    ]
 
 
 def _to_objective_ctx(o: Objective | None) -> ObjectiveCtx | None:

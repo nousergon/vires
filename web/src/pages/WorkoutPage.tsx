@@ -10,6 +10,7 @@ import { Button, Card, EmptyState, PageTitle, Spinner } from '../components/ui'
 import ExercisePicker from '../components/ExercisePicker'
 import RuckForm from '../components/RuckForm'
 import PlateCalculatorSheet from '../components/PlateCalculatorSheet'
+import ActivityForm from '../components/ActivityForm'
 
 export const ACTIVE_KEY = 'vires.activeWorkout'
 
@@ -87,6 +88,7 @@ function StartView({ onStarted }: { onStarted: (id: number) => void }) {
     onSuccess: (ws) => onStarted(ws.id),
   })
   const [ruckOpen, setRuckOpen] = useState(false)
+  const [activityOpen, setActivityOpen] = useState(false)
 
   return (
     <div>
@@ -97,7 +99,11 @@ function StartView({ onStarted }: { onStarted: (id: number) => void }) {
       <Button variant="secondary" className="mt-2 w-full" onClick={() => setRuckOpen(true)}>
         🎒 Log a ruck
       </Button>
+      <Button variant="secondary" className="mt-2 w-full" onClick={() => setActivityOpen(true)}>
+        🏃 Log an activity
+      </Button>
       <RuckForm open={ruckOpen} onClose={() => setRuckOpen(false)} />
+      <ActivityForm open={activityOpen} onClose={() => setActivityOpen(false)} />
 
       <h2 className="mb-2 mt-6 text-sm font-semibold uppercase tracking-wide text-slate-400">
         Start from a routine

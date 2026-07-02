@@ -4,7 +4,7 @@ and the public baseline prompt carries the periodization + safety rules."""
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, timedelta
 
 from api.services.coach.agent import _context_block, _objective_block
 from api.services.coach.materialize import (
@@ -13,6 +13,7 @@ from api.services.coach.materialize import (
     TemplateExerciseCtx,
 )
 from api.services.coach.objective_context import (
+    ActivitySessionCtx,
     CoachObjectiveContext,
     ConstraintCtx,
     EventOccurrenceCtx,
@@ -229,6 +230,20 @@ def test_baseline_prompt_has_event_load_accounting_language():
         load_system_prompt.cache_clear()
 
 
+def test_baseline_prompt_has_recent_activity_recovery_language():
+    from api.services.coach.prompt_loader import load_system_prompt
+
+    load_system_prompt.cache_clear()
+    text = load_system_prompt().lower()
+    try:
+        assert "recent_activities" in text
+        assert "already logged" in text  # past load, not a future constraint
+        assert "days_ago" in text
+        assert "recover" in text
+    finally:
+        load_system_prompt.cache_clear()
+
+
 # --------------------------------------------------------------------------- #
 # DB integration: a logged recurring event reaches the coach context expanded
 # --------------------------------------------------------------------------- #
@@ -258,6 +273,93 @@ def test_recurring_event_is_expanded_into_coach_context(client, db):
     dates = [e.occurrence_date for e in ctx.events]
     assert dates == sorted(dates)
     assert (dates[1] - dates[0]).days == 7
+
+
+# --------------------------------------------------------------------------- #
+# generic activity logging: recent activities reach the model as ALREADY-
+# ABSORBED load, distinct from events (upcoming load to train around)
+# --------------------------------------------------------------------------- #
+def _activity_ctx(**over) -> ActivitySessionCtx:
+    kw = dict(
+        name="Indoor top-rope",
+        session_date=date(2026, 6, 27),
+        regions="upper",
+        intensity="hard",
+        duration_min=90,
+    )
+    kw.update(over)
+    return ActivitySessionCtx(**kw)
+
+
+def test_objective_block_renders_recent_activities_as_absorbed_load():
+    ctx = CoachObjectiveContext(recent_activities=[_activity_ctx()])
+    block = _objective_block(ctx, date(2026, 6, 28))
+    assert block is not None  # activities alone still ground the coach
+    a = block["recent_activities"][0]
+    assert a["name"] == "Indoor top-rope"
+    assert a["date"] == "2026-06-27"
+    assert a["days_ago"] == 1
+    assert a["regions"] == "upper"
+    assert a["intensity"] == "hard"
+    assert a["duration_min"] == 90
+    # the coach is told this is past load, not a constraint to schedule around
+    assert "already" in a["note"].lower()
+    assert "recover" in a["note"].lower()
+
+
+def test_no_recent_activities_key_when_none_present():
+    block = _objective_block(_obj_ctx(), date(2026, 6, 28))
+    assert "recent_activities" not in block
+
+
+def test_recent_activities_reach_the_grounding_context_even_without_an_objective():
+    ctx = CoachObjectiveContext(recent_activities=[_activity_ctx()])
+    block = json.loads(_context_block(_mat_ctx(), date(2026, 6, 28), ctx))
+    assert block["goal"]["recent_activities"][0]["name"] == "Indoor top-rope"
+    assert "objective" not in block["goal"]
+
+
+def test_logged_activity_reaches_the_coach_context(client, db):
+    from api.db.identity import current_identity
+    from api.services.coach.context import build_coach_objective_context
+
+    r = client.post(
+        "/api/workouts/activity",
+        json={
+            "name": "Indoor top-rope",
+            "template_key": "climbing_indoor_toprope",
+            "regions": "upper",
+            "intensity": "hard",
+            "duration_s": 5400,
+        },
+    )
+    assert r.status_code == 201, r.text
+    ctx = build_coach_objective_context(db, current_identity())
+    assert ctx.recent_activities, "the logged activity should reach the coach context"
+    a = ctx.recent_activities[0]
+    assert a.name == "Indoor top-rope"
+    assert a.regions == "upper"
+    assert a.intensity == "hard"
+    assert a.duration_min == 90
+    assert a.session_date == date.today()
+
+
+def test_activity_outside_the_lookback_window_does_not_reach_the_coach(client, db):
+    from api.db.identity import current_identity
+    from api.services.coach.context import build_coach_objective_context
+
+    r = client.post(
+        "/api/workouts/activity",
+        json={
+            "name": "Old swim",
+            "regions": "full",
+            "intensity": "light",
+            "started_at": (date.today() - timedelta(days=30)).isoformat(),
+        },
+    )
+    assert r.status_code == 201, r.text
+    ctx = build_coach_objective_context(db, current_identity())
+    assert ctx.recent_activities == []
 
 
 # --------------------------------------------------------------------------- #

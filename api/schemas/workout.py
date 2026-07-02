@@ -7,6 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from api.schemas.calendar_event import LoadIntensity, LoadRegions
 from api.schemas.exercise import ExerciseBrief, ExercisePerformance
 
 # Coarse terrain classes accepted for a ruck (→ Pandolf terrain factor server-side).
@@ -133,6 +134,45 @@ class RuckDetailOut(BaseModel):
     source: str = "manual"
 
 
+class ActivityTemplateOut(BaseModel):
+    """One entry in the fixed activity-template catalog (``GET
+    /workouts/activity-templates``) — a starting point the quick-log form
+    prefills and the user can freely edit."""
+
+    key: str
+    label: str
+    regions: LoadRegions
+    intensity: LoadIntensity
+
+
+# --------------------------------------------------------------------------- #
+# Generic activity (cross-training) — Tier 0 quick-log
+# --------------------------------------------------------------------------- #
+class ActivityLogIn(BaseModel):
+    """Quick-log a completed generic activity (climbing, swimming, yoga, ...).
+
+    ``regions``/``intensity`` are always present — a template prefills them,
+    but 'custom' (freeform, no template) still requires the user to pick a
+    coarse estimate rather than leaving it unset, since that's the whole
+    point of logging this: giving the coach something to reason about.
+    """
+
+    name: str = Field(min_length=1, description="Display name, e.g. 'Indoor top-rope'")
+    template_key: str = "custom"
+    duration_s: int | None = Field(default=None, ge=0)
+    regions: LoadRegions = "full"
+    intensity: LoadIntensity = "moderate"
+    # Optional backdate (e.g. logging yesterday's session). Defaults to now server-side.
+    started_at: datetime | None = None
+
+
+class ActivityDetailOut(BaseModel):
+    template_key: str = "custom"
+    duration_s: int | None = None
+    regions: LoadRegions
+    intensity: LoadIntensity
+
+
 class WorkoutSessionOut(BaseModel):
     id: int
     session_type: str = "strength"
@@ -144,6 +184,8 @@ class WorkoutSessionOut(BaseModel):
     exercises: list[SessionExerciseOut]
     # Present only for session_type == 'ruck'.
     ruck: RuckDetailOut | None = None
+    # Present only for session_type == 'activity'.
+    activity: ActivityDetailOut | None = None
 
 
 class WorkoutSummary(BaseModel):
@@ -157,5 +199,6 @@ class WorkoutSummary(BaseModel):
     total_volume: float = Field(
         default=0.0, description="Sum of reps*weight over completed working sets"
     )
-    # Compact ruck facts for the history row (None for strength sessions).
+    # Compact ruck/activity facts for the history row (None otherwise).
     ruck: RuckDetailOut | None = None
+    activity: ActivityDetailOut | None = None
