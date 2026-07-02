@@ -98,7 +98,7 @@ export type SessionType = 'strength' | 'activity'
 
 export type Terrain = 'treadmill' | 'road' | 'trail' | 'offtrail' | 'snow'
 
-export type RouteSource = 'manual' | 'route_search' | 'route_draw' | 'gpx'
+export type RouteSource = 'manual' | 'route_search' | 'route_draw' | 'gpx' | 'health'
 
 // Activity load reuses LoadRegions/LoadIntensity (declared below alongside
 // CalendarEvent.load) rather than a parallel vocabulary, so the coach's
