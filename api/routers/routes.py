@@ -66,18 +66,39 @@ def search_route(
 ) -> TrailSearchOut:
     """Search OSM hiking routes by name. Returns candidates with geometry + a rough
     distance; the client sends the chosen candidate's points to ``/routes/measure``
-    for the elevation-filled stats. Empty on no match or provider outage (the UI
-    offers draw/manual)."""
+    for the elevation-filled stats. Empty candidates on no match; ``provider_ok``
+    False on provider outage (the UI offers retry/draw/manual)."""
+    result = overpass.search_trails(q)
     candidates = [
         TrailCandidate(
             osm_id=c.osm_id,
             name=c.name,
             distance_m=round(path_distance_m(c.points), 1),
-            points=[RoutePoint(lat=p.lat, lon=p.lon) for p in c.points],
+            points=[RoutePoint(lat=p.lat, lon=p.lon) for p in _orient_uphill(c.points)],
         )
-        for c in overpass.search_trails(q)
+        for c in result.candidates
     ]
-    return TrailSearchOut(candidates=candidates)
+    return TrailSearchOut(candidates=candidates, provider_ok=result.provider_ok)
+
+
+def _orient_uphill(pts: list[GeoPoint]) -> list[GeoPoint]:
+    """Point a searched trail from its lower end to its higher end.
+
+    OSM route relations don't encode a travel direction, and elevation gain is
+    direction-dependent — a peak trail measured summit→trailhead prefills ~0
+    gain. Named trails are conventionally logged uphill-first, so orient by a
+    DEM lookup of just the two endpoints (one cheap batch, not the full
+    geometry — that fill happens later in ``/routes/measure``). Fail-soft: if
+    the DEM is down, keep the stitched order.
+    """
+    if len(pts) < 2:
+        return pts
+    ends = elevation.fill_elevations(
+        [GeoPoint(lat=pts[0].lat, lon=pts[0].lon), GeoPoint(lat=pts[-1].lat, lon=pts[-1].lon)]
+    )
+    if ends[0].ele_m is not None and ends[-1].ele_m is not None and ends[0].ele_m > ends[-1].ele_m:
+        return pts[::-1]
+    return pts
 
 
 @router.post("/import-gpx", response_model=RouteStatsOut)

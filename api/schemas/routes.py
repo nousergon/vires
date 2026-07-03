@@ -40,3 +40,7 @@ class TrailCandidate(BaseModel):
 
 class TrailSearchOut(BaseModel):
     candidates: list[TrailCandidate]
+    # False when every Overpass endpoint failed (outage/rate-limit) — lets the
+    # client show "search unavailable, retry" instead of a misleading
+    # "no matching trails". Additive with a default for consumer back-compat.
+    provider_ok: bool = True
