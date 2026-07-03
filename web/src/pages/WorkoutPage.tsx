@@ -10,6 +10,7 @@ import { Button, Card, EmptyState, PageTitle, Sheet, Spinner } from '../componen
 import ExercisePicker from '../components/ExercisePicker'
 import PlateCalculatorSheet from '../components/PlateCalculatorSheet'
 import ActivityForm from '../components/ActivityForm'
+import { FuelField, RatingScale, TagsEditor } from '../components/SessionDetailSheet'
 
 export const ACTIVE_KEY = 'vires.activeWorkout'
 
@@ -339,76 +340,22 @@ function SessionDetails({
   session: WorkoutSession
   onChanged: () => void
 }) {
-  const [tagDraft, setTagDraft] = useState('')
-  const [fuel, setFuel] = useState(session.pre_workout_fuel ?? '')
-
   const save = async (body: Parameters<typeof api.updateWorkout>[1]) => {
     await api.updateWorkout(session.id, body)
     onChanged()
   }
 
-  async function addTag() {
-    const t = tagDraft.trim()
-    if (!t || session.tags.includes(t)) {
-      setTagDraft('')
-      return
-    }
-    setTagDraft('')
-    await save({ tags: [...session.tags, t] })
-  }
-  async function removeTag(t: string) {
-    await save({ tags: session.tags.filter((x) => x !== t) })
-  }
-
   return (
     <Card className="mt-4">
       <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Tags</div>
-      <div className="flex flex-wrap items-center gap-1.5">
-        {session.tags.map((t) => (
-          <span
-            key={t}
-            className="inline-flex items-center gap-1 rounded-full border border-amber-600/50 bg-amber-900/30 px-2.5 py-0.5 text-xs text-amber-200"
-          >
-            {t}
-            <button
-              type="button"
-              aria-label={`Remove tag ${t}`}
-              className="text-amber-300/70 hover:text-amber-100"
-              onClick={() => removeTag(t)}
-            >
-              ✕
-            </button>
-          </span>
-        ))}
-        <input
-          type="text"
-          value={tagDraft}
-          placeholder="+ add tag"
-          onChange={(e) => setTagDraft(e.target.value)}
-          onBlur={addTag}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault()
-              addTag()
-            }
-          }}
-          className="min-w-[6rem] flex-1 rounded-lg bg-slate-800 px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-amber-500"
-        />
-      </div>
+      <TagsEditor tags={session.tags} onSave={(tags) => save({ tags })} />
 
       <label className="mt-3 block text-xs font-semibold uppercase tracking-wide text-slate-400">
         Pre-workout food / drink / supps
       </label>
-      <textarea
-        value={fuel}
-        rows={2}
-        placeholder="e.g. black coffee, 5g creatine, banana"
-        onChange={(e) => setFuel(e.target.value)}
-        onBlur={() => {
-          if ((fuel.trim() || null) !== (session.pre_workout_fuel ?? null))
-            save({ pre_workout_fuel: fuel.trim() || null })
-        }}
-        className="mt-1 w-full resize-none rounded-lg bg-slate-800 px-2.5 py-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+      <FuelField
+        value={session.pre_workout_fuel}
+        onSave={(pre_workout_fuel) => save({ pre_workout_fuel })}
       />
 
       <label className="mt-3 block text-xs font-semibold uppercase tracking-wide text-slate-400">
@@ -470,46 +417,6 @@ function FinishSheet({
         </div>
       </div>
     </Sheet>
-  )
-}
-
-// A 1–10 tap scale. `null` = not rated.
-function RatingScale({
-  label,
-  hint,
-  value,
-  onChange,
-}: {
-  label: string
-  hint: string
-  value: number | null
-  onChange: (v: number | null) => void
-}) {
-  return (
-    <div>
-      <div className="flex items-baseline justify-between">
-        <span className="text-sm font-semibold text-slate-100">{label}</span>
-        <span className="text-xs text-slate-500">{value == null ? hint : `${value} / 10`}</span>
-      </div>
-      <div className="mt-2 grid grid-cols-10 gap-1">
-        {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
-          <button
-            key={n}
-            type="button"
-            aria-label={`${label} ${n}`}
-            aria-pressed={value === n}
-            onClick={() => onChange(value === n ? null : n)}
-            className={`rounded-md py-2 text-xs font-semibold transition ${
-              value != null && n <= value
-                ? 'bg-amber-500 text-slate-950'
-                : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-            }`}
-          >
-            {n}
-          </button>
-        ))}
-      </div>
-    </div>
   )
 }
 
