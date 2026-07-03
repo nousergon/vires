@@ -54,7 +54,7 @@ describe('ActivityForm', () => {
     const log = vi.spyOn(api, 'logActivity').mockResolvedValue(activityResult('Indoor top-rope'))
     renderWithProviders(<ActivityForm open onClose={() => {}} />)
 
-    fireEvent.click(await screen.findByText('Indoor top-rope'))
+    fireEvent.change(await screen.findByLabelText(/Activity/), { target: { value: 'climbing_indoor_toprope' } })
     expect((screen.getByPlaceholderText('e.g. Ultimate frisbee') as HTMLInputElement).value).toBe(
       'Indoor top-rope',
     )
@@ -142,7 +142,7 @@ describe('ActivityForm', () => {
     const log = vi.spyOn(api, 'logActivity').mockResolvedValue(activityResult('Walk'))
     renderWithProviders(<ActivityForm open onClose={() => {}} />)
 
-    fireEvent.click(await screen.findByText('Walk'))
+    fireEvent.change(await screen.findByLabelText(/Activity/), { target: { value: 'walk' } })
     expect(screen.getByText('Route')).toBeInTheDocument()
     // Bodyweight is never shown unless a pack weight has been entered.
     expect(screen.queryByLabelText(/Bodyweight/)).not.toBeInTheDocument()
@@ -163,7 +163,7 @@ describe('ActivityForm', () => {
       .mockResolvedValue(activityResult('Hike', { pack_weight_kg: 20.4, metabolic_cost_kj: 4184 }))
     renderWithProviders(<ActivityForm open onClose={() => {}} />)
 
-    fireEvent.click(await screen.findByText('Hike'))
+    fireEvent.change(await screen.findByLabelText(/Activity/), { target: { value: 'hike' } })
     expect(await screen.findByText(/Pack weight \(lb/)).toBeInTheDocument()
     expect(screen.getByText(/Distance \(mi\)/)).toBeInTheDocument()
 
@@ -188,7 +188,7 @@ describe('ActivityForm', () => {
     vi.spyOn(api, 'logActivity').mockResolvedValue(activityResult('Hike', { pack_weight_kg: 20.4 }))
     renderWithProviders(<ActivityForm open onClose={() => {}} />)
 
-    fireEvent.click(await screen.findByText('Hike'))
+    fireEvent.change(await screen.findByLabelText(/Activity/), { target: { value: 'hike' } })
     fireEvent.change(screen.getByLabelText(/Pack weight/), { target: { value: '45' } })
     fireEvent.change(await screen.findByLabelText(/Bodyweight/), { target: { value: '180' } })
     fireEvent.click(screen.getByText('Log activity'))
@@ -223,7 +223,7 @@ describe('ActivityForm', () => {
     const log = vi.spyOn(api, 'logActivity').mockResolvedValue(activityResult('Hike'))
     renderWithProviders(<ActivityForm open onClose={() => {}} />)
 
-    fireEvent.click(await screen.findByText('Hike'))
+    fireEvent.change(await screen.findByLabelText(/Activity/), { target: { value: 'hike' } })
     fireEvent.click(screen.getByText('Search'))
     fireEvent.change(screen.getByLabelText('trail name'), { target: { value: 'Mailbox Peak' } })
     fireEvent.click(screen.getByText('Find'))
@@ -246,7 +246,7 @@ describe('ActivityForm', () => {
     const log = vi.spyOn(api, 'logActivity').mockResolvedValue(activityResult('Hike'))
     renderWithProviders(<ActivityForm open onClose={() => {}} />)
 
-    fireEvent.click(await screen.findByText('Hike'))
+    fireEvent.change(await screen.findByLabelText(/Activity/), { target: { value: 'hike' } })
     fireEvent.click(screen.getByText('Draw'))
     // The mocked map stub drops two waypoints when clicked.
     fireEvent.click(screen.getByText('stub-add-2-points'))
@@ -271,7 +271,7 @@ describe('ActivityForm', () => {
     const log = vi.spyOn(api, 'logActivity').mockResolvedValue(activityResult('Hike'))
     renderWithProviders(<ActivityForm open onClose={() => {}} />)
 
-    fireEvent.click(await screen.findByText('Hike'))
+    fireEvent.change(await screen.findByLabelText(/Activity/), { target: { value: 'hike' } })
     fireEvent.click(screen.getByText('GPX'))
     const file = new File(['<gpx></gpx>'], 'hike.gpx', { type: 'application/gpx+xml' })
     fireEvent.change(screen.getByLabelText('gpx file'), { target: { files: [file] } })
@@ -282,5 +282,32 @@ describe('ActivityForm', () => {
     fireEvent.click(screen.getByText('Log activity'))
     await waitFor(() => expect(log).toHaveBeenCalled())
     expect(log.mock.calls[0][0].source).toBe('gpx')
+  })
+
+  it('shows the planning block for a future date — with NO separate sport field', async () => {
+    vi.spyOn(api, 'listActivityTemplates').mockResolvedValue(TEMPLATES)
+    vi.spyOn(api, 'listObjectives').mockResolvedValue([])
+    const log = vi.spyOn(api, 'logActivity').mockResolvedValue(activityResult('Rainier carry'))
+    renderWithProviders(<ActivityForm open onClose={() => {}} />)
+
+    await screen.findByText('Custom')
+    // No planning block for a today-dated log.
+    expect(screen.queryByText('Repeats weekly')).not.toBeInTheDocument()
+
+    const dateInput = document.querySelector('input[type="date"]') as HTMLInputElement
+    fireEvent.change(dateInput, { target: { value: '2030-01-01' } })
+    expect(screen.getByText('Repeats weekly')).toBeInTheDocument()
+    // The Activity picker IS the sport — no duplicate field. (The sport-keyed
+    // coach needs-analysis lives on Objectives / ObjectiveSheet.)
+    expect(screen.queryByLabelText(/[Ss]port/)).not.toBeInTheDocument()
+    fireEvent.change(screen.getByPlaceholderText('e.g. Ultimate frisbee'), {
+      target: { value: 'Rainier carry' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Add activity' }))
+
+    await waitFor(() => expect(log).toHaveBeenCalledTimes(1))
+    expect(log.mock.calls[0][0]).toMatchObject({ name: 'Rainier carry' })
+    // sport is never sent — existing values survive edits via exclude_unset.
+    expect('sport' in log.mock.calls[0][0]).toBe(false)
   })
 })
