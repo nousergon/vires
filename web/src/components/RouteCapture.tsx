@@ -132,7 +132,9 @@ export default function RouteCapture({
             </div>
             {search.isSuccess && candidates.length === 0 && (
               <p className="text-xs text-slate-500">
-                No matching trails found — draw isn't available yet, so enter distance + elevation manually below.
+                {search.data?.provider_ok === false
+                  ? 'Trail search is temporarily unavailable — try again in a minute, or use Draw / GPX / Manual.'
+                  : 'No matching trails found in OpenStreetMap — try Draw to trace the route, or enter distance + elevation manually.'}
               </p>
             )}
             {candidates.map((c) => (
