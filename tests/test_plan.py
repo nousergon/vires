@@ -47,6 +47,37 @@ def test_calendar_merges_past_session_and_future_planned(client):
     assert any(c["id"] == pw["id"] and c["status"] == "planned" for c in planned)
 
 
+def test_calendar_started_planned_renders_once_not_twice(client):
+    # Starting a planned routine creates a linked WorkoutSession. The calendar
+    # must emit ONE entry for that workout — the planned row absorbing the
+    # session's live status — never a planned "completed" card AND a session
+    # "logged" card for the same physical workout (the July-3 duplicate bug).
+    tpl = _routine(client)
+    pw = client.post(
+        "/api/plan/planned",
+        json={"scheduled_date": "2026-07-03", "template_id": tpl["id"]},
+    ).json()
+    ws = client.post(f"/api/plan/planned/{pw['id']}/start").json()
+
+    cal = client.get(
+        "/api/plan/calendar", params={"start": "2020-01-01", "end": "2030-12-31"}
+    ).json()
+    assert not any(c["kind"] == "session" and c["id"] == ws["id"] for c in cal)
+    mine = [c for c in cal if c["kind"] == "planned" and c["id"] == pw["id"]]
+    assert len(mine) == 1
+    # Session still open ⇒ live status, not pw.status's premature 'completed'.
+    assert mine[0]["status"] == "in_progress"
+    assert mine[0]["session_id"] == ws["id"]
+
+    client.post(f"/api/workouts/{ws['id']}/finish")
+    cal = client.get(
+        "/api/plan/calendar", params={"start": "2020-01-01", "end": "2030-12-31"}
+    ).json()
+    mine = [c for c in cal if c["kind"] == "planned" and c["id"] == pw["id"]]
+    assert mine[0]["status"] == "completed"
+    assert not any(c["kind"] == "session" and c["id"] == ws["id"] for c in cal)
+
+
 def test_calendar_respects_range(client):
     client.post("/api/plan/planned", json={"scheduled_date": "2026-07-15"}).json()
     inside = client.get(
@@ -256,9 +287,11 @@ def test_completing_planned_on_a_different_day_moves_marker_to_that_day(client):
     planned_dates = [e["date"] for e in cal if e["kind"] == "planned"]
     assert past not in planned_dates  # old day no longer marked
     assert today in planned_dates  # planned marker follows to the completion day
-    # and the fulfilling session is on the completion day too
-    session_dates = [e["date"] for e in cal if e["kind"] == "session"]
-    assert today in session_dates
+    # The fulfilling session is ABSORBED into the planned entry (one workout,
+    # one entry) — it must not also appear as its own session card.
+    assert not any(e["kind"] == "session" and e["id"] == ses["id"] for e in cal)
+    moved = next(e for e in cal if e["kind"] == "planned" and e["id"] == pw["id"])
+    assert moved["session_id"] == ses["id"]
 
 
 def test_delete_session_started_from_plan_detaches_and_reverts(client):
