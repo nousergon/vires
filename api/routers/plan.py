@@ -116,6 +116,11 @@ def calendar(
         .order_by(WorkoutSession.started_at)
     ).all()
     now = _now()
+    # Live status per emitted session — a fulfilled PlannedWorkout's own status
+    # can't be trusted for display (start_planned marks it 'completed' at START
+    # time), so the planned entry below takes its linked session's status and
+    # the session's standalone entry is suppressed (one workout, one entry).
+    session_status: dict[int, str] = {}
     for ws in sessions:
         if ws.ended_at is not None:
             status = "completed"
@@ -123,6 +128,7 @@ def calendar(
             status = "upcoming"
         else:
             status = "in_progress"
+        session_status[ws.id] = status
         entries.append(
             CalendarEntry(
                 kind="session",
@@ -192,6 +198,7 @@ def calendar(
         )
         .order_by(PlannedWorkout.scheduled_date)
     ).all()
+    fulfilled_session_ids: set[int] = set()
     for pw in planned:
         # A planned day that's been fulfilled by a session is shown on the day
         # the session actually happened, not its original scheduled_date — so
@@ -199,17 +206,26 @@ def calendar(
         # scheduled_date itself is left untouched (it's load-bearing for the
         # coach's week grid / replan cutover); only the calendar marker moves.
         entry_date = pw.scheduled_date
+        entry_status = pw.status
         if pw.session_id is not None:
             linked = db.get(WorkoutSession, pw.session_id)
             if linked is not None:
                 entry_date = linked.started_at.date()
+            # One physical workout must render as ONE entry. The planned row
+            # (prescription + objective linkage) absorbs its linked session,
+            # taking the session's LIVE status — pw.status says 'completed'
+            # from the moment start_planned runs, even mid-workout — and the
+            # session's standalone entry is dropped below.
+            if pw.session_id in session_status:
+                entry_status = session_status[pw.session_id]
+                fulfilled_session_ids.add(pw.session_id)
         entries.append(
             CalendarEntry(
                 kind="planned",
                 date=entry_date,
                 id=pw.id,
                 name=pw.name,
-                status=pw.status,
+                status=entry_status,
                 program_id=pw.program_id,
                 template_id=pw.template_id,
                 objective_id=pw.objective_id,
@@ -219,6 +235,12 @@ def calendar(
                 rescheduled_from=pw.rescheduled_from,
             )
         )
+    if fulfilled_session_ids:
+        entries = [
+            e
+            for e in entries
+            if not (e.kind == "session" and not e.virtual and e.id in fulfilled_session_ids)
+        ]
 
     # Dated objectives as their OWN events — in-app parity with the ICS feed:
     # a peak marker on target_date (a multi-day band across event_end_date), and a

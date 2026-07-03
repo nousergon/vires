@@ -12,6 +12,7 @@ import { Button, EmptyState, PageTitle, Sheet, Spinner } from '../components/ui'
 import CoachSheet from '../components/CoachSheet'
 import ObjectiveSheet from '../components/ObjectiveSheet'
 import ActivityForm from '../components/ActivityForm'
+import SessionDetailSheet from '../components/SessionDetailSheet'
 import { useSettings } from '../lib/useSettings'
 import { ACTIVE_KEY } from './WorkoutPage'
 import {
@@ -46,6 +47,9 @@ export default function PlanPage() {
   })
   const [modifyProgram, setModifyProgram] = useState<{ id: number; name: string } | null>(null)
   const [movedBanner, setMovedBanner] = useState<PlannedWorkout[]>([])
+  // A completed routine tapped in the DaySheet — opens the shared logged-
+  // session detail (view + tag: tags / pre-workout fuel / energy / intensity).
+  const [sessionDetailId, setSessionDetailId] = useState<number | null>(null)
 
   const openObjective = (id?: number, date?: string) => setObjectiveSheet({ open: true, id, date })
   const openActivity = (id?: number, date?: string) => setActivitySheet({ open: true, id, date })
@@ -167,9 +171,11 @@ export default function PlanPage() {
         onChanged={refresh}
         onStarted={onStarted}
         onEditActivity={openActivityEntry}
+        onOpenSession={setSessionDetailId}
         onAddActivity={() => (selected ? openActivity(undefined, isoDate(selected)) : openActivity())}
         onAddObjective={() => (selected ? openObjective(undefined, isoDate(selected)) : openObjective())}
       />
+      <SessionDetailSheet sessionId={sessionDetailId} onClose={() => setSessionDetailId(null)} />
       <ObjectiveSheet
         open={objectiveSheet.open}
         objectiveId={objectiveSheet.id}
@@ -497,7 +503,11 @@ function CalendarGrid({
               (e.kind === 'session' && e.status === 'completed') ||
               (e.kind === 'planned' && e.status === 'completed'),
           )
-          const active = es.some((e) => e.kind === 'session' && e.status === 'in_progress')
+          // A fulfilled planned entry carries its session's live status (the
+          // session row itself is absorbed), so the pulse covers both kinds.
+          const active = es.some(
+            (e) => (e.kind === 'session' || e.kind === 'planned') && e.status === 'in_progress',
+          )
           const peak = es.some((e) => e.kind === 'objective')
           const inBlock = es.some((e) => e.kind === 'objective_block')
           // Upcoming activities/events (constraints) render as a distinct
@@ -618,6 +628,7 @@ function DaySheet({
   onChanged,
   onStarted,
   onEditActivity,
+  onOpenSession,
   onAddActivity,
   onAddObjective,
 }: {
@@ -627,6 +638,7 @@ function DaySheet({
   onChanged: () => void
   onStarted: (sessionId: number) => void
   onEditActivity: (e: CalendarEntry) => void
+  onOpenSession: (sessionId: number) => void
   onAddActivity: () => void
   onAddObjective: () => void
 }) {
@@ -757,12 +769,22 @@ function DaySheet({
             e={e}
             busy={busy}
             onStart={() => start(e.id)}
+            onResume={() => e.session_id != null && onStarted(e.session_id)}
+            onOpenSession={() => e.session_id != null && onOpenSession(e.session_id)}
             onRemove={() => remove(e.id)}
           />
         ))}
 
+        {/* Ad-hoc sessions (no fulfilled plan behind them — those are absorbed
+            into their PlannedCard above). Tap a completed one to view + tag it
+            (pre-workout fuel / energy / intensity); tap an in-progress one to
+            resume it. */}
         {sessions.map((e) => (
-          <div key={`s${e.id}`} className="rounded-xl border border-slate-800 bg-slate-800/40 p-3">
+          <button
+            key={`s${e.id}`}
+            onClick={() => (e.status === 'in_progress' ? onStarted(e.id) : onOpenSession(e.id))}
+            className="block w-full rounded-xl border border-slate-800 bg-slate-800/40 p-3 text-left hover:bg-slate-800/70"
+          >
             <div className="font-semibold text-slate-100">{e.name || 'Workout'}</div>
             <div className="text-xs text-slate-400">
               {e.exercise_count} exercises ·{' '}
@@ -771,8 +793,11 @@ function DaySheet({
               ) : (
                 <span className="text-amber-400">in progress</span>
               )}
+              <span className="ml-2 text-amber-300">
+                {e.status === 'in_progress' ? 'resume →' : 'view / tag →'}
+              </span>
             </div>
-          </div>
+          </button>
         ))}
 
         {templates.length > 0 && (
@@ -806,11 +831,15 @@ function PlannedCard({
   e,
   busy,
   onStart,
+  onResume,
+  onOpenSession,
   onRemove,
 }: {
   e: CalendarEntry
   busy: boolean
   onStart: () => void
+  onResume: () => void
+  onOpenSession: () => void
   onRemove: () => void
 }) {
   const [open, setOpen] = useState(false)
@@ -820,7 +849,11 @@ function PlannedCard({
     queryFn: () => api.getPlanned(e.id),
     enabled: open,
   })
+  // The entry's status is the linked session's LIVE status (the calendar
+  // absorbs a fulfilled session into this one entry), so a started-but-
+  // unfinished routine shows in_progress here, not a premature 'completed'.
   const done = e.status === 'completed'
+  const inProgress = e.status === 'in_progress'
 
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-800/40 p-3">
@@ -835,7 +868,7 @@ function PlannedCard({
             <span className="truncate">{e.name || 'Workout'}</span>
           </div>
           <div className="ml-4 text-xs text-slate-400">
-            {e.exercise_count} exercises · {e.status} ·{' '}
+            {e.exercise_count} exercises · {e.status.replace('_', ' ')} ·{' '}
             <span className="text-amber-300">{open ? 'hide' : 'view routine'}</span>
           </div>
         </button>
@@ -868,12 +901,21 @@ function PlannedCard({
         </div>
       )}
 
-      {!done ? (
+      {inProgress ? (
+        <Button className="mt-3 w-full" onClick={onResume} disabled={busy}>
+          Resume workout
+        </Button>
+      ) : !done ? (
         <Button className="mt-3 w-full" onClick={onStart} disabled={busy}>
           Start workout
         </Button>
       ) : (
-        <p className="mt-2 text-xs text-emerald-400">Completed ✓</p>
+        <button
+          className="mt-2 block w-full text-left text-xs text-emerald-400"
+          onClick={onOpenSession}
+        >
+          Completed ✓ <span className="ml-1 text-amber-300">view / tag →</span>
+        </button>
       )}
     </div>
   )

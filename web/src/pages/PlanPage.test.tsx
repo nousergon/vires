@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { screen, fireEvent } from '@testing-library/react'
-import { renderWithProviders, SETTINGS, makeObjective, makeActiveObjective } from '../test/utils'
+import { renderWithProviders, SETTINGS, makeObjective, makeActiveObjective, makeSession } from '../test/utils'
 import PlanPage from './PlanPage'
 import { api } from '../lib/api'
 import { isoDate } from '../lib/calendar'
@@ -279,5 +279,101 @@ describe('PlanPage', () => {
     renderWithProviders(<PlanPage />)
     expect(await screen.findByText('Plan')).toBeInTheDocument()
     expect(screen.queryByText(/The coach moved/)).not.toBeInTheDocument()
+  })
+
+  it('renders ONE card for a completed planned routine and opens view/tag', async () => {
+    // The calendar API absorbs a fulfilled session into its planned entry —
+    // the day sheet must show a single card (the July-3 duplicate bug), and
+    // tapping "Completed" opens the logged session for tagging.
+    const iso = isoDate(new Date())
+    vi.spyOn(api, 'calendar').mockResolvedValue([
+      {
+        kind: 'planned',
+        date: iso,
+        id: 5,
+        name: 'Lower + Carry',
+        status: 'completed',
+        program_id: 1,
+        template_id: 2,
+        exercise_count: 1,
+        session_id: 77,
+      },
+    ])
+    vi.spyOn(api, 'listPrograms').mockResolvedValue([])
+    vi.spyOn(api, 'listTemplates').mockResolvedValue([])
+    vi.spyOn(api, 'getSettings').mockResolvedValue(SETTINGS)
+    vi.spyOn(api, 'rescheduleMissed').mockResolvedValue([])
+    const getW = vi.spyOn(api, 'getWorkout').mockResolvedValue(
+      makeSession({ id: 77, name: 'Lower + Carry', ended_at: '2026-07-03T19:00:00Z' }),
+    )
+
+    renderWithProviders(<PlanPage />)
+    fireEvent.click(await screen.findByLabelText(iso)) // open the day
+    // exactly one card for the routine
+    expect(await screen.findAllByText('Lower + Carry')).toHaveLength(1)
+    fireEvent.click(screen.getByText(/Completed ✓/))
+    // the shared session-detail sheet opens with the tagging editor
+    expect(await screen.findByText('Pre-workout food / drink / supps')).toBeInTheDocument()
+    expect(screen.getByText('Energy level')).toBeInTheDocument()
+    expect(screen.getByText('Workout intensity')).toBeInTheDocument()
+    expect(getW).toHaveBeenCalledWith(77)
+  })
+
+  it('persists an after-the-fact intensity rating from the day sheet', async () => {
+    const iso = isoDate(new Date())
+    vi.spyOn(api, 'calendar').mockResolvedValue([
+      {
+        kind: 'planned',
+        date: iso,
+        id: 5,
+        name: 'Lower + Carry',
+        status: 'completed',
+        program_id: 1,
+        template_id: 2,
+        exercise_count: 1,
+        session_id: 77,
+      },
+    ])
+    vi.spyOn(api, 'listPrograms').mockResolvedValue([])
+    vi.spyOn(api, 'listTemplates').mockResolvedValue([])
+    vi.spyOn(api, 'getSettings').mockResolvedValue(SETTINGS)
+    vi.spyOn(api, 'rescheduleMissed').mockResolvedValue([])
+    const session = makeSession({ id: 77, name: 'Lower + Carry', ended_at: '2026-07-03T19:00:00Z' })
+    vi.spyOn(api, 'getWorkout').mockResolvedValue(session)
+    const patch = vi.spyOn(api, 'updateWorkout').mockResolvedValue(session)
+
+    renderWithProviders(<PlanPage />)
+    fireEvent.click(await screen.findByLabelText(iso))
+    fireEvent.click(await screen.findByText(/Completed ✓/))
+    fireEvent.click(await screen.findByLabelText('Workout intensity 8'))
+    expect(patch).toHaveBeenCalledWith(77, { workout_intensity: 8 })
+  })
+
+  it('makes an ad-hoc logged session tappable to view/tag', async () => {
+    const iso = isoDate(new Date())
+    vi.spyOn(api, 'calendar').mockResolvedValue([
+      {
+        kind: 'session',
+        date: iso,
+        id: 42,
+        name: 'Garage Session',
+        status: 'completed',
+        session_type: 'strength',
+        exercise_count: 3,
+      },
+    ])
+    vi.spyOn(api, 'listPrograms').mockResolvedValue([])
+    vi.spyOn(api, 'listTemplates').mockResolvedValue([])
+    vi.spyOn(api, 'getSettings').mockResolvedValue(SETTINGS)
+    vi.spyOn(api, 'rescheduleMissed').mockResolvedValue([])
+    const getW = vi.spyOn(api, 'getWorkout').mockResolvedValue(
+      makeSession({ id: 42, name: 'Garage Session', ended_at: '2026-07-03T19:00:00Z' }),
+    )
+
+    renderWithProviders(<PlanPage />)
+    fireEvent.click(await screen.findByLabelText(iso))
+    fireEvent.click(await screen.findByText(/view \/ tag/))
+    expect(await screen.findByText('Pre-workout food / drink / supps')).toBeInTheDocument()
+    expect(getW).toHaveBeenCalledWith(42)
   })
 })
