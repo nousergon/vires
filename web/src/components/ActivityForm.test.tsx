@@ -283,7 +283,7 @@ describe('ActivityForm', () => {
     expect(log.mock.calls[0][0].source).toBe('gpx')
   })
 
-  it('shows the planning block for a future date, with sport as an optional coach profile', async () => {
+  it('shows the planning block for a future date — with NO separate sport field', async () => {
     vi.spyOn(api, 'listActivityTemplates').mockResolvedValue(TEMPLATES)
     vi.spyOn(api, 'listObjectives').mockResolvedValue([])
     const log = vi.spyOn(api, 'logActivity').mockResolvedValue(activityResult('Rainier carry'))
@@ -296,15 +296,17 @@ describe('ActivityForm', () => {
     const dateInput = document.querySelector('input[type="date"]') as HTMLInputElement
     fireEvent.change(dateInput, { target: { value: '2030-01-01' } })
     expect(screen.getByText('Repeats weekly')).toBeInTheDocument()
-    // Sport is framed as the coach's needs-analysis profile, a separate axis
-    // from the Activity picker — optional, blank by default.
-    fireEvent.change(screen.getByLabelText(/Coach profile/), { target: { value: 'alpine' } })
+    // The Activity picker IS the sport — no duplicate field. (The sport-keyed
+    // coach needs-analysis lives on Objectives / ObjectiveSheet.)
+    expect(screen.queryByLabelText(/[Ss]port/)).not.toBeInTheDocument()
     fireEvent.change(screen.getByPlaceholderText('e.g. Ultimate frisbee'), {
       target: { value: 'Rainier carry' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Add activity' }))
 
     await waitFor(() => expect(log).toHaveBeenCalledTimes(1))
-    expect(log.mock.calls[0][0]).toMatchObject({ name: 'Rainier carry', sport: 'alpine' })
+    expect(log.mock.calls[0][0]).toMatchObject({ name: 'Rainier carry' })
+    // sport is never sent — existing values survive edits via exclude_unset.
+    expect('sport' in log.mock.calls[0][0]).toBe(false)
   })
 })

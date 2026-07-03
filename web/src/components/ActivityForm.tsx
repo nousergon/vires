@@ -107,7 +107,12 @@ export default function ActivityForm({
   const [body, setBody] = useState(() => localStorage.getItem(LAST_BODY) ?? '')
   // Planning fields (former CalendarEvent axes) — shown when the chosen date
   // is in the future, or when editing a row that already has one of these set.
-  const [sport, setSport] = useState('')
+  // NOTE: there is deliberately NO sport field here — the Activity picker IS
+  // the sport for an activity/event (the coach receives template_key). The
+  // sport-keyed needs-analysis (demands_profile_for_sport, e.g. 'alpine')
+  // belongs to Objectives and is set in ObjectiveSheet. The API still accepts
+  // ActivityDetail.sport; this form just never sends it (PATCH is
+  // exclude_unset, so existing values are preserved on edit).
   const [recurWeekly, setRecurWeekly] = useState(false)
   const [eventEndDate, setEventEndDate] = useState('')
   const [objectiveId, setObjectiveId] = useState('')
@@ -145,7 +150,6 @@ export default function ActivityForm({
       setDistance('')
       setElevation('')
       setTerrain((existing.activity?.terrain as Terrain) ?? 'trail')
-      setSport(existing.activity?.sport ?? '')
       setRecurWeekly(existing.activity?.recurrence === 'weekly')
       setEventEndDate(existing.activity?.event_end_date ?? '')
       setObjectiveId(existing.activity?.objective_id != null ? String(existing.activity.objective_id) : '')
@@ -161,7 +165,6 @@ export default function ActivityForm({
       setDistance('')
       setElevation('')
       setTerrain('trail')
-      setSport('')
       setRecurWeekly(false)
       setEventEndDate('')
       setObjectiveId('')
@@ -216,7 +219,6 @@ export default function ActivityForm({
             bodyweight: num(body),
           }
         : {}),
-      sport: sport.trim() || null,
       recurrence: (recurWeekly ? 'weekly' : 'none') as 'weekly' | 'none',
       event_end_date: !recurWeekly && eventEndDate ? eventEndDate : null,
       objective_id: objectiveId ? Number(objectiveId) : null,
@@ -379,27 +381,6 @@ export default function ActivityForm({
                 </select>
               </Field>
 
-              {/* A DIFFERENT axis from the Activity picker above: Activity is
-                  the movement type (load accounting — regions/intensity/route);
-                  sport keys an authored coach needs-analysis for the event
-                  (demands_profile_for_sport — only 'alpine' is authored so
-                  far). Leave blank unless such a profile should steer the
-                  coach; the activity type alone covers everything else. */}
-              <Field
-                label="Coach profile (sport)"
-                hint="optional — usually leave blank; the activity type above is enough"
-              >
-                <input
-                  className={inputCls}
-                  value={sport}
-                  onChange={(e) => setSport(e.target.value)}
-                  placeholder="e.g. alpine — sport-specific coaching profile"
-                  list="sport-profiles"
-                />
-                <datalist id="sport-profiles">
-                  <option value="alpine" />
-                </datalist>
-              </Field>
             </div>
           )}
 
