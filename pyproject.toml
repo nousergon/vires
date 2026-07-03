@@ -19,7 +19,7 @@ dependencies = [
     # krepis provider-agnostic LLM adapter (Anthropic / OpenAI / OpenRouter
     # behind one call surface). Active coach model = /vires/llm/coach SSM
     # param or VIRES_COACH_LLM env; both SDK transports installed.
-    "krepis[anthropic,openai]>=0.9.0",
+    "krepis[anthropic,openai]>=0.9.1",
     "pywebpush>=1.14",
 ]
 
