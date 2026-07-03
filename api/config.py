@@ -40,13 +40,24 @@ class Settings(BaseSettings):
     dev_tenant_id: str = "dev-tenant"
     dev_user_id: str = "dev-user"
 
-    # AI coach (Anthropic). The key is hydrated onto the box from SSM at deploy
-    # time (see infrastructure/deploy-on-merge.sh); absent => the coach endpoints
-    # 503 and the rest of the app keeps working. Start on the cheapest model to
-    # shake out bugs; bumping to claude-sonnet-4-6 is a one-line config flip.
+    # AI coach — provider-agnostic via the krepis adapter. WHICH model runs is
+    # operator config, resolved (in order): VIRES_COACH_LLM env override →
+    # /vires/llm/coach SSM parameter (60s TTL — flip providers live, no
+    # redeploy; e.g. "openrouter:moonshotai/kimi-k2.6") → the code default
+    # below (anthropic + coach_model). Keys are hydrated onto the box from SSM
+    # at deploy time (see infrastructure/deploy-on-merge.sh); a missing key
+    # for the ACTIVE provider => the coach endpoints 503 and the rest of the
+    # app keeps working.
     anthropic_api_key: str | None = None
+    openrouter_api_key: str | None = None
+    coach_llm_ssm_param: str = "/vires/llm/coach"
     coach_model: str = "claude-haiku-4-5"
     coach_max_tokens: int = 4096
+    # Coach telemetry sinks (parents auto-created). Cost rows append on every
+    # generation (krepis record_llm_call — provider/tokens/cost_source); SFT
+    # distillation rows append only when LLM_SFT_CAPTURE_ENABLED=1.
+    coach_cost_log_path: str = "data/coach_cost.jsonl"
+    coach_sft_sink_path: str = "data/sft/coach.jsonl"
     # Optional explicit path to the coach system prompt. The tuned prompt is the
     # private edge (gitignored coach_system.txt, hydrated from SSM at deploy time);
     # absent => the committed coach_system.example.txt baseline is used.
