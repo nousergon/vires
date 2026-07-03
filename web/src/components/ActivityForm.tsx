@@ -309,37 +309,25 @@ export default function ActivityForm({
             />
           </Field>
 
+          {/* A dropdown, not a pill wall — the catalog is 20+ templates and
+              still growing; scanning pills across seven rows beat the point
+              of a quick-log form. Custom leads (it's the default). */}
           <Field label="Activity">
             {templates.length === 0 ? (
               <Spinner />
             ) : (
-              <div className="flex flex-wrap gap-2">
+              <select
+                className={inputCls}
+                value={templateKey}
+                onChange={(e) => pickTemplate(e.target.value)}
+              >
+                <option value="custom">Custom</option>
                 {templates.map((t) => (
-                  <button
-                    key={t.key}
-                    type="button"
-                    onClick={() => pickTemplate(t.key)}
-                    className={`rounded-full border px-3 py-1.5 text-sm ${
-                      templateKey === t.key
-                        ? 'border-amber-600/60 bg-amber-900/30 text-amber-200'
-                        : 'border-slate-700 text-slate-300 hover:bg-slate-800'
-                    }`}
-                  >
+                  <option key={t.key} value={t.key}>
                     {t.label}
-                  </button>
+                  </option>
                 ))}
-                <button
-                  type="button"
-                  onClick={() => pickTemplate('custom')}
-                  className={`rounded-full border px-3 py-1.5 text-sm ${
-                    templateKey === 'custom'
-                      ? 'border-amber-600/60 bg-amber-900/30 text-amber-200'
-                      : 'border-slate-700 text-slate-300 hover:bg-slate-800'
-                  }`}
-                >
-                  Custom
-                </button>
-              </div>
+              </select>
             )}
           </Field>
 
@@ -354,15 +342,6 @@ export default function ActivityForm({
 
           {showPlanning && (
             <div className="space-y-3 rounded-lg border border-fuchsia-800/40 bg-fuchsia-900/10 p-3">
-              <Field label="Sport" hint="drives the needs-analysis (alpine is authored)">
-                <input
-                  className={inputCls}
-                  value={sport}
-                  onChange={(e) => setSport(e.target.value)}
-                  placeholder="alpine"
-                />
-              </Field>
-
               <label className="flex items-center gap-2 text-sm text-slate-300">
                 <input
                   type="checkbox"
@@ -398,6 +377,28 @@ export default function ActivityForm({
                     </option>
                   ))}
                 </select>
+              </Field>
+
+              {/* A DIFFERENT axis from the Activity picker above: Activity is
+                  the movement type (load accounting — regions/intensity/route);
+                  sport keys an authored coach needs-analysis for the event
+                  (demands_profile_for_sport — only 'alpine' is authored so
+                  far). Leave blank unless such a profile should steer the
+                  coach; the activity type alone covers everything else. */}
+              <Field
+                label="Coach profile (sport)"
+                hint="optional — usually leave blank; the activity type above is enough"
+              >
+                <input
+                  className={inputCls}
+                  value={sport}
+                  onChange={(e) => setSport(e.target.value)}
+                  placeholder="e.g. alpine — sport-specific coaching profile"
+                  list="sport-profiles"
+                />
+                <datalist id="sport-profiles">
+                  <option value="alpine" />
+                </datalist>
               </Field>
             </div>
           )}
