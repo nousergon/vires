@@ -107,7 +107,12 @@ export default function ActivityForm({
   const [body, setBody] = useState(() => localStorage.getItem(LAST_BODY) ?? '')
   // Planning fields (former CalendarEvent axes) — shown when the chosen date
   // is in the future, or when editing a row that already has one of these set.
-  const [sport, setSport] = useState('')
+  // NOTE: there is deliberately NO sport field here — the Activity picker IS
+  // the sport for an activity/event (the coach receives template_key). The
+  // sport-keyed needs-analysis (demands_profile_for_sport, e.g. 'alpine')
+  // belongs to Objectives and is set in ObjectiveSheet. The API still accepts
+  // ActivityDetail.sport; this form just never sends it (PATCH is
+  // exclude_unset, so existing values are preserved on edit).
   const [recurWeekly, setRecurWeekly] = useState(false)
   const [eventEndDate, setEventEndDate] = useState('')
   const [objectiveId, setObjectiveId] = useState('')
@@ -145,7 +150,6 @@ export default function ActivityForm({
       setDistance('')
       setElevation('')
       setTerrain((existing.activity?.terrain as Terrain) ?? 'trail')
-      setSport(existing.activity?.sport ?? '')
       setRecurWeekly(existing.activity?.recurrence === 'weekly')
       setEventEndDate(existing.activity?.event_end_date ?? '')
       setObjectiveId(existing.activity?.objective_id != null ? String(existing.activity.objective_id) : '')
@@ -161,7 +165,6 @@ export default function ActivityForm({
       setDistance('')
       setElevation('')
       setTerrain('trail')
-      setSport('')
       setRecurWeekly(false)
       setEventEndDate('')
       setObjectiveId('')
@@ -216,7 +219,6 @@ export default function ActivityForm({
             bodyweight: num(body),
           }
         : {}),
-      sport: sport.trim() || null,
       recurrence: (recurWeekly ? 'weekly' : 'none') as 'weekly' | 'none',
       event_end_date: !recurWeekly && eventEndDate ? eventEndDate : null,
       objective_id: objectiveId ? Number(objectiveId) : null,
@@ -309,37 +311,25 @@ export default function ActivityForm({
             />
           </Field>
 
+          {/* A dropdown, not a pill wall — the catalog is 20+ templates and
+              still growing; scanning pills across seven rows beat the point
+              of a quick-log form. Custom leads (it's the default). */}
           <Field label="Activity">
             {templates.length === 0 ? (
               <Spinner />
             ) : (
-              <div className="flex flex-wrap gap-2">
+              <select
+                className={inputCls}
+                value={templateKey}
+                onChange={(e) => pickTemplate(e.target.value)}
+              >
+                <option value="custom">Custom</option>
                 {templates.map((t) => (
-                  <button
-                    key={t.key}
-                    type="button"
-                    onClick={() => pickTemplate(t.key)}
-                    className={`rounded-full border px-3 py-1.5 text-sm ${
-                      templateKey === t.key
-                        ? 'border-amber-600/60 bg-amber-900/30 text-amber-200'
-                        : 'border-slate-700 text-slate-300 hover:bg-slate-800'
-                    }`}
-                  >
+                  <option key={t.key} value={t.key}>
                     {t.label}
-                  </button>
+                  </option>
                 ))}
-                <button
-                  type="button"
-                  onClick={() => pickTemplate('custom')}
-                  className={`rounded-full border px-3 py-1.5 text-sm ${
-                    templateKey === 'custom'
-                      ? 'border-amber-600/60 bg-amber-900/30 text-amber-200'
-                      : 'border-slate-700 text-slate-300 hover:bg-slate-800'
-                  }`}
-                >
-                  Custom
-                </button>
-              </div>
+              </select>
             )}
           </Field>
 
@@ -354,15 +344,6 @@ export default function ActivityForm({
 
           {showPlanning && (
             <div className="space-y-3 rounded-lg border border-fuchsia-800/40 bg-fuchsia-900/10 p-3">
-              <Field label="Sport" hint="drives the needs-analysis (alpine is authored)">
-                <input
-                  className={inputCls}
-                  value={sport}
-                  onChange={(e) => setSport(e.target.value)}
-                  placeholder="alpine"
-                />
-              </Field>
-
               <label className="flex items-center gap-2 text-sm text-slate-300">
                 <input
                   type="checkbox"
@@ -399,6 +380,7 @@ export default function ActivityForm({
                   ))}
                 </select>
               </Field>
+
             </div>
           )}
 
