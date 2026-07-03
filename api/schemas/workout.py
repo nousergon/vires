@@ -30,6 +30,20 @@ Recurrence = Literal["none", "weekly"]
 class WorkoutStart(BaseModel):
     template_id: int | None = None  # None => empty/ad-hoc workout
     name: str | None = None
+    # Optional session context, settable at the moment of starting (also
+    # editable later via PATCH): free-text tags/custom labels and a note of
+    # what was eaten/drunk/supplemented pre-workout.
+    tags: list[str] | None = None
+    pre_workout_fuel: str | None = None
+
+
+class WorkoutFinish(BaseModel):
+    """End-of-workout self-report, prompted when finishing. Both optional so a
+    user can just tap Finish and skip the rating; when given, each is a 1–10
+    score (energy/readiness vs. how hard the session was)."""
+
+    energy_level: int | None = Field(default=None, ge=1, le=10)
+    workout_intensity: int | None = Field(default=None, ge=1, le=10)
 
 
 class SetIn(BaseModel):
@@ -238,6 +252,10 @@ class WorkoutSessionOut(BaseModel):
     started_at: datetime
     ended_at: datetime | None = None
     notes: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    pre_workout_fuel: str | None = None
+    energy_level: int | None = None
+    workout_intensity: int | None = None
     template_id: int | None = None
     exercises: list[SessionExerciseOut]
     # Present only for session_type == 'activity'.
@@ -264,6 +282,14 @@ class WorkoutSessionUpdate(BaseModel):
     started_at: datetime | None = None
     ended_at: datetime | None = None
     notes: str | None = None
+
+    # Session-tracking fields — apply to any session type (strength or
+    # activity), unlike the activity-only block below. ``tags`` replaces the
+    # whole list when supplied; the 1–10 ratings can be revised after the fact.
+    tags: list[str] | None = None
+    pre_workout_fuel: str | None = None
+    energy_level: int | None = Field(default=None, ge=1, le=10)
+    workout_intensity: int | None = Field(default=None, ge=1, le=10)
 
     # Activity-detail fields — rejected (400) if the session isn't
     # session_type == 'activity'.
@@ -316,5 +342,9 @@ class WorkoutSummary(BaseModel):
     total_volume: float = Field(
         default=0.0, description="Sum of reps*weight over completed working sets"
     )
+    # Session-tracking summary bits surfaced on the history row.
+    tags: list[str] = Field(default_factory=list)
+    energy_level: int | None = None
+    workout_intensity: int | None = None
     # Compact activity facts for the history row (None otherwise).
     activity: ActivityDetailOut | None = None

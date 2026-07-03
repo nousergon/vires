@@ -230,6 +230,23 @@ class WorkoutSession(Base):
     started_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
     ended_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Free-text labels for the session — a mix of reusable tags ("push day",
+    # "fasted") and one-off custom inputs. Stored as a JSON list of strings so a
+    # user can coin a new tag inline without a lookup table. Empty list => none.
+    tags: Mapped[list] = mapped_column(JSON, default=list)
+    # What was eaten/drunk/supplemented before training (food, drink, caffeine,
+    # creatine, ...). Free text — kept as one field rather than a structured
+    # intake log, which is out of scope for this tracker.
+    pre_workout_fuel: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # End-of-workout self-report on a 1–10 scale, prompted when the session is
+    # finished. ``energy_level`` = how the body felt (readiness);
+    # ``workout_intensity`` = how hard the session was (RPE-like, whole-session).
+    # Named ``workout_intensity`` (not ``intensity``) to stay distinct from the
+    # activity load's coarse ``intensity`` (light/moderate/hard) on the 1:1
+    # ``ActivityDetail`` row. Both nullable — a session finished before the
+    # prompt existed, or dismissed, simply has none.
+    energy_level: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    workout_intensity: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Which routine this session was started from (nullable => empty/ad-hoc workout).
     template_id: Mapped[int | None] = mapped_column(
         ForeignKey("workout_templates.id"), nullable=True

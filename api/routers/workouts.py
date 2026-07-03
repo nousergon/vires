@@ -33,6 +33,7 @@ from api.schemas.workout import (
     SetIn,
     SetOut,
     SetUpdate,
+    WorkoutFinish,
     WorkoutSessionOut,
     WorkoutSessionUpdate,
     WorkoutStart,
@@ -156,6 +157,10 @@ def _session_out(db: Session, ident: Identity, ws: WorkoutSession) -> WorkoutSes
         started_at=ws.started_at,
         ended_at=ws.ended_at,
         notes=ws.notes,
+        tags=ws.tags or [],
+        pre_workout_fuel=ws.pre_workout_fuel,
+        energy_level=ws.energy_level,
+        workout_intensity=ws.workout_intensity,
         template_id=ws.template_id,
         exercises=[_se_out(db, ident, se) for se in ws.exercises],
         activity=_activity_out(ws.activity_detail),
@@ -247,6 +252,8 @@ def start_workout(
         user_id=ident.user_id,
         name=name,
         started_at=_now(),
+        tags=body.tags or [],
+        pre_workout_fuel=body.pre_workout_fuel,
         template_id=body.template_id,
         exercises=exercises,
     )
@@ -423,6 +430,9 @@ def list_workouts(
                 exercise_count=len(ws.exercises),
                 set_count=set_count,
                 total_volume=round(volume, 2),
+                tags=ws.tags or [],
+                energy_level=ws.energy_level,
+                workout_intensity=ws.workout_intensity,
                 activity=_activity_out(ws.activity_detail),
             )
         )
@@ -472,6 +482,15 @@ def update_workout(
         ws.ended_at = data["ended_at"]
     if "notes" in data:
         ws.notes = data["notes"]
+    # Session-tracking fields — valid on any session type.
+    if "tags" in data and data["tags"] is not None:
+        ws.tags = data["tags"]
+    if "pre_workout_fuel" in data:
+        ws.pre_workout_fuel = data["pre_workout_fuel"]
+    if "energy_level" in data:
+        ws.energy_level = data["energy_level"]
+    if "workout_intensity" in data:
+        ws.workout_intensity = data["workout_intensity"]
 
     ad = ws.activity_detail
     if ad is not None:
@@ -600,10 +619,20 @@ def materialize_occurrence(
 @router.post("/{session_id}/finish", response_model=WorkoutSessionOut)
 def finish_workout(
     session_id: int,
+    body: WorkoutFinish | None = None,
     db: Session = Depends(get_db),
     ident: Identity = Depends(current_identity),
 ) -> WorkoutSessionOut:
+    """Close out a session, optionally recording the end-of-workout 1–10
+    energy/intensity self-report. The ratings are applied whenever supplied
+    (even on a re-finish of an already-closed session, so a skipped prompt can
+    be filled in later), but ``ended_at`` is only stamped once."""
     ws = _get_session(db, session_id, ident)
+    if body is not None:
+        if body.energy_level is not None:
+            ws.energy_level = body.energy_level
+        if body.workout_intensity is not None:
+            ws.workout_intensity = body.workout_intensity
     if ws.ended_at is None:
         ws.ended_at = _now()
         db.commit()  # the workout log is the primary deliverable — land it first
@@ -612,6 +641,10 @@ def finish_workout(
         # autoregulation is secondary to recording the workout, so it must never
         # fail a completed session (see _maybe_autoregulate).
         _maybe_autoregulate(db, ident, ws)
+    else:
+        # Already closed — just persist any ratings supplied on this call.
+        db.commit()
+        db.refresh(ws)
     return _session_out(db, ident, ws)
 
 

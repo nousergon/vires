@@ -226,6 +226,7 @@ function SessionsView() {
         {detail && (
           <div className="space-y-4">
             <p className="text-sm text-slate-400">{new Date(detail.started_at).toLocaleString()}</p>
+            <SessionTracking detail={detail} />
             {detail.session_type === 'activity' && detail.activity && (
               <dl className="grid grid-cols-2 gap-3 text-sm">
                 <div>
@@ -338,6 +339,57 @@ function SessionsView() {
         )}
       </Sheet>
     </>
+  )
+}
+
+// Read-only recap of a session's tracking context: tags, pre-workout fuel, and
+// the end-of-workout 1–10 energy/intensity self-report. Renders nothing when the
+// session carries none of these.
+function SessionTracking({ detail }: { detail: WorkoutSession }) {
+  const hasRatings = detail.energy_level != null || detail.workout_intensity != null
+  if (
+    detail.tags.length === 0 &&
+    !detail.pre_workout_fuel &&
+    !hasRatings
+  )
+    return null
+  return (
+    <div className="space-y-3">
+      {detail.tags.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {detail.tags.map((t) => (
+            <span
+              key={t}
+              className="rounded-full border border-amber-600/50 bg-amber-900/30 px-2.5 py-0.5 text-xs text-amber-200"
+            >
+              {t}
+            </span>
+          ))}
+        </div>
+      )}
+      {detail.pre_workout_fuel && (
+        <div>
+          <div className="text-xs uppercase tracking-wide text-slate-500">Pre-workout fuel</div>
+          <p className="text-sm text-slate-200">{detail.pre_workout_fuel}</p>
+        </div>
+      )}
+      {hasRatings && (
+        <dl className="grid grid-cols-2 gap-3 text-sm">
+          <div>
+            <dt className="text-xs uppercase tracking-wide text-slate-500">Energy</dt>
+            <dd className="text-slate-200">
+              {detail.energy_level != null ? `${detail.energy_level} / 10` : '—'}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs uppercase tracking-wide text-slate-500">Intensity</dt>
+            <dd className="text-slate-200">
+              {detail.workout_intensity != null ? `${detail.workout_intensity} / 10` : '—'}
+            </dd>
+          </div>
+        </dl>
+      )}
+    </div>
   )
 }
 

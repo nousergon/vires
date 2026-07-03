@@ -235,6 +235,32 @@ def test_start_planned_seeds_session_from_prescription_and_links(client):
     assert got["session_id"] == ses["id"]
 
 
+def test_completing_planned_on_a_different_day_moves_marker_to_that_day(client):
+    # Doing Thursday's planned workout on Friday should show it on Friday and
+    # clear the Thursday marker (the day it actually happened wins). The stored
+    # scheduled_date is intentionally left in place — only the calendar marker
+    # follows the fulfilling session's date.
+    tpl = _routine(client)
+    past = "2026-07-01"  # a past scheduled day; starting it completes it "now"
+    pw = client.post(
+        "/api/plan/planned",
+        json={"scheduled_date": past, "template_id": tpl["id"]},
+    ).json()
+    ses = client.post(f"/api/plan/planned/{pw['id']}/start").json()
+    today = ses["started_at"][:10]  # UTC date the session was actually started
+    assert today != past  # sanity: the completion day differs from the plan day
+
+    cal = client.get(
+        "/api/plan/calendar", params={"start": past, "end": today}
+    ).json()
+    planned_dates = [e["date"] for e in cal if e["kind"] == "planned"]
+    assert past not in planned_dates  # old day no longer marked
+    assert today in planned_dates  # planned marker follows to the completion day
+    # and the fulfilling session is on the completion day too
+    session_dates = [e["date"] for e in cal if e["kind"] == "session"]
+    assert today in session_dates
+
+
 def test_delete_session_started_from_plan_detaches_and_reverts(client):
     # Regression: deleting a session that fulfilled a planned workout used to hit
     # the planned_workouts.session_id FK (500) and silently fail in the UI.
