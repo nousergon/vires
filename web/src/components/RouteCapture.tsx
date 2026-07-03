@@ -190,6 +190,10 @@ export default function RouteCapture({
 
         {mode === 'gpx' && (
           <div className="space-y-2">
+            <p className="text-xs text-slate-500">
+              Export a GPX from CalTopo, Gaia GPS, AllTrails (activity → download route), Garmin
+              Connect, or Apple Health and drop it here.
+            </p>
             <input
               type="file"
               accept=".gpx,application/gpx+xml,text/xml"
