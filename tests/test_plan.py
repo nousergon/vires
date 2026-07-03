@@ -143,6 +143,80 @@ def test_calendar_objective_clipped_to_window(client):
     assert not any(c["kind"] in ("objective", "objective_block") for c in cal)
 
 
+# --------------------------------------------------------------------------- #
+# Merged athletic-calendar events on /plan/calendar (formerly a separate
+# /calendar-events/window endpoint — merge_calendar_events_into_activity).
+# --------------------------------------------------------------------------- #
+def test_calendar_feed_virtual_occurrence_and_dedup_against_real_row(client):
+    template = client.post(
+        "/api/workouts/activity",
+        json={
+            "name": "Tuesday league",
+            "template_key": "league_game",
+            "regions": "full",
+            "intensity": "hard",
+            "recurrence": "weekly",
+            "started_at": "2026-08-04T18:00:00Z",
+        },
+    ).json()
+    cal = _cal(client, "2026-08-01", "2026-08-31")
+    league = sorted((c for c in cal if c["id"] == template["id"]), key=lambda c: c["date"])
+    dates = [c["date"] for c in league]
+    assert dates == ["2026-08-04", "2026-08-11", "2026-08-18", "2026-08-25"]
+    # the anchor date is the real row (not virtual); every later occurrence
+    # in-window is a synthesized, never-persisted projection
+    assert [c["virtual"] for c in league] == [False, True, True, True]
+    assert all(c["session_type"] == "activity" for c in league)
+
+
+def test_calendar_feed_materialized_occurrence_stops_being_virtual(client):
+    template = client.post(
+        "/api/workouts/activity",
+        json={
+            "name": "Tuesday league",
+            "regions": "full",
+            "intensity": "hard",
+            "recurrence": "weekly",
+            "started_at": "2026-08-04T18:00:00Z",
+        },
+    ).json()
+    materialized = client.post(
+        f"/api/workouts/{template['id']}/occurrences", json={"occurrence_date": "2026-08-11"}
+    ).json()
+    cal = _cal(client, "2026-08-01", "2026-08-31")
+    ids = (template["id"], materialized["id"])
+    league = sorted((c for c in cal if c["id"] in ids), key=lambda c: c["date"])
+    by_date = {c["date"]: c for c in league}
+    # 8/4 (anchor, real) and 8/11 (now materialized, real) are both non-virtual
+    # with distinct ids; 8/18 and 8/25 remain virtual, keyed by the template id.
+    assert by_date["2026-08-04"]["virtual"] is False
+    assert by_date["2026-08-04"]["id"] == template["id"]
+    assert by_date["2026-08-11"]["virtual"] is False
+    assert by_date["2026-08-11"]["id"] == materialized["id"]
+    assert by_date["2026-08-18"]["virtual"] is True
+    assert by_date["2026-08-18"]["id"] == template["id"]
+    # exactly one entry per date — no duplicate emission of 8/11
+    assert len(league) == 4
+
+
+def test_calendar_feed_future_activity_status_is_upcoming(client):
+    client.post(
+        "/api/workouts/activity",
+        json={
+            "name": "Mailbox Peak",
+            "template_key": "race",
+            "regions": "legs",
+            "intensity": "hard",
+            "started_at": "2026-09-12T14:00:00Z",
+        },
+    )
+    cal = _cal(client, "2026-09-01", "2026-09-30")
+    race = next(c for c in cal if c["name"] == "Mailbox Peak")
+    assert race["status"] == "upcoming"
+    assert race["session_type"] == "activity"
+    assert race["virtual"] is False
+
+
 def test_start_planned_seeds_session_from_prescription_and_links(client):
     tpl = _routine(client)
     pw = client.post(

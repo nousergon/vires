@@ -129,7 +129,7 @@ def _objective_block(obj_ctx: CoachObjectiveContext | None, today: date) -> dict
         block["events"] = [
             {
                 "name": e.name,
-                "type": e.type,
+                "template_key": e.template_key,
                 "sport": e.sport,
                 "date": e.occurrence_date.isoformat(),
                 "end_date": e.occurrence_end_date.isoformat()

@@ -5,7 +5,7 @@ tests/test_reschedule.py for that).
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 TODAY = date.today()
 
@@ -18,13 +18,15 @@ def _one_off(client, scheduled_date: date, name: str = "Lift") -> dict:
 
 def _hard_event(client, event_date: date, event_end_date: date | None = None) -> dict:
     return client.post(
-        "/api/calendar-events",
+        "/api/workouts/activity",
         json={
             "name": "Mailbox Peak",
-            "type": "recreation",
-            "event_date": event_date.isoformat(),
+            "template_key": "recreation_event",
+            "regions": "legs",
+            "intensity": "hard",
+            "duration_s": 21600,
+            "started_at": datetime.combine(event_date, datetime.min.time()).isoformat(),
             "event_end_date": event_end_date.isoformat() if event_end_date else None,
-            "load": {"regions": "legs", "intensity": "hard", "duration_min": 360},
         },
     ).json()
 
@@ -118,12 +120,14 @@ def test_hard_calendar_event_blocks_landing_on_or_adjacent_to_it(client):
 
 def test_moderate_calendar_event_does_not_block_landing(client):
     client.post(
-        "/api/calendar-events",
+        "/api/workouts/activity",
         json={
             "name": "Rec league game",
-            "type": "league",
-            "event_date": TODAY.isoformat(),
-            "load": {"regions": "legs", "intensity": "moderate", "duration_min": 60},
+            "template_key": "league_game",
+            "regions": "legs",
+            "intensity": "moderate",
+            "duration_s": 3600,
+            "started_at": datetime.combine(TODAY, datetime.min.time()).isoformat(),
         },
     )
     _one_off(client, TODAY - timedelta(days=1))

@@ -6,9 +6,9 @@ Covers ``api.services.reschedule.plan_reschedule_moves`` and
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
-from api.db.models import CalendarEvent, PlannedWorkout, Program
+from api.db.models import ActivityDetail, PlannedWorkout, Program, WorkoutSession
 from api.services.reschedule import (
     DEFAULT_HORIZON_DAYS,
     _hard_blocked_dates,
@@ -28,15 +28,23 @@ def _pw(id: int, scheduled_date: date, *, program: Program | None = None) -> Pla
 
 
 def _event(
-    event_date: date, intensity: str | None, *, event_end_date: date | None = None
-) -> CalendarEvent:
-    load = {"regions": "legs", "intensity": intensity, "duration_min": None} if intensity else None
-    return CalendarEvent(
-        event_date=event_date,
+    event_date: date, intensity: str, *, event_end_date: date | None = None
+) -> tuple[WorkoutSession, ActivityDetail]:
+    """An unclosed-out ('still a live constraint') activity row — the merged
+    equivalent of a CalendarEvent (formerly its own table); `intensity` is
+    always set now (no "no load tagged at all" state — ActivityDetail.intensity
+    is NOT NULL)."""
+    ws = WorkoutSession(
+        started_at=datetime.combine(event_date, datetime.min.time()),
+        session_type="activity",
+    )
+    ad = ActivityDetail(
+        regions="legs",
+        intensity=intensity,
         event_end_date=event_end_date,
         recurrence="none",
-        load=load,
     )
+    return (ws, ad)
 
 
 # --------------------------------------------------------------------------- #
@@ -122,12 +130,6 @@ def test_multiday_hard_event_buffer_wraps_whole_span():
 def test_moderate_event_imposes_no_buffer():
     event_day = TODAY + timedelta(days=2)
     events = [_event(event_day, "moderate")]
-    blocked = _hard_blocked_dates(events, TODAY - timedelta(days=1), TODAY + timedelta(days=13))
-    assert blocked == set()
-
-
-def test_event_with_no_load_imposes_no_buffer():
-    events = [_event(TODAY + timedelta(days=2), None)]
     blocked = _hard_blocked_dates(events, TODAY - timedelta(days=1), TODAY + timedelta(days=13))
     assert blocked == set()
 

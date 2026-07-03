@@ -15,7 +15,6 @@ from sqlalchemy.orm import Session
 from api.db.identity import Identity, get_or_create_settings
 from api.db.models import (
     ActivityDetail,
-    CalendarEvent,
     Constraint,
     Exercise,
     Objective,
@@ -24,7 +23,6 @@ from api.db.models import (
     WorkoutSession,
     WorkoutTemplate,
 )
-from api.services.calendar_events import expand_occurrences
 from api.services.coach.materialize import (
     ExerciseMeta,
     MaterializeContext,
@@ -45,6 +43,7 @@ from api.services.objective_focus import (
     milestones_for,
     pick_focus,
 )
+from api.services.recurrence import expand_occurrences
 from api.services.search import get_search_service
 
 # Cap the candidate pool so the grounding context stays compact.
@@ -204,33 +203,50 @@ def _build_event_ctxs(
 ) -> list[EventOccurrenceCtx]:
     """Athletic events (recurrence-expanded within the planning window) the coach
     must train *around* — the load-accounting axis (#33). Empty for users with no
-    events (the coach then behaves exactly as before)."""
-    events = db.scalars(
-        select(CalendarEvent)
+    events (the coach then behaves exactly as before).
+
+    Formerly a dedicated ``CalendarEvent`` query; now any ``ActivityDetail``
+    row not yet closed out (``ended_at IS NULL``) — a `CalendarEvent` row was
+    implicitly "a constraint forever" (it had no ``ended_at`` concept), and
+    that's the merged equivalent. An already-logged activity (``ended_at``
+    set) is history, not a forward constraint, and is excluded here — it
+    shows up instead in ``_build_recent_activities``.
+    """
+    rows = db.execute(
+        select(WorkoutSession, ActivityDetail)
+        .join(ActivityDetail, ActivityDetail.session_id == WorkoutSession.id)
         .where(
-            CalendarEvent.tenant_id == ident.tenant_id,
-            CalendarEvent.user_id == ident.user_id,
+            WorkoutSession.tenant_id == ident.tenant_id,
+            WorkoutSession.user_id == ident.user_id,
+            WorkoutSession.session_type == "activity",
+            WorkoutSession.ended_at.is_(None),
         )
-        .order_by(CalendarEvent.event_date)
+        .order_by(WorkoutSession.started_at)
     ).all()
-    if not events:
+    if not rows:
         return []
     window_start, window_end = _event_window(timeline, today)
     out: list[EventOccurrenceCtx] = []
-    for event in events:
-        occurrences = expand_occurrences(event, window_start, window_end)
+    for ws, ad in rows:
+        occurrences = expand_occurrences(
+            ws.started_at.date(), ad.event_end_date, ad.recurrence, window_start, window_end
+        )
         for occ_date, occ_end in occurrences[:_MAX_OCCURRENCES_PER_EVENT]:
             out.append(
                 EventOccurrenceCtx(
-                    name=event.name,
-                    type=event.type,
+                    name=ws.name or "Activity",
+                    template_key=ad.template_key,
                     occurrence_date=occ_date,
                     occurrence_end_date=occ_end,
-                    sport=event.sport,
-                    load=event.load,
-                    recurrence=event.recurrence,
-                    objective_id=event.objective_id,
-                    notes=event.notes,
+                    sport=ad.sport,
+                    load={
+                        "regions": ad.regions,
+                        "intensity": ad.intensity,
+                        "duration_min": ad.duration_s // 60 if ad.duration_s else None,
+                    },
+                    recurrence=ad.recurrence,
+                    objective_id=ad.objective_id,
+                    notes=ws.notes,
                 )
             )
     # Soonest first, and keep the list compact regardless of event count.
@@ -259,6 +275,12 @@ def _build_recent_activities(
             WorkoutSession.user_id == ident.user_id,
             WorkoutSession.session_type == "activity",
             WorkoutSession.started_at >= window_start,
+            # Closed-out (actuals recorded) only — since the CalendarEvent
+            # merge, a future/planned/not-yet-happened activity can also
+            # have started_at in this trailing window (e.g. logged
+            # "tomorrow"); that's an upcoming constraint (_build_event_ctxs),
+            # not load already absorbed.
+            WorkoutSession.ended_at.is_not(None),
         )
         .order_by(WorkoutSession.started_at.desc())
         .limit(_MAX_RECENT_ACTIVITIES)

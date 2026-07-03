@@ -19,8 +19,9 @@ class CalendarEntry(BaseModel):
     date: date
     id: int
     name: str | None = None
-    # session: 'completed' | 'in_progress'; planned: 'planned' | 'completed' | 'skipped';
-    # objective: 'peak' | 'event' (multi-day window day); objective_block: 'block'
+    # session: 'completed' | 'in_progress' | 'upcoming'; planned: 'planned' |
+    # 'completed' | 'skipped'; objective: 'peak' | 'event' (multi-day window
+    # day); objective_block: 'block'
     status: str
     program_id: int | None = None
     template_id: int | None = None
@@ -31,6 +32,14 @@ class CalendarEntry(BaseModel):
     # planned only: set when api.services.reschedule auto-moved this day forward
     # because it was missed — the date it moved FROM.
     rescheduled_from: date | None = None
+    # session only: 'strength' | 'activity' — lets the frontend distinguish a
+    # lift from a logged/planned activity within the same 'session' kind.
+    session_type: str | None = None
+    # session only: True for a synthesized weekly occurrence with no row of
+    # its own yet. `id` is the RECURRING TEMPLATE session's real id (not a
+    # fabricated id) — paired with `date`, that's what the frontend passes to
+    # POST /workouts/{id}/occurrences to materialize it.
+    virtual: bool = False
 
 
 class PlannedExerciseIn(BaseModel):

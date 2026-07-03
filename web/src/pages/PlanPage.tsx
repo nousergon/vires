@@ -4,7 +4,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   api,
   type CalendarEntry,
-  type CalendarEventOccurrence,
   type Objective,
   type PlannedExercise,
   type PlannedWorkout,
@@ -12,7 +11,6 @@ import {
 import { Button, EmptyState, PageTitle, Sheet, Spinner } from '../components/ui'
 import CoachSheet from '../components/CoachSheet'
 import ObjectiveSheet from '../components/ObjectiveSheet'
-import CalendarEventSheet from '../components/CalendarEventSheet'
 import ActivityForm from '../components/ActivityForm'
 import { useSettings } from '../lib/useSettings'
 import { ACTIVE_KEY } from './WorkoutPage'
@@ -38,21 +36,32 @@ export default function PlanPage() {
   const [objectiveSheet, setObjectiveSheet] = useState<{ open: boolean; id?: number; date?: string }>({
     open: false,
   })
-  // { open } with an optional id — id present = edit that calendar event, absent = add
-  // new (optionally seeded with the tapped day via `date`).
-  const [eventSheet, setEventSheet] = useState<{ open: boolean; id?: number; date?: string }>({
-    open: false,
-  })
-  // Log-an-activity sheet, optionally seeded with the tapped calendar day.
-  const [activitySheet, setActivitySheet] = useState<{ open: boolean; date?: string }>({
+  // Add/edit-activity sheet — id present = edit that session (via PATCH),
+  // absent = add new (optionally seeded with the tapped day via `date`). One
+  // sheet covers both a logged activity and a future/recurring/objective-
+  // anchored one (formerly a separate athletic-calendar event) — whether
+  // it's planned or happened is derived from date, not a separate flow.
+  const [activitySheet, setActivitySheet] = useState<{ open: boolean; id?: number; date?: string }>({
     open: false,
   })
   const [modifyProgram, setModifyProgram] = useState<{ id: number; name: string } | null>(null)
   const [movedBanner, setMovedBanner] = useState<PlannedWorkout[]>([])
 
   const openObjective = (id?: number, date?: string) => setObjectiveSheet({ open: true, id, date })
-  const openEvent = (id?: number, date?: string) => setEventSheet({ open: true, id, date })
-  const openActivity = (date?: string) => setActivitySheet({ open: true, date })
+  const openActivity = (id?: number, date?: string) => setActivitySheet({ open: true, id, date })
+
+  // Tapping a virtual (never-materialized) recurring occurrence turns it
+  // into a real, linked row first, then opens it for editing — a real id
+  // and a merely-projected one both end up going through the same sheet.
+  async function openActivityEntry(e: CalendarEntry) {
+    if (e.virtual) {
+      const ws = await api.materializeOccurrence(e.id, e.date)
+      qc.invalidateQueries({ queryKey: ['calendar'] })
+      openActivity(ws.id, e.date)
+    } else {
+      openActivity(e.id, e.date)
+    }
+  }
 
   const openCoach = (auto: boolean) => {
     setCoachAutoStart(auto)
@@ -88,31 +97,14 @@ export default function PlanPage() {
     queryFn: () => api.calendar(rangeStart, rangeEnd),
   })
 
-  // Athletic-calendar events (markers) — separate endpoint from objectives
-  // (bands); weekly recurrence is expanded server-side within [rangeStart, rangeEnd].
-  const { data: occurrences = [] } = useQuery({
-    queryKey: ['calendar-events-window', rangeStart, rangeEnd],
-    queryFn: () => api.calendarEventsWindow(rangeStart, rangeEnd),
-  })
-
   const byDate = useMemo(() => {
     const m = new Map<string, CalendarEntry[]>()
     entries.forEach((e) => m.set(e.date, [...(m.get(e.date) ?? []), e]))
     return m
   }, [entries])
 
-  const eventsByDate = useMemo(() => {
-    const m = new Map<string, CalendarEventOccurrence[]>()
-    occurrences.forEach((o) =>
-      m.set(o.occurrence_date, [...(m.get(o.occurrence_date) ?? []), o]),
-    )
-    return m
-  }, [occurrences])
-
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['calendar'] })
-    qc.invalidateQueries({ queryKey: ['calendar-events'] })
-    qc.invalidateQueries({ queryKey: ['calendar-events-window'] })
     qc.invalidateQueries({ queryKey: ['programs'] })
     qc.invalidateQueries({ queryKey: ['active-objective'] })
   }
@@ -153,7 +145,6 @@ export default function PlanPage() {
           month={month}
           today={today}
           byDate={byDate}
-          eventsByDate={eventsByDate}
           onPick={setSelected}
         />
       )}
@@ -165,20 +156,18 @@ export default function PlanPage() {
         onGenerate={() => openCoach(true)}
       />
 
-      <EventsSection onAdd={() => openEvent()} />
+      <EventsSection entries={entries} onEdit={openActivityEntry} onAdd={() => openActivity()} />
 
       <ProgramsSection onModify={setModifyProgram} onChanged={refresh} />
 
       <DaySheet
         date={selected}
         entries={selected ? byDate.get(isoDate(selected)) ?? [] : []}
-        occurrences={selected ? eventsByDate.get(isoDate(selected)) ?? [] : []}
         onClose={() => setSelected(null)}
         onChanged={refresh}
         onStarted={onStarted}
-        onEditEvent={(id) => openEvent(id)}
-        onAddEvent={() => (selected ? openEvent(undefined, isoDate(selected)) : openEvent())}
-        onAddActivity={() => (selected ? openActivity(isoDate(selected)) : openActivity())}
+        onEditActivity={openActivityEntry}
+        onAddActivity={() => (selected ? openActivity(undefined, isoDate(selected)) : openActivity())}
         onAddObjective={() => (selected ? openObjective(undefined, isoDate(selected)) : openObjective())}
       />
       <ObjectiveSheet
@@ -188,17 +177,12 @@ export default function PlanPage() {
         onClose={() => setObjectiveSheet({ open: false })}
         onSaved={refresh}
       />
-      <CalendarEventSheet
-        open={eventSheet.open}
-        eventId={eventSheet.id}
-        defaultDate={eventSheet.date}
-        onClose={() => setEventSheet({ open: false })}
-        onSaved={refresh}
-      />
       <ActivityForm
         open={activitySheet.open}
+        sessionId={activitySheet.id}
         defaultDate={activitySheet.date}
         onClose={() => setActivitySheet({ open: false })}
+        onSaved={refresh}
       />
       <CoachSheet
         open={coachOpen}
@@ -360,26 +344,31 @@ function objectiveDateLabel(iso: string, eventEnd?: string | null): string {
 }
 
 // --------------------------------------------------------------------------- //
-// Athletic-calendar events: constraints the coach trains AROUND (races, weekly
-// league games, trips, rehab windows) — distinct from Objectives, which are
-// goals the coach peaks TOWARD. Listed here as a flat upcoming list; they also
-// render as markers on the month grid above (see CalendarGrid / DaySheet).
-function EventsSection({ onAdd }: { onAdd: () => void }) {
-  const { data: events = [] } = useQuery({
-    queryKey: ['calendar-events'],
-    queryFn: api.listCalendarEvents,
-  })
-
-  const todayIso = isoDate(new Date())
-  const upcoming = events
-    .filter((e) => e.recurrence === 'weekly' || e.event_date >= todayIso)
-    .sort((a, b) => a.event_date.localeCompare(b.event_date))
+// Upcoming activities/events: constraints the coach trains AROUND (races,
+// weekly league games, trips, rehab windows) — distinct from Objectives,
+// which are goals the coach peaks TOWARD. Same 'session' kind as a logged
+// activity — filtered to status='upcoming' — so this is a discovery list
+// over the SAME feed the month grid renders, not a separate concept. Listed
+// here as a flat list; upcoming activities also render as markers on the
+// month grid above (see CalendarGrid / DaySheet).
+function EventsSection({
+  entries,
+  onEdit,
+  onAdd,
+}: {
+  entries: CalendarEntry[]
+  onEdit: (e: CalendarEntry) => void
+  onAdd: () => void
+}) {
+  const upcoming = entries
+    .filter((e) => e.kind === 'session' && e.session_type === 'activity' && e.status === 'upcoming')
+    .sort((a, b) => a.date.localeCompare(b.date))
 
   return (
     <div className="mt-6">
       <div className="mb-2 flex items-center justify-between">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
-          Athletic calendar
+          Upcoming activities
         </h2>
         <button className="text-sm text-amber-300 hover:text-amber-200" onClick={onAdd}>
           + Add
@@ -396,22 +385,19 @@ function EventsSection({ onAdd }: { onAdd: () => void }) {
       ) : (
         <div className="space-y-2">
           {upcoming.map((e) => (
-            <div
-              key={e.id}
-              className="flex items-center justify-between gap-2 rounded-xl border border-sky-700/40 bg-sky-900/15 p-3"
+            <button
+              key={`${e.id}-${e.date}`}
+              onClick={() => onEdit(e)}
+              className="flex w-full items-center justify-between gap-2 rounded-xl border border-sky-700/40 bg-sky-900/15 p-3 text-left"
             >
               <div className="min-w-0">
                 <div className="flex items-center gap-2 text-sm font-semibold text-sky-200">
                   <span>📍</span>
                   <span className="truncate">{e.name}</span>
                 </div>
-                <div className="mt-0.5 text-xs text-sky-300/70">
-                  {e.type}
-                  {e.recurrence === 'weekly' ? ' · weekly' : ` · ${e.event_date}`}
-                  {e.load && ` · ${e.load.regions}/${e.load.intensity}`}
-                </div>
+                <div className="mt-0.5 text-xs text-sky-300/70">{e.date}</div>
               </div>
-            </div>
+            </button>
           ))}
         </div>
       )}
@@ -485,14 +471,12 @@ function CalendarGrid({
   month,
   today,
   byDate,
-  eventsByDate,
   onPick,
 }: {
   weeks: Date[][]
   month: Date
   today: Date
   byDate: Map<string, CalendarEntry[]>
-  eventsByDate: Map<string, CalendarEventOccurrence[]>
   onPick: (d: Date) => void
 }) {
   return (
@@ -516,10 +500,15 @@ function CalendarGrid({
           const active = es.some((e) => e.kind === 'session' && e.status === 'in_progress')
           const peak = es.some((e) => e.kind === 'objective')
           const inBlock = es.some((e) => e.kind === 'objective_block')
-          // Athletic-calendar events (constraints) render as a distinct point
-          // MARKER — a small hollow ring badge — never the filled objective
-          // "band" background, so events and objectives stay visually distinct.
-          const eventCount = (eventsByDate.get(iso) ?? []).length
+          // Upcoming activities/events (constraints) render as a distinct
+          // point MARKER — a small hollow ring badge — never the filled
+          // objective "band" background, so events and objectives stay
+          // visually distinct. Same 'session' kind as a logged activity,
+          // filtered to status='upcoming' (covers both a materialized future
+          // row and a virtual not-yet-materialized occurrence).
+          const eventCount = es.filter(
+            (e) => e.kind === 'session' && e.session_type === 'activity' && e.status === 'upcoming',
+          ).length
           const isToday = sameDay(d, today)
           return (
             <button
@@ -614,8 +603,8 @@ function Legend() {
         <Dot className="bg-fuchsia-400" /> objective
       </span>
       <span className="flex items-center gap-1">
-        <span className="h-2 w-2 rounded-full border border-sky-400 bg-transparent" /> athletic
-        event
+        <span className="h-2 w-2 rounded-full border border-sky-400 bg-transparent" /> upcoming
+        activity
       </span>
     </div>
   )
@@ -625,23 +614,19 @@ function Legend() {
 function DaySheet({
   date,
   entries,
-  occurrences,
   onClose,
   onChanged,
   onStarted,
-  onEditEvent,
-  onAddEvent,
+  onEditActivity,
   onAddActivity,
   onAddObjective,
 }: {
   date: Date | null
   entries: CalendarEntry[]
-  occurrences: CalendarEventOccurrence[]
   onClose: () => void
   onChanged: () => void
   onStarted: (sessionId: number) => void
-  onEditEvent: (id: number) => void
-  onAddEvent: () => void
+  onEditActivity: (e: CalendarEntry) => void
   onAddActivity: () => void
   onAddObjective: () => void
 }) {
@@ -683,7 +668,11 @@ function DaySheet({
   }
 
   const planned = entries.filter((e) => e.kind === 'planned')
-  const sessions = entries.filter((e) => e.kind === 'session')
+  const sessions = entries.filter((e) => e.kind === 'session' && e.session_type !== 'activity')
+  // Activities — logged OR upcoming/planned/recurring (formerly a separate
+  // athletic-calendar event) — same 'session' kind, split out from strength
+  // sessions above purely for a distinct chip style, not a distinct concept.
+  const activities = entries.filter((e) => e.kind === 'session' && e.session_type === 'activity')
   // One objective chip per objective on this day: a peak/event marker wins over a
   // bare block day (a day can be both — the peak day of a block).
   const objectiveById = new Map<number, CalendarEntry>()
@@ -704,7 +693,7 @@ function DaySheet({
   return (
     <Sheet open={!!date} onClose={onClose} title={title}>
       <div className="space-y-4">
-        {entries.length === 0 && occurrences.length === 0 && (
+        {entries.length === 0 && (
           <EmptyState title="Nothing scheduled" hint="Schedule a routine below or ask the Coach." />
         )}
 
@@ -720,23 +709,29 @@ function DaySheet({
           </div>
         ))}
 
-        {/* Athletic-calendar events render as MARKER chips (point-in-time,
-            outlined) — visually distinct from the filled objective bands above. */}
-        {occurrences.map((o) => (
+        {/* Activities render as MARKER chips (point-in-time, outlined) —
+            visually distinct from the filled objective bands above. Covers a
+            logged activity AND a future/recurring/objective-anchored one
+            (formerly a separate athletic-calendar event) — same chip either
+            way, since whether it's planned or happened is just its date vs.
+            now. Tapping a virtual (never-materialized) occurrence
+            materializes it first (see onEditActivity in PlanPage). */}
+        {activities.map((e) => (
           <button
-            key={`e${o.event.id}`}
-            onClick={() => onEditEvent(o.event.id)}
+            key={`e${e.id}-${e.date}`}
+            onClick={() => onEditActivity(e)}
             className="block w-full rounded-xl border border-sky-700/40 bg-sky-900/10 p-3 text-left"
           >
             <div className="flex items-center gap-2 text-sm font-semibold text-sky-200">
               <span className="h-2 w-2 shrink-0 rounded-full border border-sky-400 bg-transparent" />
-              <span className="truncate">{o.event.name}</span>
+              <span className="truncate">{e.name || 'Activity'}</span>
             </div>
             <div className="mt-0.5 text-xs text-sky-300/70">
-              {o.event.type}
-              {o.event.recurrence === 'weekly' && ' · weekly'}
-              {o.event.load && ` · ${o.event.load.regions}/${o.event.load.intensity}`}
-              {o.event.load?.duration_min ? ` · ${o.event.load.duration_min}min` : ''}
+              {e.status === 'completed'
+                ? 'logged'
+                : e.status === 'upcoming'
+                  ? 'upcoming'
+                  : 'needs logging'}
             </div>
           </button>
         ))}
@@ -746,7 +741,7 @@ function DaySheet({
             onClick={onAddActivity}
             className="flex-1 rounded-xl border border-dashed border-slate-700 p-2.5 text-center text-xs text-slate-300 hover:bg-slate-800/40"
           >
-            🏃 Log activity
+            🏃 Add activity
           </button>
           <button
             onClick={onAddObjective}
@@ -755,13 +750,6 @@ function DaySheet({
             🎯 New objective
           </button>
         </div>
-
-        <button
-          onClick={onAddEvent}
-          className="block w-full rounded-xl border border-dashed border-sky-800/60 p-2.5 text-center text-xs text-sky-300/80 hover:bg-sky-900/10"
-        >
-          + Add athletic event on this day
-        </button>
 
         {planned.map((e) => (
           <PlannedCard

@@ -13,8 +13,6 @@ function mockEmpty() {
   vi.spyOn(api, 'listTemplates').mockResolvedValue([])
   vi.spyOn(api, 'activeObjective').mockResolvedValue(makeActiveObjective())
   vi.spyOn(api, 'listObjectives').mockResolvedValue([])
-  vi.spyOn(api, 'calendarEventsWindow').mockResolvedValue([])
-  vi.spyOn(api, 'listCalendarEvents').mockResolvedValue([])
   vi.spyOn(api, 'rescheduleMissed').mockResolvedValue([])
 }
 
@@ -196,43 +194,37 @@ describe('PlanPage', () => {
     expect(startSpy).not.toHaveBeenCalled() // reviewed, NOT started
   })
 
-  it('renders an athletic-calendar event as a marker distinct from objectives', async () => {
+  it('renders an upcoming activity as a marker distinct from objectives', async () => {
     mockEmpty()
-    const iso = isoDate(new Date())
-    vi.spyOn(api, 'calendarEventsWindow').mockResolvedValue([
+    const iso = isoDate(new Date(Date.now() + 7 * 864e5)) // a week out — safely "upcoming"
+    vi.spyOn(api, 'calendar').mockResolvedValue([
       {
-        event: {
-          id: 3,
-          name: 'Tuesday league game',
-          sport: 'soccer',
-          type: 'league',
-          event_date: iso,
-          event_end_date: null,
-          recurrence: 'weekly',
-          load: { regions: 'legs', intensity: 'hard', duration_min: 90 },
-          notes: null,
-          objective_id: null,
-          created_at: '',
-          updated_at: '',
-        },
-        occurrence_date: iso,
-        occurrence_end_date: null,
+        kind: 'session',
+        date: iso,
+        id: 3,
+        name: 'Tuesday league game',
+        status: 'upcoming',
+        exercise_count: 0,
+        session_type: 'activity',
+        virtual: true,
       },
     ])
     renderWithProviders(<PlanPage />)
-    // the legend documents the distinct event marker
-    expect(await screen.findByText(/athletic event/)).toBeInTheDocument()
-    // tapping the day surfaces the event as a marker chip (not a fuchsia band)
-    fireEvent.click(await screen.findByLabelText(iso))
+    // the legend documents the distinct upcoming-activity marker
+    expect(await screen.findByText(/upcoming\s*activity/)).toBeInTheDocument()
+    // it also surfaces in the flat "Upcoming activities" list
     expect(await screen.findByText('Tuesday league game')).toBeInTheDocument()
-    expect(screen.getByText(/league · weekly · legs\/hard · 90min/)).toBeInTheDocument()
+    // tapping the day surfaces the activity as a marker chip (not a fuchsia band)
+    fireEvent.click(await screen.findByLabelText(iso))
+    expect(await screen.findAllByText('Tuesday league game')).not.toHaveLength(0)
+    expect(screen.getByText('upcoming')).toBeInTheDocument()
   })
 
-  it('opens the new-event sheet from the Athletic calendar section', async () => {
+  it('opens the add-activity sheet from the Upcoming activities section', async () => {
     mockEmpty()
     renderWithProviders(<PlanPage />)
     fireEvent.click(await screen.findByText(/Add a race, league game, trip/))
-    expect(await screen.findByText('📅 New event')).toBeInTheDocument()
+    expect(await screen.findByText('Add activity')).toBeInTheDocument()
   })
 
   it('shows the reschedule banner and invalidates the calendar when a workout moves', async () => {
