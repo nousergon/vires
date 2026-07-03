@@ -211,6 +211,7 @@ describe('ActivityForm', () => {
           ],
         },
       ],
+      provider_ok: true,
     })
     // 8046 m ⇒ 5 mi.
     vi.spyOn(api, 'measureRoute').mockResolvedValue({

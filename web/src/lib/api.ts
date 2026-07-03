@@ -600,7 +600,9 @@ export const api = {
     req<WorkoutSession>('/workouts/activity', { method: 'POST', body: JSON.stringify(body) }),
   // route derivation — all three feed the same editable activity route fields
   searchTrails: (q: string) =>
-    req<{ candidates: TrailCandidate[] }>(`/routes/search?q=${encodeURIComponent(q)}`),
+    req<{ candidates: TrailCandidate[]; provider_ok: boolean }>(
+      `/routes/search?q=${encodeURIComponent(q)}`,
+    ),
   measureRoute: (points: RoutePoint[]) =>
     req<RouteStats>('/routes/measure', { method: 'POST', body: JSON.stringify({ points }) }),
   importGpx: (gpxText: string) =>

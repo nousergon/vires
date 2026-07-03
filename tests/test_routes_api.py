@@ -42,25 +42,65 @@ def test_measure_rejects_single_point(client):
     assert r.status_code == 422  # min_length=2
 
 
-def test_search_returns_candidates(client, monkeypatch):
+def _patch_search(monkeypatch, points):
     monkeypatch.setattr(
         overpass,
         "search_trails",
-        lambda q, **kw: [
-            overpass.TrailCandidate(
-                name="Mailbox Peak Trail",
-                osm_id=42,
-                points=[GeoPoint(47.60, -121.67), GeoPoint(47.62, -121.66)],
-            )
-        ],
+        lambda q, **kw: overpass.TrailSearchResult(
+            candidates=[
+                overpass.TrailCandidate(name="Mailbox Peak Trail", osm_id=42, points=points)
+            ],
+            provider_ok=True,
+        ),
     )
+
+
+def test_search_returns_candidates(client, monkeypatch):
+    _patch_search(monkeypatch, [GeoPoint(47.60, -121.67), GeoPoint(47.62, -121.66)])
+    # DEM unavailable (uphill orientation degrades to stitched order) — no network.
+    monkeypatch.setattr(elevation, "fill_elevations", lambda pts, **kw: pts)
     r = client.get("/api/routes/search", params={"q": "Mailbox Peak"})
     assert r.status_code == 200
-    cands = r.json()["candidates"]
+    out = r.json()
+    assert out["provider_ok"] is True
+    cands = out["candidates"]
     assert len(cands) == 1
     assert cands[0]["name"] == "Mailbox Peak Trail"
     assert cands[0]["distance_m"] > 0
     assert len(cands[0]["points"]) == 2
+
+
+def test_search_orients_candidates_uphill(client, monkeypatch):
+    # Candidate arrives summit-first; the endpoint DEM check must flip it so
+    # the prefill measures ascent, not descent (~0 gain).
+    _patch_search(monkeypatch, [GeoPoint(47.60, -121.67), GeoPoint(47.62, -121.66)])
+
+    def _fill(pts, **kw):
+        # First endpoint high (summit), second low (trailhead).
+        return [
+            GeoPoint(lat=pts[0].lat, lon=pts[0].lon, ele_m=1450.0),
+            GeoPoint(lat=pts[1].lat, lon=pts[1].lon, ele_m=250.0),
+        ]
+
+    monkeypatch.setattr(elevation, "fill_elevations", _fill)
+    r = client.get("/api/routes/search", params={"q": "Mailbox Peak"})
+    pts = r.json()["candidates"][0]["points"]
+    assert pts[0]["lat"] == 47.62  # low end now first
+    assert pts[-1]["lat"] == 47.60
+
+
+def test_search_surfaces_provider_outage(client, monkeypatch):
+    # A provider outage must be distinguishable from "OSM has no such trail" —
+    # the client shows retry copy instead of a misleading no-match message.
+    monkeypatch.setattr(elevation, "fill_elevations", lambda pts, **kw: pts)
+    monkeypatch.setattr(
+        overpass,
+        "search_trails",
+        lambda q, **kw: overpass.TrailSearchResult(candidates=[], provider_ok=False),
+    )
+    r = client.get("/api/routes/search", params={"q": "Mailbox Peak"})
+    assert r.status_code == 200
+    assert r.json() == {"candidates": [], "provider_ok": False}
 
 
 def test_search_short_query_rejected(client):
