@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type FocusEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   api,
@@ -6,6 +6,8 @@ import {
   type ExerciseRecords,
   type RecordMetric,
   type RecordWindow,
+  type SessionExercise,
+  type SetEntry,
   type WorkoutSession,
 } from '../lib/api'
 import { useSettings } from '../lib/useSettings'
@@ -13,6 +15,8 @@ import { fmtClock } from '../lib/timer'
 import { fmtDistance, fmtElevation, fmtLoad, fmtPack } from '../lib/units'
 import type { WeightUnit } from '../lib/api'
 import { Button, Card, EmptyState, PageTitle, Sheet, Spinner } from '../components/ui'
+
+const selectOnFocus = (e: FocusEvent<HTMLInputElement>) => e.currentTarget.select()
 
 // One-line summary of an activity's headline facts. A route-capable entry
 // with a distance leads with pack (if any)/distance/load; everything else
@@ -67,9 +71,15 @@ function SessionsView() {
     queryFn: api.listWorkouts,
   })
   const [detail, setDetail] = useState<WorkoutSession | null>(null)
+  const [editingSets, setEditingSets] = useState(false)
   const [selecting, setSelecting] = useState(false)
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [busy, setBusy] = useState(false)
+
+  async function refreshDetail(id: number) {
+    setDetail(await api.getWorkout(id))
+    refresh()
+  }
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['workouts'] })
@@ -205,7 +215,14 @@ function SessionsView() {
         </div>
       )}
 
-      <Sheet open={!!detail} onClose={() => setDetail(null)} title={detail?.name || 'Workout'}>
+      <Sheet
+        open={!!detail}
+        onClose={() => {
+          setDetail(null)
+          setEditingSets(false)
+        }}
+        title={detail?.name || 'Workout'}
+      >
         {detail && (
           <div className="space-y-4">
             <p className="text-sm text-slate-400">{new Date(detail.started_at).toLocaleString()}</p>
@@ -265,21 +282,46 @@ function SessionsView() {
                 )}
               </dl>
             )}
+            {detail.exercises.length > 0 && (
+              <div className="flex justify-end">
+                <button
+                  className="text-sm text-amber-300 hover:text-amber-200"
+                  onClick={() => setEditingSets((v) => !v)}
+                >
+                  {editingSets ? 'Done editing' : 'Edit sets'}
+                </button>
+              </div>
+            )}
             {detail.exercises.map((se) => (
               <div key={se.id}>
                 <h3 className="font-semibold text-slate-100">{se.exercise.name}</h3>
-                <ul className="mt-1 text-sm text-slate-300">
-                  {se.sets.map((s) => (
-                    <li key={s.id} className="flex gap-2">
-                      <span className="w-6 text-slate-500">{s.is_warmup ? 'W' : s.set_number}</span>
-                      <span>
-                        {s.weight ?? '—'} × {s.reps ?? '—'}
-                        {s.rpe ? ` @ RPE ${s.rpe}` : ''}
-                      </span>
-                    </li>
-                  ))}
-                  {se.sets.length === 0 && <li className="text-slate-500">no sets logged</li>}
-                </ul>
+                {editingSets ? (
+                  <div className="mt-1 space-y-1">
+                    {se.sets.map((s) => (
+                      <SetEditRow
+                        key={s.id}
+                        sessionId={detail.id}
+                        se={se}
+                        set={s}
+                        onSaved={() => refreshDetail(detail.id)}
+                      />
+                    ))}
+                    {se.sets.length === 0 && <p className="text-sm text-slate-500">no sets logged</p>}
+                  </div>
+                ) : (
+                  <ul className="mt-1 text-sm text-slate-300">
+                    {se.sets.map((s) => (
+                      <li key={s.id} className="flex gap-2">
+                        <span className="w-6 text-slate-500">{s.is_warmup ? 'W' : s.set_number}</span>
+                        <span>
+                          {s.weight ?? '—'} × {s.reps ?? '—'}
+                          {s.rpe ? ` @ RPE ${s.rpe}` : ''}
+                        </span>
+                      </li>
+                    ))}
+                    {se.sets.length === 0 && <li className="text-slate-500">no sets logged</li>}
+                  </ul>
+                )}
               </div>
             ))}
             <div className="border-t border-slate-800 pt-3">
@@ -296,6 +338,58 @@ function SessionsView() {
         )}
       </Sheet>
     </>
+  )
+}
+
+// Editable weight/reps for a set already logged in a finished workout — the
+// History-detail counterpart to WorkoutPage's in-workout SetRow, minus the
+// live-timer/mark-done affordances that don't apply to a closed session.
+function SetEditRow({
+  sessionId,
+  se,
+  set,
+  onSaved,
+}: {
+  sessionId: number
+  se: SessionExercise
+  set: SetEntry
+  onSaved: () => void
+}) {
+  const [weight, setWeight] = useState(set.weight?.toString() ?? '')
+  const [reps, setReps] = useState(set.reps?.toString() ?? '')
+
+  const save = async (patch: { weight?: number; reps?: number }) => {
+    await api.updateSet(sessionId, se.id, set.id, patch)
+    onSaved()
+  }
+
+  const cell =
+    'w-full min-w-0 rounded-lg bg-slate-800 px-2 py-1.5 text-center outline-none focus:ring-1 focus:ring-amber-500'
+
+  return (
+    <div className="grid grid-cols-[1.5rem_1fr_1fr] items-center gap-2">
+      <span className="text-slate-500">{set.is_warmup ? 'W' : set.set_number}</span>
+      <input
+        type="number"
+        inputMode="decimal"
+        aria-label={`${se.exercise.name} set ${set.set_number} weight`}
+        value={weight}
+        onFocus={selectOnFocus}
+        onChange={(e) => setWeight(e.target.value)}
+        onBlur={() => save({ weight: weight === '' ? undefined : Number(weight) })}
+        className={cell}
+      />
+      <input
+        type="number"
+        inputMode="numeric"
+        aria-label={`${se.exercise.name} set ${set.set_number} reps`}
+        value={reps}
+        onFocus={selectOnFocus}
+        onChange={(e) => setReps(e.target.value)}
+        onBlur={() => save({ reps: reps === '' ? undefined : Number(reps) })}
+        className={cell}
+      />
+    </div>
   )
 }
 
