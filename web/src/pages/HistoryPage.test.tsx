@@ -30,6 +30,9 @@ describe('HistoryPage', () => {
         exercise_count: 2,
         set_count: 6,
         total_volume: 1200,
+        tags: [],
+        energy_level: null,
+        workout_intensity: null,
         activity: null,
       },
     ])
@@ -51,6 +54,9 @@ describe('HistoryPage', () => {
         exercise_count: 0,
         set_count: 0,
         total_volume: 0,
+        tags: [],
+        energy_level: null,
+        workout_intensity: null,
         activity: makeActivityDetail({
           template_key: 'climbing_indoor_toprope',
           duration_s: 5400,
@@ -86,6 +92,9 @@ describe('HistoryPage', () => {
         exercise_count: 0,
         set_count: 0,
         total_volume: 0,
+        tags: [],
+        energy_level: null,
+        workout_intensity: null,
         activity: loadedHike,
       },
     ])
@@ -97,6 +106,10 @@ describe('HistoryPage', () => {
       started_at: '2026-06-28T13:00:00Z',
       ended_at: '2026-06-28T15:00:00Z',
       notes: null,
+      tags: [],
+      pre_workout_fuel: null,
+      energy_level: null,
+      workout_intensity: null,
       template_id: null,
       exercises: [],
       activity: loadedHike,
@@ -110,6 +123,31 @@ describe('HistoryPage', () => {
     expect(await screen.findByText('Pack')).toBeInTheDocument()
     expect(screen.getByText('Load')).toBeInTheDocument()
     expect(screen.getByText('Distance')).toBeInTheDocument()
+  })
+
+  it('shows tags, pre-workout fuel and energy/intensity in the detail sheet', async () => {
+    mockSettings()
+    vi.spyOn(api, 'listWorkouts').mockResolvedValue([
+      { id: 7, session_type: 'strength', name: 'Push Day', started_at: '2026-06-28T18:00:00Z', ended_at: '2026-06-28T19:00:00Z', exercise_count: 0, set_count: 0, total_volume: 0, tags: ['push'], energy_level: 7, workout_intensity: 9, activity: null },
+    ])
+    vi.spyOn(api, 'records').mockResolvedValue([])
+    vi.spyOn(api, 'getWorkout').mockResolvedValue(
+      makeSession({
+        id: 7,
+        name: 'Push Day',
+        exercises: [],
+        tags: ['push', 'fasted'],
+        pre_workout_fuel: 'black coffee + creatine',
+        energy_level: 7,
+        workout_intensity: 9,
+      }),
+    )
+    renderWithProviders(<HistoryPage />)
+    fireEvent.click(await screen.findByText('Push Day'))
+    expect(await screen.findByText('fasted')).toBeInTheDocument()
+    expect(screen.getByText('black coffee + creatine')).toBeInTheDocument()
+    expect(screen.getByText('7 / 10')).toBeInTheDocument()
+    expect(screen.getByText('9 / 10')).toBeInTheDocument()
   })
 
   it('switches to Records and shows per-exercise bests', async () => {
@@ -138,8 +176,8 @@ describe('HistoryPage', () => {
   it('selects workouts and bulk-deletes them', async () => {
     mockSettings()
     vi.spyOn(api, 'listWorkouts').mockResolvedValue([
-      { id: 1, session_type: 'strength', name: 'Test A', started_at: '2026-06-28T18:00:00Z', ended_at: '2026-06-28T19:00:00Z', exercise_count: 1, set_count: 3, total_volume: 100, activity: null },
-      { id: 2, session_type: 'strength', name: 'Test B', started_at: '2026-06-27T18:00:00Z', ended_at: '2026-06-27T19:00:00Z', exercise_count: 1, set_count: 3, total_volume: 100, activity: null },
+      { id: 1, session_type: 'strength', name: 'Test A', started_at: '2026-06-28T18:00:00Z', ended_at: '2026-06-28T19:00:00Z', exercise_count: 1, set_count: 3, total_volume: 100, tags: [], energy_level: null, workout_intensity: null, activity: null },
+      { id: 2, session_type: 'strength', name: 'Test B', started_at: '2026-06-27T18:00:00Z', ended_at: '2026-06-27T19:00:00Z', exercise_count: 1, set_count: 3, total_volume: 100, tags: [], energy_level: null, workout_intensity: null, activity: null },
     ])
     vi.spyOn(api, 'records').mockResolvedValue([])
     const del = vi.spyOn(api, 'deleteWorkout').mockResolvedValue(undefined)
@@ -157,12 +195,13 @@ describe('HistoryPage', () => {
   it('deletes a single workout from the detail sheet', async () => {
     mockSettings()
     vi.spyOn(api, 'listWorkouts').mockResolvedValue([
-      { id: 9, session_type: 'strength', name: 'Test C', started_at: '2026-06-28T18:00:00Z', ended_at: '2026-06-28T19:00:00Z', exercise_count: 0, set_count: 0, total_volume: 0, activity: null },
+      { id: 9, session_type: 'strength', name: 'Test C', started_at: '2026-06-28T18:00:00Z', ended_at: '2026-06-28T19:00:00Z', exercise_count: 0, set_count: 0, total_volume: 0, tags: [], energy_level: null, workout_intensity: null, activity: null },
     ])
     vi.spyOn(api, 'records').mockResolvedValue([])
     vi.spyOn(api, 'getWorkout').mockResolvedValue({
       id: 9, session_type: 'strength', name: 'Test C', started_at: '2026-06-28T18:00:00Z', ended_at: '2026-06-28T19:00:00Z',
-      notes: null, template_id: null, exercises: [], activity: null, recurrence_source_id: null,
+      notes: null, tags: [], pre_workout_fuel: null, energy_level: null, workout_intensity: null,
+      template_id: null, exercises: [], activity: null, recurrence_source_id: null,
     })
     const del = vi.spyOn(api, 'deleteWorkout').mockResolvedValue(undefined)
     vi.spyOn(window, 'confirm').mockReturnValue(true)
@@ -177,7 +216,7 @@ describe('HistoryPage', () => {
   it('edits a logged set weight/reps from the History detail sheet', async () => {
     mockSettings()
     vi.spyOn(api, 'listWorkouts').mockResolvedValue([
-      { id: 9, session_type: 'strength', name: 'Test D', started_at: '2026-06-28T18:00:00Z', ended_at: '2026-06-28T19:00:00Z', exercise_count: 1, set_count: 1, total_volume: 135, activity: null },
+      { id: 9, session_type: 'strength', name: 'Test D', started_at: '2026-06-28T18:00:00Z', ended_at: '2026-06-28T19:00:00Z', exercise_count: 1, set_count: 1, total_volume: 135, tags: [], energy_level: null, workout_intensity: null, activity: null },
     ])
     vi.spyOn(api, 'records').mockResolvedValue([])
     const session = makeSession({

@@ -193,10 +193,20 @@ def calendar(
         .order_by(PlannedWorkout.scheduled_date)
     ).all()
     for pw in planned:
+        # A planned day that's been fulfilled by a session is shown on the day
+        # the session actually happened, not its original scheduled_date — so
+        # doing Thursday's workout on Friday marks Friday and clears Thursday.
+        # scheduled_date itself is left untouched (it's load-bearing for the
+        # coach's week grid / replan cutover); only the calendar marker moves.
+        entry_date = pw.scheduled_date
+        if pw.session_id is not None:
+            linked = db.get(WorkoutSession, pw.session_id)
+            if linked is not None:
+                entry_date = linked.started_at.date()
         entries.append(
             CalendarEntry(
                 kind="planned",
-                date=pw.scheduled_date,
+                date=entry_date,
                 id=pw.id,
                 name=pw.name,
                 status=pw.status,

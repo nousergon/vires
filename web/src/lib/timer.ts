@@ -58,6 +58,13 @@ export function fireTimerAlert(prefs: TimerAlertPrefs, label = 'Timer done') {
   if (prefs.timer_notification) showNotification(label)
 }
 
+/** A short sound + vibration confirmation — used when a set is logged (no
+ * notification: the user is in-app tapping ✓, unlike a backgrounded timer). */
+export function firePing(prefs: Pick<TimerAlertPrefs, 'timer_sound' | 'timer_vibration'>) {
+  if (prefs.timer_sound) beep()
+  if (prefs.timer_vibration) vibrate()
+}
+
 /** Ask for notification permission (call when the user enables the toggle). */
 export async function requestNotificationPermission(): Promise<boolean> {
   if (typeof Notification === 'undefined') return false

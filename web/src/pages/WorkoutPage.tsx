@@ -2,11 +2,11 @@ import { type FocusEvent, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type SessionExercise, type SetEntry, type WorkoutSession } from '../lib/api'
-import { useCountdown, fmtClock, fireTimerAlert } from '../lib/timer'
+import { useCountdown, fmtClock, fireTimerAlert, firePing } from '../lib/timer'
 import { useWakeLock } from '../lib/wakeLock'
 import { schedulePush, cancelPush } from '../lib/push'
 import { useSettings } from '../lib/useSettings'
-import { Button, Card, EmptyState, PageTitle, Spinner } from '../components/ui'
+import { Button, Card, EmptyState, PageTitle, Sheet, Spinner } from '../components/ui'
 import ExercisePicker from '../components/ExercisePicker'
 import PlateCalculatorSheet from '../components/PlateCalculatorSheet'
 import ActivityForm from '../components/ActivityForm'
@@ -139,6 +139,7 @@ function ActiveWorkout({ id, onClear }: { id: number; onClear: () => void }) {
   const timer = useCountdown((label) => fireTimerAlert(settings, label))
   const [timerCtx, setTimerCtx] = useState<TimerCtx | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [finishOpen, setFinishOpen] = useState(false)
 
   // Keep the screen awake while a timer runs so the end alert reliably fires.
   useWakeLock(timer.running && settings.timer_keep_awake)
@@ -230,7 +231,8 @@ function ActiveWorkout({ id, onClear }: { id: number; onClear: () => void }) {
     onSuccess: invalidate,
   })
   const finish = useMutation({
-    mutationFn: () => api.finishWorkout(id),
+    mutationFn: (ratings?: { energy_level?: number; workout_intensity?: number }) =>
+      api.finishWorkout(id, ratings),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['workouts'] })
       onClear()
@@ -271,12 +273,14 @@ function ActiveWorkout({ id, onClear }: { id: number; onClear: () => void }) {
           <h1 className="text-2xl font-bold text-slate-100">{ws.name || 'Workout'}</h1>
           <Elapsed start={ws.started_at} />
         </div>
-        <Button onClick={() => finish.mutate()} disabled={finish.isPending}>
+        <Button onClick={() => setFinishOpen(true)} disabled={finish.isPending}>
           Finish
         </Button>
       </div>
 
-      <div className="space-y-4">
+      <SessionDetails session={ws} onChanged={invalidate} />
+
+      <div className="mt-4 space-y-4">
         {ws.exercises.map((se, i) => (
           <ExerciseBlock
             key={se.id}
@@ -313,8 +317,208 @@ function ActiveWorkout({ id, onClear }: { id: number; onClear: () => void }) {
         onClose={() => setPickerOpen(false)}
         onSelect={(ex) => addExercise.mutate(ex.id)}
       />
+
+      <FinishSheet
+        open={finishOpen}
+        pending={finish.isPending}
+        onClose={() => setFinishOpen(false)}
+        onFinish={(ratings) => finish.mutate(ratings)}
+      />
     </div>
   )
+}
+
+// Session-level tracking editor shown at the top of an active workout: freeform
+// tags (reusable + one-off custom inputs), what was eaten/drunk/supplemented
+// pre-workout, and an editable start time. Each change persists immediately via
+// PATCH /workouts/{id}.
+function SessionDetails({
+  session,
+  onChanged,
+}: {
+  session: WorkoutSession
+  onChanged: () => void
+}) {
+  const [tagDraft, setTagDraft] = useState('')
+  const [fuel, setFuel] = useState(session.pre_workout_fuel ?? '')
+
+  const save = async (body: Parameters<typeof api.updateWorkout>[1]) => {
+    await api.updateWorkout(session.id, body)
+    onChanged()
+  }
+
+  async function addTag() {
+    const t = tagDraft.trim()
+    if (!t || session.tags.includes(t)) {
+      setTagDraft('')
+      return
+    }
+    setTagDraft('')
+    await save({ tags: [...session.tags, t] })
+  }
+  async function removeTag(t: string) {
+    await save({ tags: session.tags.filter((x) => x !== t) })
+  }
+
+  return (
+    <Card className="mt-4">
+      <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Tags</div>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {session.tags.map((t) => (
+          <span
+            key={t}
+            className="inline-flex items-center gap-1 rounded-full border border-amber-600/50 bg-amber-900/30 px-2.5 py-0.5 text-xs text-amber-200"
+          >
+            {t}
+            <button
+              type="button"
+              aria-label={`Remove tag ${t}`}
+              className="text-amber-300/70 hover:text-amber-100"
+              onClick={() => removeTag(t)}
+            >
+              ✕
+            </button>
+          </span>
+        ))}
+        <input
+          type="text"
+          value={tagDraft}
+          placeholder="+ add tag"
+          onChange={(e) => setTagDraft(e.target.value)}
+          onBlur={addTag}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              addTag()
+            }
+          }}
+          className="min-w-[6rem] flex-1 rounded-lg bg-slate-800 px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-amber-500"
+        />
+      </div>
+
+      <label className="mt-3 block text-xs font-semibold uppercase tracking-wide text-slate-400">
+        Pre-workout food / drink / supps
+      </label>
+      <textarea
+        value={fuel}
+        rows={2}
+        placeholder="e.g. black coffee, 5g creatine, banana"
+        onChange={(e) => setFuel(e.target.value)}
+        onBlur={() => {
+          if ((fuel.trim() || null) !== (session.pre_workout_fuel ?? null))
+            save({ pre_workout_fuel: fuel.trim() || null })
+        }}
+        className="mt-1 w-full resize-none rounded-lg bg-slate-800 px-2.5 py-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+      />
+
+      <label className="mt-3 block text-xs font-semibold uppercase tracking-wide text-slate-400">
+        Start time
+      </label>
+      <input
+        type="datetime-local"
+        value={toLocalInput(session.started_at)}
+        onChange={(e) => {
+          const v = e.target.value
+          if (v) save({ started_at: new Date(v).toISOString() })
+        }}
+        className="mt-1 w-full rounded-lg bg-slate-800 px-2.5 py-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+      />
+    </Card>
+  )
+}
+
+// End-of-workout self-report prompt. Both ratings are optional — "Skip" finishes
+// without them; picking a number on either scale and tapping Finish records it.
+function FinishSheet({
+  open,
+  pending,
+  onClose,
+  onFinish,
+}: {
+  open: boolean
+  pending: boolean
+  onClose: () => void
+  onFinish: (ratings?: { energy_level?: number; workout_intensity?: number }) => void
+}) {
+  const [energy, setEnergy] = useState<number | null>(null)
+  const [intensity, setIntensity] = useState<number | null>(null)
+
+  const finish = () => {
+    const ratings: { energy_level?: number; workout_intensity?: number } = {}
+    if (energy != null) ratings.energy_level = energy
+    if (intensity != null) ratings.workout_intensity = intensity
+    onFinish(Object.keys(ratings).length ? ratings : undefined)
+  }
+
+  return (
+    <Sheet open={open} onClose={onClose} title="Finish workout">
+      <div className="space-y-5">
+        <RatingScale label="Energy level" hint="How did your body feel?" value={energy} onChange={setEnergy} />
+        <RatingScale
+          label="Workout intensity"
+          hint="How hard was this session?"
+          value={intensity}
+          onChange={setIntensity}
+        />
+        <div className="flex gap-2 pt-1">
+          <Button className="flex-1" onClick={finish} disabled={pending}>
+            {pending ? 'Finishing…' : 'Finish'}
+          </Button>
+          <Button variant="secondary" onClick={() => onFinish(undefined)} disabled={pending}>
+            Skip
+          </Button>
+        </div>
+      </div>
+    </Sheet>
+  )
+}
+
+// A 1–10 tap scale. `null` = not rated.
+function RatingScale({
+  label,
+  hint,
+  value,
+  onChange,
+}: {
+  label: string
+  hint: string
+  value: number | null
+  onChange: (v: number | null) => void
+}) {
+  return (
+    <div>
+      <div className="flex items-baseline justify-between">
+        <span className="text-sm font-semibold text-slate-100">{label}</span>
+        <span className="text-xs text-slate-500">{value == null ? hint : `${value} / 10`}</span>
+      </div>
+      <div className="mt-2 grid grid-cols-10 gap-1">
+        {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
+          <button
+            key={n}
+            type="button"
+            aria-label={`${label} ${n}`}
+            aria-pressed={value === n}
+            onClick={() => onChange(value === n ? null : n)}
+            className={`rounded-md py-2 text-xs font-semibold transition ${
+              value != null && n <= value
+                ? 'bg-amber-500 text-slate-950'
+                : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+            }`}
+          >
+            {n}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ISO timestamp -> value for a <input type="datetime-local"> (local wall time,
+// minute precision, no timezone suffix).
+function toLocalInput(iso: string): string {
+  const d = new Date(iso)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 function Elapsed({ start }: { start: string }) {
@@ -450,8 +654,12 @@ function ExerciseBlock({
   const template = gridTemplate(cols)
 
   const [restEnabled, setRestEnabled] = useFlag(`vires.restOn.${se.id}`, true)
-  const restSecs = se.rest_seconds ?? settings.default_rest_seconds
-  const [restInput, setRestInput] = useState(String(restSecs))
+  // Live rest value: seeded from the persisted rest_seconds but updated the
+  // instant the user edits the field, so completing a set right after a change
+  // uses the NEW rest (the persisted value + a refetch can lag behind a tap).
+  const persistedRest = se.rest_seconds ?? settings.default_rest_seconds
+  const [restSecs, setRestSecs] = useState(persistedRest)
+  const [restInput, setRestInput] = useState(String(persistedRest))
   const holdSecs = se.target_duration_seconds ?? 60
 
   const [plateCalcOpen, setPlateCalcOpen] = useState(false)
@@ -478,11 +686,26 @@ function ExerciseBlock({
 
   async function saveRest() {
     const secs = restInput === '' ? settings.default_rest_seconds : Number(restInput)
-    if (secs !== restSecs) {
+    setRestSecs(secs)
+    if (secs !== persistedRest) {
       await api.updateWorkoutExercise(session.id, se.id, { rest_seconds: secs })
       onChanged()
     }
   }
+
+  // Update all later sets in this exercise to the just-entered value — so
+  // filling in set 1's weight/reps/hold auto-populates the sets below it.
+  async function cascadeToLater(
+    afterSetNumber: number,
+    patch: { weight?: number; reps?: number; duration_seconds?: number },
+  ) {
+    const later = se.sets.filter((s) => s.set_number > afterSetNumber)
+    if (later.length === 0) return
+    await Promise.all(later.map((s) => api.updateSet(session.id, se.id, s.id, patch)))
+    onChanged()
+  }
+
+  const ping = () => firePing(settings)
 
   return (
     <Card>
@@ -554,7 +777,11 @@ function ExerciseBlock({
           value={restInput}
           disabled={!restEnabled}
           onFocus={selectOnFocus}
-          onChange={(e) => setRestInput(e.target.value)}
+          onChange={(e) => {
+            setRestInput(e.target.value)
+            const n = Number(e.target.value)
+            if (e.target.value !== '' && n > 0) setRestSecs(n) // keep the live value current
+          }}
           onBlur={saveRest}
           className="w-14 rounded bg-slate-800 px-1.5 py-0.5 text-center outline-none focus:ring-1 focus:ring-amber-500 disabled:opacity-40"
         />
@@ -590,6 +817,8 @@ function ExerciseBlock({
               restSecs={restSecs}
               restEnabled={restEnabled}
               runTimer={runTimer}
+              onCascade={cascadeToLater}
+              ping={ping}
               onChanged={onChanged}
             />
             {timerCtx?.seId === se.id && timerCtx.setId === s.id && (
@@ -699,6 +928,8 @@ function SetRow({
   restSecs,
   restEnabled,
   runTimer,
+  onCascade,
+  ping,
   onChanged,
 }: {
   sessionId: number
@@ -710,20 +941,43 @@ function SetRow({
   restSecs: number
   restEnabled: boolean
   runTimer: RunTimer
+  onCascade: (
+    afterSetNumber: number,
+    patch: { weight?: number; reps?: number; duration_seconds?: number },
+  ) => void
+  ping: () => void
   onChanged: () => void
 }) {
   const [weight, setWeight] = useState(set.weight?.toString() ?? '')
   const [reps, setReps] = useState(set.reps?.toString() ?? '')
   const [dur, setDur] = useState((set.duration_seconds ?? holdDefault).toString())
+  // Re-sync the displayed value when the row's set changes underneath us — e.g.
+  // an earlier set's edit cascaded a new weight/reps/hold down into this row.
+  useEffect(() => setWeight(set.weight?.toString() ?? ''), [set.weight])
+  useEffect(() => setReps(set.reps?.toString() ?? ''), [set.reps])
+  useEffect(() => setDur((set.duration_seconds ?? holdDefault).toString()), [set.duration_seconds, holdDefault])
   const done = !!set.completed_at
   const seconds = () => (dur === '' ? holdDefault : Number(dur))
 
   const save = (patch: { weight?: number; reps?: number; duration_seconds?: number }) =>
     api.updateSet(sessionId, seId, set.id, patch)
 
+  // Persist a single edited field, then cascade the new value into every later
+  // set of this exercise (auto-populate). Only cascades on an actual change.
+  async function commitField(
+    field: 'weight' | 'reps' | 'duration_seconds',
+    value: number | undefined,
+    prev: number | null,
+  ) {
+    await save({ [field]: value })
+    if (value !== undefined && value !== prev) onCascade(set.set_number, { [field]: value })
+  }
+
   // Persist whichever toggled-on fields the row carries, mark the set done, and
-  // start the rest countdown beneath this row.
-  async function markDone(nowDone: boolean) {
+  // start the rest countdown beneath this row. `silent` suppresses the set-done
+  // ping when the completion was itself triggered by a hold timer finishing
+  // (which already fired its own alert).
+  async function markDone(nowDone: boolean, silent = false) {
     const patch: {
       done: boolean
       weight?: number
@@ -734,14 +988,17 @@ function SetRow({
     if (cols.reps) patch.reps = reps === '' ? undefined : Number(reps)
     if (cols.timer) patch.duration_seconds = seconds()
     await api.updateSet(sessionId, seId, set.id, patch)
-    if (nowDone && restEnabled) runTimer('rest', seId, set.id, restSecs)
+    if (nowDone) {
+      if (!silent) ping() // audible + haptic confirmation that the set was logged
+      if (restEnabled) runTimer('rest', seId, set.id, restSecs)
+    }
     onChanged()
   }
 
   // ▶ : count the hold down, then log it done and roll into rest.
   function startHold() {
     runTimer('hold', seId, set.id, seconds(), () => {
-      markDone(true)
+      markDone(true, true) // hold timer already pinged at zero
     })
   }
 
@@ -762,7 +1019,9 @@ function SetRow({
           value={weight}
           onFocus={selectOnFocus}
           onChange={(e) => setWeight(e.target.value)}
-          onBlur={() => save({ weight: weight === '' ? undefined : Number(weight) })}
+          onBlur={() =>
+            commitField('weight', weight === '' ? undefined : Number(weight), set.weight)
+          }
           className={cell}
         />
       )}
@@ -773,7 +1032,7 @@ function SetRow({
           value={reps}
           onFocus={selectOnFocus}
           onChange={(e) => setReps(e.target.value)}
-          onBlur={() => save({ reps: reps === '' ? undefined : Number(reps) })}
+          onBlur={() => commitField('reps', reps === '' ? undefined : Number(reps), set.reps)}
           className={cell}
         />
       )}
@@ -785,7 +1044,7 @@ function SetRow({
             value={dur}
             onFocus={selectOnFocus}
             onChange={(e) => setDur(e.target.value)}
-            onBlur={() => save({ duration_seconds: seconds() })}
+            onBlur={() => commitField('duration_seconds', seconds(), set.duration_seconds)}
             className={cell}
           />
           <button

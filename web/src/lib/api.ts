@@ -182,6 +182,12 @@ export interface WorkoutSessionUpdate {
   started_at?: string
   ended_at?: string
   notes?: string | null
+  // Session-tracking fields — valid on any session type. `tags` replaces the
+  // whole list; the 1–10 ratings can be revised after finishing.
+  tags?: string[]
+  pre_workout_fuel?: string | null
+  energy_level?: number | null
+  workout_intensity?: number | null
   template_key?: string
   duration_s?: number | null
   regions?: LoadRegions
@@ -227,6 +233,13 @@ export interface WorkoutSession {
   started_at: string
   ended_at: string | null
   notes: string | null
+  // Free-text labels (reusable tags + one-off custom inputs).
+  tags: string[]
+  // Pre-workout food/drink/supplements, free text.
+  pre_workout_fuel: string | null
+  // End-of-workout 1–10 self-report (null until finished with a rating).
+  energy_level: number | null
+  workout_intensity: number | null
   template_id: number | null
   exercises: SessionExercise[]
   activity: ActivityDetail | null
@@ -244,6 +257,9 @@ export interface WorkoutSummary {
   exercise_count: number
   set_count: number
   total_volume: number
+  tags: string[]
+  energy_level: number | null
+  workout_intensity: number | null
   activity: ActivityDetail | null
 }
 
@@ -573,8 +589,12 @@ export const api = {
   deleteTemplate: (id: number) => req<void>(`/templates/${id}`, { method: 'DELETE' }),
 
   // workouts
-  startWorkout: (body: { template_id?: number | null; name?: string | null }) =>
-    req<WorkoutSession>('/workouts', { method: 'POST', body: JSON.stringify(body) }),
+  startWorkout: (body: {
+    template_id?: number | null
+    name?: string | null
+    tags?: string[]
+    pre_workout_fuel?: string | null
+  }) => req<WorkoutSession>('/workouts', { method: 'POST', body: JSON.stringify(body) }),
   listActivityTemplates: () => req<ActivityTemplate[]>('/workouts/activity-templates'),
   logActivity: (body: ActivityLogInput) =>
     req<WorkoutSession>('/workouts/activity', { method: 'POST', body: JSON.stringify(body) }),
@@ -597,7 +617,13 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ occurrence_date: occurrenceDate }),
     }),
-  finishWorkout: (id: number) => req<WorkoutSession>(`/workouts/${id}/finish`, { method: 'POST' }),
+  // Optionally records the end-of-workout 1–10 energy/intensity self-report;
+  // omit the body to just close the session out.
+  finishWorkout: (id: number, body?: { energy_level?: number; workout_intensity?: number }) =>
+    req<WorkoutSession>(`/workouts/${id}/finish`, {
+      method: 'POST',
+      body: body ? JSON.stringify(body) : undefined,
+    }),
   deleteWorkout: (id: number) => req<void>(`/workouts/${id}`, { method: 'DELETE' }),
   addWorkoutExercise: (sessionId: number, body: TemplateExerciseInput) =>
     req<SessionExercise>(`/workouts/${sessionId}/exercises`, {

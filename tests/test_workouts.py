@@ -248,3 +248,96 @@ def test_reorder_session_exercises_by_swapping_order_index(client):
 
 def test_workout_404(client):
     assert client.get("/api/workouts/99999999").status_code == 404
+
+
+# --------------------------------------------------------------------------- #
+# Per-workout tracking: tags (+ custom inputs), pre-workout fuel, and the
+# end-of-session 1–10 energy/intensity self-report.
+# --------------------------------------------------------------------------- #
+def test_start_workout_with_tags_and_fuel(client):
+    ws = client.post(
+        "/api/workouts",
+        json={
+            "name": "Push day",
+            "tags": ["push", "fasted", "6am garage"],
+            "pre_workout_fuel": "black coffee + 5g creatine",
+        },
+    ).json()
+    assert ws["tags"] == ["push", "fasted", "6am garage"]
+    assert ws["pre_workout_fuel"] == "black coffee + 5g creatine"
+    assert ws["energy_level"] is None and ws["workout_intensity"] is None
+    # Defaults when omitted.
+    bare = client.post("/api/workouts", json={"name": "Bare"}).json()
+    assert bare["tags"] == [] and bare["pre_workout_fuel"] is None
+
+
+def test_finish_records_energy_and_intensity(client):
+    ws = client.post("/api/workouts", json={"name": "Legs"}).json()
+    fin = client.post(
+        f"/api/workouts/{ws['id']}/finish",
+        json={"energy_level": 7, "workout_intensity": 9},
+    ).json()
+    assert fin["ended_at"] is not None
+    assert fin["energy_level"] == 7 and fin["workout_intensity"] == 9
+
+
+def test_finish_ratings_out_of_range_rejected(client):
+    ws = client.post("/api/workouts", json={"name": "X"}).json()
+    assert (
+        client.post(
+            f"/api/workouts/{ws['id']}/finish", json={"energy_level": 11}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post(
+            f"/api/workouts/{ws['id']}/finish", json={"workout_intensity": 0}
+        ).status_code
+        == 422
+    )
+
+
+def test_finish_without_body_still_closes_session(client):
+    ws = client.post("/api/workouts", json={"name": "NoRating"}).json()
+    fin = client.post(f"/api/workouts/{ws['id']}/finish").json()
+    assert fin["ended_at"] is not None
+    assert fin["energy_level"] is None and fin["workout_intensity"] is None
+
+
+def test_ratings_can_be_filled_in_after_finishing(client):
+    ws = client.post("/api/workouts", json={"name": "Later"}).json()
+    client.post(f"/api/workouts/{ws['id']}/finish")  # closed, no ratings
+    fin = client.post(
+        f"/api/workouts/{ws['id']}/finish",
+        json={"energy_level": 5, "workout_intensity": 6},
+    ).json()
+    assert fin["energy_level"] == 5 and fin["workout_intensity"] == 6
+
+
+def test_patch_session_tracking_fields(client):
+    ws = client.post("/api/workouts", json={"name": "Edit me"}).json()
+    patched = client.patch(
+        f"/api/workouts/{ws['id']}",
+        json={
+            "tags": ["deload"],
+            "pre_workout_fuel": "banana",
+            "energy_level": 8,
+            "workout_intensity": 4,
+        },
+    ).json()
+    assert patched["tags"] == ["deload"]
+    assert patched["pre_workout_fuel"] == "banana"
+    assert patched["energy_level"] == 8 and patched["workout_intensity"] == 4
+
+
+def test_tracking_fields_surface_in_history_list(client):
+    ws = client.post(
+        "/api/workouts", json={"name": "Traced", "tags": ["morning"]}
+    ).json()
+    client.post(
+        f"/api/workouts/{ws['id']}/finish",
+        json={"energy_level": 6, "workout_intensity": 7},
+    )
+    row = next(w for w in client.get("/api/workouts").json() if w["id"] == ws["id"])
+    assert row["tags"] == ["morning"]
+    assert row["energy_level"] == 6 and row["workout_intensity"] == 7
