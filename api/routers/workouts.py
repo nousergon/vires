@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import select
@@ -13,6 +13,7 @@ from api.config import get_settings
 from api.db.identity import Identity, current_identity, get_or_create_settings
 from api.db.models import (
     ActivityDetail,
+    Objective,
     PlannedWorkout,
     SessionExercise,
     SetEntry,
@@ -25,6 +26,7 @@ from api.schemas.workout import (
     ActivityDetailOut,
     ActivityLogIn,
     ActivityTemplateOut,
+    MaterializeOccurrenceIn,
     SessionExerciseIn,
     SessionExerciseOut,
     SessionExerciseUpdate,
@@ -32,6 +34,7 @@ from api.schemas.workout import (
     SetOut,
     SetUpdate,
     WorkoutSessionOut,
+    WorkoutSessionUpdate,
     WorkoutStart,
     WorkoutSummary,
 )
@@ -47,6 +50,13 @@ router = APIRouter(prefix="/workouts", tags=["workouts"])
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+def _as_aware_utc(dt: datetime) -> datetime:
+    """A client-supplied ``started_at`` may arrive naive (no offset) — treat
+    it as UTC, matching how ``UTCDateTime`` stores/reads every timestamp in
+    this app, so it can be safely compared against ``_now()``."""
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
 
 
 # --------------------------------------------------------------------------- #
@@ -131,6 +141,10 @@ def _activity_out(ad: ActivityDetail | None) -> ActivityDetailOut | None:
         terrain=ad.terrain,
         metabolic_cost_kj=ad.metabolic_cost_kj,
         source=ad.source,
+        sport=ad.sport,
+        event_end_date=ad.event_end_date,
+        recurrence=ad.recurrence,
+        objective_id=ad.objective_id,
     )
 
 
@@ -145,7 +159,14 @@ def _session_out(db: Session, ident: Identity, ws: WorkoutSession) -> WorkoutSes
         template_id=ws.template_id,
         exercises=[_se_out(db, ident, se) for se in ws.exercises],
         activity=_activity_out(ws.activity_detail),
+        recurrence_source_id=ws.recurrence_source_id,
     )
+
+
+def _require_owned_objective(db: Session, ident: Identity, objective_id: int) -> None:
+    o = db.get(Objective, objective_id)
+    if o is None or o.tenant_id != ident.tenant_id or o.user_id != ident.user_id:
+        raise HTTPException(404, "Objective not found")
 
 
 # --------------------------------------------------------------------------- #
@@ -254,14 +275,23 @@ def log_activity(
     db: Session = Depends(get_db),
     ident: Identity = Depends(current_identity),
 ) -> WorkoutSessionOut:
-    """Quick-log a completed activity — cross-training (climbing, swimming,
-    yoga, ...) or locomotion (walk/run/hike), optionally with a route and/or
-    a weighted pack.
+    """Log an activity — a completed cross-training/locomotion session, OR a
+    future/recurring/multi-day/objective-anchored one (what used to require
+    a separate ``CalendarEvent``). Optionally with a route and/or a weighted
+    pack.
 
     Tier 0: a coarse regions/intensity estimate (template-prefilled, always
     user-editable) rather than a bespoke schema per activity — see
-    ``ActivityDetail`` for why. The session is created already-finished; no
-    set-by-set flow and no double-progression autoregulation.
+    ``ActivityDetail`` for why. No set-by-set flow and no double-progression
+    autoregulation.
+
+    There is no "planned" flag: whether the row is upcoming or already
+    happened is derived purely from ``started_at``/``ended_at`` vs. "now" at
+    read time. A recurring ('weekly') row is a perpetual series template and
+    is never itself closed out; otherwise ``ended_at`` is set iff the log is
+    backdated to today-or-earlier (the existing quick-log behavior), and left
+    null for a future date — the user fills in what happened later via
+    ``PATCH /workouts/{id}``.
 
     Pack-weight-adjusted metabolic cost (Pandolf) is computed only when BOTH
     pack weight and bodyweight are present — never with a synthetic 0kg pack,
@@ -288,13 +318,21 @@ def log_activity(
         )
 
     started = body.started_at or _now()
+    if body.event_end_date is not None and body.event_end_date < started.date():
+        raise HTTPException(400, "event_end_date must be on or after the start date")
+    if body.objective_id is not None:
+        _require_owned_objective(db, ident, body.objective_id)
+
+    is_past_or_now = _as_aware_utc(started) <= _now()
+    ended_at = None if body.recurrence == "weekly" else (started if is_past_or_now else None)
+
     ws = WorkoutSession(
         tenant_id=ident.tenant_id,
         user_id=ident.user_id,
         session_type="activity",
         name=body.name,
         started_at=started,
-        ended_at=started,  # quick-log records a completed activity
+        ended_at=ended_at,
         activity_detail=ActivityDetail(
             template_key=body.template_key,
             duration_s=body.duration_s,
@@ -307,6 +345,10 @@ def log_activity(
             terrain=body.terrain,
             metabolic_cost_kj=cost_kj,
             source=body.source,
+            sport=body.sport,
+            event_end_date=body.event_end_date,
+            recurrence=body.recurrence,
+            objective_id=body.objective_id,
         ),
     )
     db.add(ws)
@@ -353,6 +395,10 @@ def list_workouts(
         .where(
             WorkoutSession.tenant_id == ident.tenant_id,
             WorkoutSession.user_id == ident.user_id,
+            # Retrospective history only — a future/planned activity (no
+            # prior equivalent existed for strength, which is always created
+            # at "now") doesn't belong in the log until it's happened.
+            WorkoutSession.started_at <= _now(),
         )
         .order_by(WorkoutSession.started_at.desc())
         .limit(limit)
@@ -390,6 +436,165 @@ def get_workout(
     ident: Identity = Depends(current_identity),
 ) -> WorkoutSessionOut:
     return _session_out(db, ident, _get_session(db, session_id, ident))
+
+
+_ACTIVITY_ONLY_FIELDS = frozenset(
+    {
+        "template_key", "duration_s", "regions", "intensity", "distance",
+        "elevation_gain", "terrain", "source", "pack_weight", "bodyweight",
+        "sport", "recurrence", "event_end_date", "objective_id",
+    }
+)
+
+
+@router.patch("/{session_id}", response_model=WorkoutSessionOut)
+def update_workout(
+    session_id: int,
+    body: WorkoutSessionUpdate,
+    db: Session = Depends(get_db),
+    ident: Identity = Depends(current_identity),
+) -> WorkoutSessionOut:
+    """Edit a session in place. Serves both "edit a still-open future/planned
+    activity" and "log what actually happened on one" — including
+    ``ended_at`` in the payload is what closes it out; there's no separate
+    status transition (see ``WorkoutSessionUpdate``)."""
+    ws = _get_session(db, session_id, ident)
+    data = body.model_dump(exclude_unset=True)
+
+    if (_ACTIVITY_ONLY_FIELDS & data.keys()) and ws.session_type != "activity":
+        raise HTTPException(400, "These fields only apply to an activity session")
+
+    if "name" in data and data["name"] is not None:
+        ws.name = data["name"]
+    if "started_at" in data and data["started_at"] is not None:
+        ws.started_at = data["started_at"]
+    if "ended_at" in data and data["ended_at"] is not None:
+        ws.ended_at = data["ended_at"]
+    if "notes" in data:
+        ws.notes = data["notes"]
+
+    ad = ws.activity_detail
+    if ad is not None:
+        if (
+            "recurrence" in data
+            and data["recurrence"] == "weekly"
+            and ws.recurrence_source_id is not None
+        ):
+            raise HTTPException(400, "A materialized occurrence can't itself recur")
+        if "objective_id" in data and data["objective_id"] is not None:
+            _require_owned_objective(db, ident, data["objective_id"])
+
+        if "template_key" in data:
+            ad.template_key = data["template_key"]
+        if "duration_s" in data:
+            ad.duration_s = data["duration_s"]
+        if "regions" in data and data["regions"] is not None:
+            ad.regions = data["regions"]
+        if "intensity" in data and data["intensity"] is not None:
+            ad.intensity = data["intensity"]
+        if "sport" in data:
+            ad.sport = data["sport"]
+        if "recurrence" in data and data["recurrence"] is not None:
+            ad.recurrence = data["recurrence"]
+        if "event_end_date" in data:
+            ad.event_end_date = data["event_end_date"]
+        if "objective_id" in data:
+            ad.objective_id = data["objective_id"]
+
+        us = get_or_create_settings(db, ident)
+        unit = us.weight_unit
+        if "distance" in data:
+            ad.distance_m = _distance_to_m(data["distance"], unit)
+        if "elevation_gain" in data:
+            ad.elevation_gain_m = _elevation_to_m(data["elevation_gain"], unit)
+        if "terrain" in data and data["terrain"] is not None:
+            ad.terrain = data["terrain"]
+        if "source" in data and data["source"] is not None:
+            ad.source = data["source"]
+        if "pack_weight" in data:
+            pack = data["pack_weight"]
+            ad.pack_weight_kg = _weight_to_kg(pack, unit) if pack is not None else None
+        if "bodyweight" in data:
+            bw = data["bodyweight"]
+            ad.bodyweight_kg = _weight_to_kg(bw, unit) if bw is not None else None
+        if ad.pack_weight_kg is not None and ad.bodyweight_kg is not None:
+            ad.metabolic_cost_kj = ruck_metabolic_cost_kj(
+                bodyweight_kg=ad.bodyweight_kg,
+                pack_weight_kg=ad.pack_weight_kg,
+                distance_m=ad.distance_m,
+                elevation_gain_m=ad.elevation_gain_m,
+                duration_s=ad.duration_s,
+                terrain=ad.terrain,
+            )
+
+        if ad.event_end_date is not None and ad.event_end_date < ws.started_at.date():
+            raise HTTPException(400, "event_end_date must be on or after the start date")
+
+    db.commit()
+    db.refresh(ws)
+    return _session_out(db, ident, ws)
+
+
+@router.post("/{session_id}/occurrences", response_model=WorkoutSessionOut, status_code=201)
+def materialize_occurrence(
+    session_id: int,
+    body: MaterializeOccurrenceIn,
+    db: Session = Depends(get_db),
+    ident: Identity = Depends(current_identity),
+) -> WorkoutSessionOut:
+    """Turn one virtual (expanded-on-read, never-persisted) occurrence of a
+    recurring activity into a real, linked row — fired when the user taps a
+    future occurrence of a weekly series (e.g. "next Tuesday's league game")
+    to log what happened or just to view/edit that specific date."""
+    template = _get_session(db, session_id, ident)
+    if template.session_type != "activity" or template.activity_detail is None:
+        raise HTTPException(400, "Not an activity session")
+    ad = template.activity_detail
+    if ad.recurrence != "weekly":
+        raise HTTPException(400, "Session is not a recurring series")
+
+    # Idempotent: re-tapping an already-materialized occurrence returns the
+    # existing row rather than creating a duplicate (no DB-level uniqueness
+    # constraint — matches this codebase's existing idempotent-by-predicate
+    # style, e.g. api.services.reschedule).
+    day_start = datetime.combine(body.occurrence_date, datetime.min.time())
+    existing = db.scalars(
+        select(WorkoutSession).where(
+            WorkoutSession.recurrence_source_id == session_id,
+            WorkoutSession.started_at >= day_start,
+            WorkoutSession.started_at < day_start + timedelta(days=1),
+        )
+    ).first()
+    if existing is not None:
+        return _session_out(db, ident, existing)
+
+    occurrence_dt = datetime.combine(body.occurrence_date, template.started_at.time())
+    occurrence = WorkoutSession(
+        tenant_id=ident.tenant_id,
+        user_id=ident.user_id,
+        session_type="activity",
+        name=template.name,
+        started_at=occurrence_dt,
+        ended_at=None,
+        notes=template.notes,
+        recurrence_source_id=template.id,
+        activity_detail=ActivityDetail(
+            template_key=ad.template_key,
+            regions=ad.regions,
+            intensity=ad.intensity,
+            duration_s=ad.duration_s,
+            sport=ad.sport,
+            # A materialized occurrence is a single concrete instance, never
+            # itself a recurring template or a multi-day span.
+            recurrence="none",
+            event_end_date=None,
+            objective_id=ad.objective_id,
+        ),
+    )
+    db.add(occurrence)
+    db.commit()
+    db.refresh(occurrence)
+    return _session_out(db, ident, occurrence)
 
 
 @router.post("/{session_id}/finish", response_model=WorkoutSessionOut)

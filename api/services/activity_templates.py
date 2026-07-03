@@ -14,6 +14,13 @@ route-capture UI (manual entry / trail search / draw / GPX import) plus an
 optional pack-weight + bodyweight section that unlocks the Pandolf
 metabolic-cost estimate — see ``api.db.models.ActivityDetail``. Every other
 template is a coarse regions/intensity estimate only, same as before.
+
+The last five entries (race / league_game / recreation_event / trip /
+rehab_window) fold in what used to be the separate ``CalendarEvent.type``
+enum (merge_calendar_events_into_activity) — a race is exactly as much "an
+activity with a type picker" as a Walk is; the only thing that varies is
+whether the frontend shows the future/recurring section (driven purely by
+the chosen date, never by which template was picked — see ``ActivityForm``).
 """
 
 from __future__ import annotations
@@ -22,7 +29,7 @@ from api.schemas.workout import ActivityTemplateOut
 
 # (key, label, regions, intensity, route_capable). regions:
 # 'legs'|'upper'|'full'|'core'|'none'; intensity: 'light'|'moderate'|'hard'
-# (see api.schemas.calendar_event).
+# (see api.schemas.workout).
 _CATALOG: list[tuple[str, str, str, str, bool]] = [
     ("walk", "Walk", "legs", "light", True),
     ("run", "Run", "legs", "moderate", True),
@@ -39,6 +46,12 @@ _CATALOG: list[tuple[str, str, str, str, bool]] = [
     ("rowing", "Rowing (erg)", "full", "hard", False),
     ("martial_arts", "Martial arts", "full", "hard", False),
     ("mobility", "Mobility / stretching", "full", "light", False),
+    # Folded in from the retired CalendarEvent.type enum.
+    ("race", "Race / competition", "legs", "hard", False),
+    ("league_game", "League game", "full", "hard", False),
+    ("recreation_event", "Recreational outing", "full", "moderate", False),
+    ("trip", "Trip", "full", "light", False),
+    ("rehab_window", "Rehab window", "full", "light", False),
 ]
 
 ACTIVITY_TEMPLATES: list[ActivityTemplateOut] = [

@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from api.db.identity import Identity, current_identity, get_or_create_settings
 from api.db.models import (
+    ActivityDetail,
     Exercise,
     Objective,
     PlannedExercise,
@@ -40,6 +41,7 @@ from api.schemas.plan import (
 from api.schemas.workout import WorkoutSessionOut
 from api.serializers import program_coach_summary, to_planned_workout_out
 from api.services.ics import IcsEvent, build_calendar
+from api.services.recurrence import expand_occurrences
 from api.services.reschedule import reschedule_missed
 
 router = APIRouter(prefix="/plan", tags=["plan"])
@@ -113,18 +115,71 @@ def calendar(
         )
         .order_by(WorkoutSession.started_at)
     ).all()
+    now = _now()
     for ws in sessions:
+        if ws.ended_at is not None:
+            status = "completed"
+        elif ws.started_at > now:
+            status = "upcoming"
+        else:
+            status = "in_progress"
         entries.append(
             CalendarEntry(
                 kind="session",
                 date=ws.started_at.date(),
                 id=ws.id,
                 name=ws.name,
-                status="completed" if ws.ended_at else "in_progress",
+                status=status,
                 template_id=ws.template_id,
                 exercise_count=len(ws.exercises),
+                session_type=ws.session_type,
             )
         )
+
+    # Virtual occurrences of recurring ('weekly') activities — the athletic-
+    # calendar merge (formerly a separate /calendar-events/window endpoint).
+    # Unbounded by [lo, hi]: a template anchored months ago must still expand
+    # into this window's occurrences. Every recurring template's own anchor
+    # date, and every occurrence already materialized into its own linked row
+    # (WorkoutSession.recurrence_source_id), is already covered by the
+    # `sessions` query above — skip those dates here to avoid double-emitting.
+    recurring = db.scalars(
+        select(WorkoutSession)
+        .join(ActivityDetail, ActivityDetail.session_id == WorkoutSession.id)
+        .where(
+            WorkoutSession.tenant_id == ident.tenant_id,
+            WorkoutSession.user_id == ident.user_id,
+            WorkoutSession.session_type == "activity",
+            ActivityDetail.recurrence == "weekly",
+        )
+    ).all()
+    for template in recurring:
+        materialized_dates = set(
+            db.scalars(
+                select(WorkoutSession.started_at).where(
+                    WorkoutSession.recurrence_source_id == template.id,
+                    WorkoutSession.started_at >= lo,
+                    WorkoutSession.started_at <= hi,
+                )
+            ).all()
+        )
+        materialized_dates = {d.date() for d in materialized_dates}
+        for occ_date, _occ_end in expand_occurrences(
+            template.started_at.date(), None, "weekly", start, end
+        ):
+            if occ_date == template.started_at.date() or occ_date in materialized_dates:
+                continue
+            entries.append(
+                CalendarEntry(
+                    kind="session",
+                    date=occ_date,
+                    id=template.id,
+                    name=template.name,
+                    status="upcoming",
+                    session_type="activity",
+                    virtual=True,
+                )
+            )
 
     objective_names = _objective_name_map(db, ident)
     planned = db.scalars(

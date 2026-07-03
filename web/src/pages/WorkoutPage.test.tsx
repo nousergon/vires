@@ -54,7 +54,7 @@ describe('WorkoutPage — StartView (no active workout)', () => {
     vi.spyOn(api, 'listActivityTemplates').mockResolvedValue([])
     renderWithProviders(<WorkoutPage />)
     fireEvent.click(await screen.findByText('🏃 Log an activity'))
-    expect(await screen.findByText('Log an activity')).toBeInTheDocument()
+    expect(await screen.findByText('Add activity')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('e.g. Ultimate frisbee')).toBeInTheDocument()
   })
 })

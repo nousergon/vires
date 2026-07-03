@@ -4,7 +4,7 @@ and the public baseline prompt carries the periodization + safety rules."""
 from __future__ import annotations
 
 import json
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from api.services.coach.agent import _context_block, _objective_block
 from api.services.coach.materialize import (
@@ -173,7 +173,7 @@ def test_no_goal_key_when_objective_context_empty():
 def _event_ctx(**over) -> EventOccurrenceCtx:
     kw = dict(
         name="Tuesday pickup soccer",
-        type="league",
+        template_key="league_game",
         occurrence_date=date(2026, 7, 7),
         sport="soccer",
         load={"regions": "legs", "intensity": "moderate", "duration_min": 90},
@@ -253,13 +253,15 @@ def test_recurring_event_is_expanded_into_coach_context(client, db):
 
     # A weekly leg-heavy commitment anchored on an in-window Tuesday.
     r = client.post(
-        "/api/calendar-events",
+        "/api/workouts/activity",
         json={
             "name": "Wednesday hoops",
-            "type": "league",
-            "event_date": (date.today()).isoformat(),
+            "template_key": "league_game",
+            "regions": "legs",
+            "intensity": "hard",
+            "duration_s": 3600,
+            "started_at": datetime.combine(date.today(), datetime.min.time()).isoformat(),
             "recurrence": "weekly",
-            "load": {"regions": "legs", "intensity": "hard", "duration_min": 60},
         },
     )
     assert r.status_code == 201, r.text
@@ -341,7 +343,10 @@ def test_logged_activity_reaches_the_coach_context(client, db):
     assert a.regions == "upper"
     assert a.intensity == "hard"
     assert a.duration_min == 90
-    assert a.session_date == date.today()
+    # The server stamps started_at with UTC "now" (api.routers.workouts._now),
+    # not local wall-clock time — compare against the same clock to avoid a
+    # spurious failure near local-midnight/UTC-date-rollover boundaries.
+    assert a.session_date == datetime.now(UTC).date()
 
 
 def test_activity_outside_the_lookback_window_does_not_reach_the_coach(client, db):
@@ -585,3 +590,46 @@ def test_baseline_prompt_has_season_phase_language():
         assert "sport-specific" in text  # each block specific to its objective
     finally:
         load_system_prompt.cache_clear()
+
+
+# --------------------------------------------------------------------------- #
+# merged-model split: an upcoming (not yet closed out) activity is an "event"
+# constraint; an already-closed-out one is "recent_activities" absorbed load —
+# never both. There's no stored status; this is derived purely from
+# started_at/ended_at vs. "now" (merge_calendar_events_into_activity).
+# --------------------------------------------------------------------------- #
+def test_future_activity_is_an_event_not_a_recent_activity(client, db):
+    from api.db.identity import current_identity
+    from api.services.coach.context import build_coach_objective_context
+
+    client.post(
+        "/api/workouts/activity",
+        json={
+            "name": "Boston Marathon",
+            "template_key": "race",
+            "regions": "legs",
+            "intensity": "hard",
+            "started_at": (datetime.now(UTC) + timedelta(days=10)).isoformat(),
+        },
+    )
+    ctx = build_coach_objective_context(db, current_identity())
+    assert any(e.name == "Boston Marathon" for e in ctx.events)
+    assert not any(a.name == "Boston Marathon" for a in ctx.recent_activities)
+
+
+def test_closed_out_past_activity_is_recent_not_an_event(client, db):
+    from api.db.identity import current_identity
+    from api.services.coach.context import build_coach_objective_context
+
+    client.post(
+        "/api/workouts/activity",
+        json={
+            "name": "Morning run",
+            "template_key": "run",
+            "regions": "legs",
+            "intensity": "moderate",
+        },
+    )
+    ctx = build_coach_objective_context(db, current_identity())
+    assert any(a.name == "Morning run" for a in ctx.recent_activities)
+    assert not any(e.name == "Morning run" for e in ctx.events)

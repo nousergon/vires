@@ -100,13 +100,19 @@ export type Terrain = 'treadmill' | 'road' | 'trail' | 'offtrail' | 'snow'
 
 export type RouteSource = 'manual' | 'route_search' | 'route_draw' | 'gpx'
 
-// Activity load reuses LoadRegions/LoadIntensity (declared below alongside
-// CalendarEvent.load) rather than a parallel vocabulary, so the coach's
-// existing recovery-budget reasoning generalizes to logged activities for free.
+export type LoadRegions = 'legs' | 'upper' | 'full' | 'core' | 'none'
+export type LoadIntensity = 'light' | 'moderate' | 'hard'
+// 'weekly' repeats every 7 days from the activity's own started_at date,
+// expanded server-side on read — never persisted as extra rows.
+export type Recurrence = 'none' | 'weekly'
 
 // One entry in the fixed activity-template catalog (GET /workouts/activity-templates).
 // route_capable templates (walk/run/hike) additionally get the route-capture
-// UI + an optional pack-weight section.
+// UI + an optional pack-weight section. The last five entries (race,
+// league_game, recreation_event, trip, rehab_window) are what used to
+// require a separate CalendarEvent — see ActivityForm's future/recurring
+// section, shown based purely on the chosen date, never on which template
+// is picked.
 export interface ActivityTemplate {
   key: string
   label: string
@@ -130,16 +136,27 @@ export interface ActivityDetail {
   terrain: string
   metabolic_cost_kj: number | null
   source: string
+  // Former CalendarEvent axes — merged in so a future/recurring/multi-day/
+  // objective-anchored activity is the SAME row type as a logged one; there
+  // is no separate "planned" flag, only started_at/ended_at vs. now.
+  sport: string | null
+  event_end_date: string | null
+  recurrence: Recurrence
+  objective_id: number | null
 }
 
-// Quick-log payload — numbers in the account's DISPLAY units (server converts).
+// Quick-log / create payload — numbers in the account's DISPLAY units
+// (server converts). A future started_at with no other event fields is a
+// plain "planned activity"; recurrence/event_end_date/objective_id are the
+// event-only axes (formerly a separate CalendarEvent create).
 export interface ActivityLogInput {
   name: string
   template_key?: string
   duration_s?: number | null
   regions: LoadRegions
   intensity: LoadIntensity
-  // ISO datetime — omit to default to now server-side; set to backdate.
+  // ISO datetime — omit to default to now server-side; set to backdate OR
+  // future-date (a future date leaves ended_at null server-side).
   started_at?: string | null
   // Route capture — optional for every template.
   distance?: number | null
@@ -150,6 +167,35 @@ export interface ActivityLogInput {
   // is given (server-validated).
   pack_weight?: number | null
   bodyweight?: number | null
+  // Event-merge fields.
+  sport?: string | null
+  recurrence?: Recurrence
+  event_end_date?: string | null
+  objective_id?: number | null
+}
+
+// Partial update to a session (PATCH /workouts/{id}) — edits a still-open
+// future/planned activity, OR closes one out by including ended_at ("log
+// what actually happened"). Only send the fields you're changing.
+export interface WorkoutSessionUpdate {
+  name?: string
+  started_at?: string
+  ended_at?: string
+  notes?: string | null
+  template_key?: string
+  duration_s?: number | null
+  regions?: LoadRegions
+  intensity?: LoadIntensity
+  distance?: number | null
+  elevation_gain?: number | null
+  terrain?: Terrain
+  source?: RouteSource
+  pack_weight?: number | null
+  bodyweight?: number | null
+  sport?: string | null
+  recurrence?: Recurrence
+  event_end_date?: string | null
+  objective_id?: number | null
 }
 
 // ---- route derivation (trail search / draw / GPX) ------------------------- //
@@ -184,6 +230,9 @@ export interface WorkoutSession {
   template_id: number | null
   exercises: SessionExercise[]
   activity: ActivityDetail | null
+  // Set only on a materialized occurrence of a recurring activity — the id
+  // of the recurring "template" session it was expanded from.
+  recurrence_source_id: number | null
 }
 
 export interface WorkoutSummary {
@@ -276,7 +325,7 @@ export interface CalendarEntry {
   date: string // YYYY-MM-DD
   id: number
   name: string | null
-  // session: completed|in_progress; planned: planned|completed|skipped;
+  // session: completed|in_progress|upcoming; planned: planned|completed|skipped;
   // objective: peak|event; objective_block: block
   status: string
   program_id?: number | null
@@ -288,6 +337,12 @@ export interface CalendarEntry {
   // planned only: set when the coach auto-moved this day forward because it
   // was missed — the date it moved FROM.
   rescheduled_from?: string | null
+  // session only: distinguishes a lift from a logged/planned activity.
+  session_type?: SessionType | null
+  // session only: True for a synthesized weekly occurrence with no row of
+  // its own yet. `id` is the recurring template session's real id — pair
+  // with `date` to materializeOccurrence() it.
+  virtual?: boolean
 }
 
 export interface PlannedExercise {
@@ -493,57 +548,6 @@ export interface ConstraintInput {
   defer_to_professional?: boolean | null
 }
 
-// ---- athletic calendar events ---------------------------------------------- //
-// A CalendarEvent is a training-load CONSTRAINT the coach trains *around*
-// (a race, a weekly league game, a trip, a rehab window) — distinct from
-// Objective, which is a goal the coach peaks *toward* (see vires-ops#30/#31).
-export type EventType = 'competition' | 'league' | 'recreation' | 'travel' | 'rehab'
-export type EventRecurrence = 'none' | 'weekly'
-export type LoadRegions = 'legs' | 'upper' | 'full' | 'core' | 'none'
-export type LoadIntensity = 'light' | 'moderate' | 'hard'
-
-export interface EventLoad {
-  regions: LoadRegions
-  intensity: LoadIntensity
-  duration_min?: number | null
-}
-
-export interface CalendarEvent {
-  id: number
-  name: string
-  sport: string | null
-  type: EventType
-  event_date: string
-  // Last day of a multi-day event (>= event_date); null = single-day event.
-  event_end_date: string | null
-  recurrence: EventRecurrence
-  load: EventLoad | null
-  notes: string | null
-  objective_id: number | null
-  created_at: string
-  updated_at: string
-}
-
-export interface CalendarEventInput {
-  name: string
-  sport?: string | null
-  type: EventType
-  event_date: string
-  event_end_date?: string | null
-  recurrence?: EventRecurrence
-  load?: EventLoad | null
-  notes?: string | null
-  objective_id?: number | null
-}
-
-/** One concrete occurrence of a (possibly recurring) event within a queried
- * window — the server-side expansion of recurrence='weekly' events. */
-export interface CalendarEventOccurrence {
-  event: CalendarEvent
-  occurrence_date: string
-  occurrence_end_date: string | null
-}
-
 // ---- endpoints ------------------------------------------------------------ //
 export const api = {
   // exercises
@@ -583,6 +587,16 @@ export const api = {
     req<RouteStats>('/routes/import-gpx', { method: 'POST', body: gpxText }),
   listWorkouts: () => req<WorkoutSummary[]>('/workouts'),
   getWorkout: (id: number) => req<WorkoutSession>(`/workouts/${id}`),
+  updateWorkout: (id: number, body: WorkoutSessionUpdate) =>
+    req<WorkoutSession>(`/workouts/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  // Materializes one virtual (expanded-on-read) occurrence of a recurring
+  // activity into a real, linked row — idempotent (re-tapping an
+  // already-materialized occurrence just returns it).
+  materializeOccurrence: (id: number, occurrenceDate: string) =>
+    req<WorkoutSession>(`/workouts/${id}/occurrences`, {
+      method: 'POST',
+      body: JSON.stringify({ occurrence_date: occurrenceDate }),
+    }),
   finishWorkout: (id: number) => req<WorkoutSession>(`/workouts/${id}/finish`, { method: 'POST' }),
   deleteWorkout: (id: number) => req<void>(`/workouts/${id}`, { method: 'DELETE' }),
   addWorkoutExercise: (sessionId: number, body: TemplateExerciseInput) =>
@@ -733,16 +747,6 @@ export const api = {
   updateConstraint: (id: number, body: Partial<ConstraintInput & { is_active: boolean }>) =>
     req<Constraint>(`/constraints/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   deleteConstraint: (id: number) => req<void>(`/constraints/${id}`, { method: 'DELETE' }),
-
-  // athletic calendar events (constraints the coach trains around, not toward)
-  listCalendarEvents: () => req<CalendarEvent[]>('/calendar-events'),
-  calendarEventsWindow: (start: string, end: string) =>
-    req<CalendarEventOccurrence[]>(`/calendar-events/window?start=${start}&end=${end}`),
-  createCalendarEvent: (body: CalendarEventInput) =>
-    req<CalendarEvent>('/calendar-events', { method: 'POST', body: JSON.stringify(body) }),
-  updateCalendarEvent: (id: number, body: Partial<CalendarEventInput>) =>
-    req<CalendarEvent>(`/calendar-events/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
-  deleteCalendarEvent: (id: number) => req<void>(`/calendar-events/${id}`, { method: 'DELETE' }),
 
   // web push
   pushPublicKey: () => req<{ key: string }>('/push/public-key'),

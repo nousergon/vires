@@ -238,6 +238,15 @@ class WorkoutSession(Base):
     planned_workout_id: Mapped[int | None] = mapped_column(
         ForeignKey("planned_workouts.id"), nullable=True
     )
+    # Set ONLY on a materialized occurrence of a recurring activity (see
+    # ActivityDetail.recurrence) — points back at the recurring "template"
+    # session it was expanded from. None on the template row itself and on
+    # every non-recurring session. Mirrors planned_workout_id's "which row
+    # this one fulfilled" linkage, one level up (series -> instance instead
+    # of plan -> instance).
+    recurrence_source_id: Mapped[int | None] = mapped_column(
+        ForeignKey("workout_sessions.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     exercises: Mapped[list[SessionExercise]] = relationship(
         back_populates="session",
@@ -328,6 +337,21 @@ class ActivityDetail(Base):
     model's units and the GPX/route-import paths, which deliver SI natively.
     Conversion to/from the user's display unit happens once, at the API
     boundary — never here.
+
+    **Also covers what used to be the separate ``CalendarEvent`` table**
+    (races, league games, trips, rehab windows — merged
+    ``merge_calendar_events_into_activity`` migration). There is no stored
+    "planned" vs. "happened" distinction anywhere in this schema: whether a
+    row is upcoming or already occurred is derived purely from
+    ``WorkoutSession.started_at``/``ended_at`` vs. "now" at read time (see
+    ``api.routers.plan.calendar``'s status derivation) — never a column
+    here. ``sport``/``event_end_date``/``recurrence``/``objective_id`` are
+    the event-only axes that had no prior home on this table; a "weekly"
+    recurring row is never itself closed out (``ended_at`` stays ``None``)
+    — its concrete occurrences are expanded on read (see
+    ``api.services.recurrence.expand_occurrences``) and only materialize
+    into their own linked row (``WorkoutSession.recurrence_source_id``)
+    when a user opens one to log what happened.
     """
 
     __tablename__ = "activity_details"
@@ -369,6 +393,26 @@ class ActivityDetail(Base):
     # 'gpx'. Meaningful for any route-capable template, not just a loaded one.
     source: Mapped[str] = mapped_column(
         String, nullable=False, server_default="manual", default="manual"
+    )
+    # Sport profile key — reuses the SAME free-text vocabulary as
+    # Objective.sport (e.g. 'alpine'); not redefined here. Mainly relevant
+    # for event-shaped activities (a race, a league game).
+    sport: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Last day of a multi-day activity (nullable; e.g. a ski trip). None =>
+    # a single-day activity at started_at's date. Not used for a recurring
+    # ('weekly') row — recurrence is the multi-occurrence axis there.
+    event_end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # none | weekly. 'weekly' repeats every 7 days from the session's own
+    # started_at date, expanded server-side on read within the queried
+    # window — never persisted as extra rows (see api.services.recurrence).
+    recurrence: Mapped[str] = mapped_column(
+        String, nullable=False, server_default="none", default="none"
+    )
+    # Anchor to an Objective when this activity IS itself a peak target
+    # (e.g. the race). Nullable — most activities have none. SET NULL on
+    # objective delete so the activity survives as a standalone constraint.
+    objective_id: Mapped[int | None] = mapped_column(
+        ForeignKey("objectives.id", ondelete="SET NULL"), nullable=True, index=True
     )
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
 
@@ -607,71 +651,6 @@ class Constraint(Base):
     defer_to_professional: Mapped[bool] = mapped_column(Boolean, default=False)
     # Active constraints bound generation; deactivate (vs delete) to keep history.
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
-    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
-    updated_at: Mapped[datetime] = mapped_column(
-        UTCDateTime(), default=_utcnow, onupdate=_utcnow
-    )
-
-
-# --------------------------------------------------------------------------- #
-# Athletic calendar — external athletic events as training-load CONSTRAINTS
-# (epic: nousergon/vires-ops#30). Distinct from ``Objective``: an Objective is a
-# goal the coach peaks/tapers *toward* and drives focus-derivation; a
-# ``CalendarEvent`` is a date + a coarse load estimate the coach trains
-# *around* (a weekly league game, a ski trip, a rehab window). Overloading
-# these onto Objective would let a recurring pickup game hijack the focus
-# (focus-derivation picks the soonest dated peak) — so events get their own
-# table. ``objective_id`` is the escape hatch: set it only when the event IS
-# itself a peak target (e.g. the race), anchoring the two without merging them.
-# --------------------------------------------------------------------------- #
-class CalendarEvent(Base):
-    """An external athletic event trained *around*, not toward.
-
-    ``recurrence='weekly'`` events are NOT expanded/persisted as rows — a single
-    row is the recurring series (anchored at ``event_date``), and concrete
-    occurrences within a lookahead window are computed on read (see
-    ``api.services.calendar_events.expand_occurrences``). This keeps edits to the
-    series (time, load, notes) trivially consistent instead of needing to fan out
-    across materialized rows.
-    """
-
-    __tablename__ = "calendar_events"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
-    name: Mapped[str] = mapped_column(String, nullable=False)
-    # Sport profile key — reuses the SAME free-text vocabulary as
-    # ``Objective.sport`` (e.g. 'alpine'); not redefined here.
-    sport: Mapped[str | None] = mapped_column(String, nullable=True)
-    # competition | league | recreation | travel | rehab
-    type: Mapped[str] = mapped_column(String, nullable=False)
-    # The (first) day of the event. A pure Date, like Objective.target_date — an
-    # event belongs to a day, not an instant. For a 'weekly' recurring event this
-    # is the ANCHOR date the weekly cadence is computed from (must fall on the
-    # weekday the series recurs on).
-    event_date: Mapped[date] = mapped_column(Date, nullable=False)
-    # Last day of a multi-day event (nullable; e.g. a ski trip). None => a
-    # single-day event at event_date. Not used (and not expanded) for recurring
-    # events — recurrence is the multi-occurrence axis there.
-    event_end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
-    # none | weekly. 'weekly' repeats every 7 days from event_date, expanded
-    # server-side on read within the queried window — never persisted.
-    recurrence: Mapped[str] = mapped_column(String, nullable=False, default="none")
-    # Structured coarse load estimate — the axis that makes events useful to the
-    # coach's load-accounting (vires-ops#33): which regions the event taxes, how
-    # hard, and (optionally) how long. Stored as JSON, matching the precedent set
-    # by ``Objective.demands_profile`` for small structured sub-objects that don't
-    # warrant their own table. Shape: {"regions": "legs|upper|full|core|none",
-    # "intensity": "light|moderate|hard", "duration_min": int | None}.
-    load: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Anchor to an Objective when this event IS itself a peak target (e.g. the
-    # race). Nullable — most events have none. SET NULL on objective delete so
-    # the event survives as a standalone constraint.
-    objective_id: Mapped[int | None] = mapped_column(
-        ForeignKey("objectives.id", ondelete="SET NULL"), nullable=True, index=True
-    )
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         UTCDateTime(), default=_utcnow, onupdate=_utcnow

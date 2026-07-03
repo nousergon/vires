@@ -93,6 +93,7 @@ describe('HistoryPage', () => {
       template_id: null,
       exercises: [],
       activity: loadedHike,
+      recurrence_source_id: null,
     })
     renderWithProviders(<HistoryPage />)
     expect(await screen.findByText('🎒 Morning hike')).toBeInTheDocument()
@@ -154,7 +155,7 @@ describe('HistoryPage', () => {
     vi.spyOn(api, 'records').mockResolvedValue([])
     vi.spyOn(api, 'getWorkout').mockResolvedValue({
       id: 9, session_type: 'strength', name: 'Test C', started_at: '2026-06-28T18:00:00Z', ended_at: '2026-06-28T19:00:00Z',
-      notes: null, template_id: null, exercises: [], activity: null,
+      notes: null, template_id: null, exercises: [], activity: null, recurrence_source_id: null,
     })
     const del = vi.spyOn(api, 'deleteWorkout').mockResolvedValue(undefined)
     vi.spyOn(window, 'confirm').mockReturnValue(true)

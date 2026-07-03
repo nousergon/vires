@@ -292,3 +292,251 @@ def test_heavier_pack_logs_higher_load(client):
         "/api/workouts/activity", json={**common, "pack_weight": 50}
     ).json()["activity"]["metabolic_cost_kj"]
     assert heavy > light
+
+
+# --------------------------------------------------------------------------- #
+# Merged athletic-calendar events (formerly a standalone CalendarEvent table,
+# merged 2026-07-02 — see alembic merge_calendar_events_into_activity). No
+# stored "planned" vs. "happened" status: whether a row is upcoming or
+# already occurred is derived purely from started_at/ended_at vs. "now".
+# --------------------------------------------------------------------------- #
+def test_log_activity_future_date_leaves_ended_at_null(client):
+    future = datetime.now(UTC) + timedelta(days=7)
+    r = client.post(
+        "/api/workouts/activity",
+        json={
+            "name": "Mailbox Peak",
+            "template_key": "race",
+            "regions": "legs",
+            "intensity": "hard",
+            "started_at": future.isoformat(),
+        },
+    )
+    assert r.status_code == 201
+    assert r.json()["ended_at"] is None
+
+
+def test_log_activity_recurring_weekly_never_closes_out(client):
+    # Anchored in the PAST — a plain (non-recurring) past date always closes
+    # out immediately, but a recurring series template never does (it's a
+    # perpetual series, not a single occurrence).
+    past = datetime.now(UTC) - timedelta(days=3)
+    r = client.post(
+        "/api/workouts/activity",
+        json={
+            "name": "Tuesday league",
+            "template_key": "league_game",
+            "regions": "full",
+            "intensity": "hard",
+            "started_at": past.isoformat(),
+            "recurrence": "weekly",
+        },
+    )
+    assert r.status_code == 201
+    ws = r.json()
+    assert ws["ended_at"] is None
+    assert ws["activity"]["recurrence"] == "weekly"
+
+
+def test_log_activity_rejects_event_end_date_before_start(client):
+    r = client.post(
+        "/api/workouts/activity",
+        json={
+            "name": "Ski trip",
+            "regions": "legs",
+            "intensity": "moderate",
+            "started_at": "2026-08-10T00:00:00Z",
+            "event_end_date": "2026-08-05",
+        },
+    )
+    assert r.status_code == 422
+
+
+def test_log_activity_rejects_event_end_date_with_weekly_recurrence(client):
+    r = client.post(
+        "/api/workouts/activity",
+        json={
+            "name": "Tuesday league",
+            "regions": "full",
+            "intensity": "hard",
+            "recurrence": "weekly",
+            "event_end_date": "2026-08-05",
+        },
+    )
+    assert r.status_code == 422
+
+
+def test_log_activity_objective_id_must_exist(client):
+    r = client.post(
+        "/api/workouts/activity",
+        json={"name": "Race", "regions": "legs", "intensity": "hard", "objective_id": 999},
+    )
+    assert r.status_code == 404
+
+
+def test_log_activity_objective_id_anchors_activity(client):
+    obj = client.post(
+        "/api/objectives",
+        json={"name": "Boston Marathon", "kind": "dated", "target_date": "2026-10-12"},
+    ).json()
+    r = client.post(
+        "/api/workouts/activity",
+        json={
+            "name": "Boston Marathon",
+            "template_key": "race",
+            "regions": "legs",
+            "intensity": "hard",
+            "started_at": "2026-10-12T08:00:00Z",
+            "objective_id": obj["id"],
+        },
+    )
+    assert r.status_code == 201
+    assert r.json()["activity"]["objective_id"] == obj["id"]
+
+
+def test_history_list_excludes_future_activities(client):
+    future = datetime.now(UTC) + timedelta(days=5)
+    client.post(
+        "/api/workouts/activity",
+        json={
+            "name": "Future race",
+            "regions": "legs",
+            "intensity": "hard",
+            "started_at": future.isoformat(),
+        },
+    )
+    client.post(
+        "/api/workouts/activity",
+        json={
+            "name": "Past swim",
+            "template_key": "swimming",
+            "regions": "full",
+            "intensity": "moderate",
+        },
+    )
+    rows = client.get("/api/workouts").json()
+    names = {w["name"] for w in rows}
+    assert "Past swim" in names
+    assert "Future race" not in names
+
+
+# --------------------------------------------------------------------------- #
+# PATCH /workouts/{id} — edit a still-open row, or close one out ("log what
+# actually happened") by including ended_at in the same call.
+# --------------------------------------------------------------------------- #
+def test_patch_activity_updates_estimate_fields(client):
+    ws = client.post(
+        "/api/workouts/activity",
+        json={"name": "Custom", "regions": "full", "intensity": "light"},
+    ).json()
+    r = client.patch(f"/api/workouts/{ws['id']}", json={"regions": "legs", "intensity": "hard"})
+    assert r.status_code == 200
+    activity = r.json()["activity"]
+    assert activity["regions"] == "legs"
+    assert activity["intensity"] == "hard"
+
+
+def test_patch_activity_sets_ended_at_closes_it_out(client):
+    future = datetime.now(UTC) + timedelta(days=2)
+    ws = client.post(
+        "/api/workouts/activity",
+        json={
+            "name": "Race",
+            "regions": "legs",
+            "intensity": "hard",
+            "started_at": future.isoformat(),
+        },
+    ).json()
+    assert ws["ended_at"] is None
+    now = datetime.now(UTC).isoformat()
+    r = client.patch(
+        f"/api/workouts/{ws['id']}",
+        json={"ended_at": now, "distance": 10, "duration_s": 3000},
+    )
+    assert r.status_code == 200
+    assert r.json()["ended_at"] is not None
+
+
+def test_patch_activity_rejects_activity_only_fields_on_strength_session(client):
+    ws = client.post("/api/workouts", json={}).json()
+    r = client.patch(f"/api/workouts/{ws['id']}", json={"regions": "legs"})
+    assert r.status_code == 400
+
+
+def test_patch_materialized_occurrence_rejects_setting_recurrence_weekly(client):
+    template = client.post(
+        "/api/workouts/activity",
+        json={
+            "name": "Tuesday league",
+            "regions": "full",
+            "intensity": "hard",
+            "recurrence": "weekly",
+            "started_at": datetime.now(UTC).isoformat(),
+        },
+    ).json()
+    occ_date = (datetime.now(UTC) + timedelta(days=7)).date().isoformat()
+    occurrence = client.post(
+        f"/api/workouts/{template['id']}/occurrences", json={"occurrence_date": occ_date}
+    ).json()
+    r = client.patch(f"/api/workouts/{occurrence['id']}", json={"recurrence": "weekly"})
+    assert r.status_code == 400
+
+
+# --------------------------------------------------------------------------- #
+# POST /workouts/{id}/occurrences — materialize a virtual weekly occurrence.
+# --------------------------------------------------------------------------- #
+def test_materialize_occurrence_creates_linked_session(client):
+    template = client.post(
+        "/api/workouts/activity",
+        json={
+            "name": "Tuesday league",
+            "template_key": "league_game",
+            "regions": "full",
+            "intensity": "hard",
+            "recurrence": "weekly",
+            "started_at": datetime.now(UTC).isoformat(),
+        },
+    ).json()
+    occ_date = (datetime.now(UTC) + timedelta(days=14)).date().isoformat()
+    r = client.post(
+        f"/api/workouts/{template['id']}/occurrences", json={"occurrence_date": occ_date}
+    )
+    assert r.status_code == 201
+    occurrence = r.json()
+    assert occurrence["recurrence_source_id"] == template["id"]
+    assert occurrence["ended_at"] is None
+    assert occurrence["activity"]["recurrence"] == "none"
+    assert datetime.fromisoformat(occurrence["started_at"]).date().isoformat() == occ_date
+
+
+def test_materialize_occurrence_is_idempotent(client):
+    template = client.post(
+        "/api/workouts/activity",
+        json={
+            "name": "Tuesday league",
+            "regions": "full",
+            "intensity": "hard",
+            "recurrence": "weekly",
+            "started_at": datetime.now(UTC).isoformat(),
+        },
+    ).json()
+    occ_date = (datetime.now(UTC) + timedelta(days=7)).date().isoformat()
+    first = client.post(
+        f"/api/workouts/{template['id']}/occurrences", json={"occurrence_date": occ_date}
+    ).json()
+    second = client.post(
+        f"/api/workouts/{template['id']}/occurrences", json={"occurrence_date": occ_date}
+    ).json()
+    assert first["id"] == second["id"]
+
+
+def test_materialize_occurrence_404s_on_non_recurring_session(client):
+    ws = client.post(
+        "/api/workouts/activity",
+        json={"name": "One-off", "regions": "full", "intensity": "moderate"},
+    ).json()
+    r = client.post(
+        f"/api/workouts/{ws['id']}/occurrences",
+        json={"occurrence_date": datetime.now(UTC).date().isoformat()},
+    )
+    assert r.status_code == 400
