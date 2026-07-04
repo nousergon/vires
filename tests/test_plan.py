@@ -47,6 +47,37 @@ def test_calendar_merges_past_session_and_future_planned(client):
     assert any(c["id"] == pw["id"] and c["status"] == "planned" for c in planned)
 
 
+def test_calendar_started_planned_renders_once_not_twice(client):
+    # Starting a planned routine creates a linked WorkoutSession. The calendar
+    # must emit ONE entry for that workout — the planned row absorbing the
+    # session's live status — never a planned "completed" card AND a session
+    # "logged" card for the same physical workout (the July-3 duplicate bug).
+    tpl = _routine(client)
+    pw = client.post(
+        "/api/plan/planned",
+        json={"scheduled_date": "2026-07-03", "template_id": tpl["id"]},
+    ).json()
+    ws = client.post(f"/api/plan/planned/{pw['id']}/start").json()
+
+    cal = client.get(
+        "/api/plan/calendar", params={"start": "2020-01-01", "end": "2030-12-31"}
+    ).json()
+    assert not any(c["kind"] == "session" and c["id"] == ws["id"] for c in cal)
+    mine = [c for c in cal if c["kind"] == "planned" and c["id"] == pw["id"]]
+    assert len(mine) == 1
+    # Session still open ⇒ live status, not pw.status's premature 'completed'.
+    assert mine[0]["status"] == "in_progress"
+    assert mine[0]["session_id"] == ws["id"]
+
+    client.post(f"/api/workouts/{ws['id']}/finish")
+    cal = client.get(
+        "/api/plan/calendar", params={"start": "2020-01-01", "end": "2030-12-31"}
+    ).json()
+    mine = [c for c in cal if c["kind"] == "planned" and c["id"] == pw["id"]]
+    assert mine[0]["status"] == "completed"
+    assert not any(c["kind"] == "session" and c["id"] == ws["id"] for c in cal)
+
+
 def test_calendar_respects_range(client):
     client.post("/api/plan/planned", json={"scheduled_date": "2026-07-15"}).json()
     inside = client.get(
@@ -143,6 +174,80 @@ def test_calendar_objective_clipped_to_window(client):
     assert not any(c["kind"] in ("objective", "objective_block") for c in cal)
 
 
+# --------------------------------------------------------------------------- #
+# Merged athletic-calendar events on /plan/calendar (formerly a separate
+# /calendar-events/window endpoint — merge_calendar_events_into_activity).
+# --------------------------------------------------------------------------- #
+def test_calendar_feed_virtual_occurrence_and_dedup_against_real_row(client):
+    template = client.post(
+        "/api/workouts/activity",
+        json={
+            "name": "Tuesday league",
+            "template_key": "league_game",
+            "regions": "full",
+            "intensity": "hard",
+            "recurrence": "weekly",
+            "started_at": "2026-08-04T18:00:00Z",
+        },
+    ).json()
+    cal = _cal(client, "2026-08-01", "2026-08-31")
+    league = sorted((c for c in cal if c["id"] == template["id"]), key=lambda c: c["date"])
+    dates = [c["date"] for c in league]
+    assert dates == ["2026-08-04", "2026-08-11", "2026-08-18", "2026-08-25"]
+    # the anchor date is the real row (not virtual); every later occurrence
+    # in-window is a synthesized, never-persisted projection
+    assert [c["virtual"] for c in league] == [False, True, True, True]
+    assert all(c["session_type"] == "activity" for c in league)
+
+
+def test_calendar_feed_materialized_occurrence_stops_being_virtual(client):
+    template = client.post(
+        "/api/workouts/activity",
+        json={
+            "name": "Tuesday league",
+            "regions": "full",
+            "intensity": "hard",
+            "recurrence": "weekly",
+            "started_at": "2026-08-04T18:00:00Z",
+        },
+    ).json()
+    materialized = client.post(
+        f"/api/workouts/{template['id']}/occurrences", json={"occurrence_date": "2026-08-11"}
+    ).json()
+    cal = _cal(client, "2026-08-01", "2026-08-31")
+    ids = (template["id"], materialized["id"])
+    league = sorted((c for c in cal if c["id"] in ids), key=lambda c: c["date"])
+    by_date = {c["date"]: c for c in league}
+    # 8/4 (anchor, real) and 8/11 (now materialized, real) are both non-virtual
+    # with distinct ids; 8/18 and 8/25 remain virtual, keyed by the template id.
+    assert by_date["2026-08-04"]["virtual"] is False
+    assert by_date["2026-08-04"]["id"] == template["id"]
+    assert by_date["2026-08-11"]["virtual"] is False
+    assert by_date["2026-08-11"]["id"] == materialized["id"]
+    assert by_date["2026-08-18"]["virtual"] is True
+    assert by_date["2026-08-18"]["id"] == template["id"]
+    # exactly one entry per date — no duplicate emission of 8/11
+    assert len(league) == 4
+
+
+def test_calendar_feed_future_activity_status_is_upcoming(client):
+    client.post(
+        "/api/workouts/activity",
+        json={
+            "name": "Mailbox Peak",
+            "template_key": "race",
+            "regions": "legs",
+            "intensity": "hard",
+            "started_at": "2026-09-12T14:00:00Z",
+        },
+    )
+    cal = _cal(client, "2026-09-01", "2026-09-30")
+    race = next(c for c in cal if c["name"] == "Mailbox Peak")
+    assert race["status"] == "upcoming"
+    assert race["session_type"] == "activity"
+    assert race["virtual"] is False
+
+
 def test_start_planned_seeds_session_from_prescription_and_links(client):
     tpl = _routine(client)
     pw = client.post(
@@ -159,6 +264,34 @@ def test_start_planned_seeds_session_from_prescription_and_links(client):
     got = client.get(f"/api/plan/planned/{pw['id']}").json()
     assert got["status"] == "completed"
     assert got["session_id"] == ses["id"]
+
+
+def test_completing_planned_on_a_different_day_moves_marker_to_that_day(client):
+    # Doing Thursday's planned workout on Friday should show it on Friday and
+    # clear the Thursday marker (the day it actually happened wins). The stored
+    # scheduled_date is intentionally left in place — only the calendar marker
+    # follows the fulfilling session's date.
+    tpl = _routine(client)
+    past = "2026-07-01"  # a past scheduled day; starting it completes it "now"
+    pw = client.post(
+        "/api/plan/planned",
+        json={"scheduled_date": past, "template_id": tpl["id"]},
+    ).json()
+    ses = client.post(f"/api/plan/planned/{pw['id']}/start").json()
+    today = ses["started_at"][:10]  # UTC date the session was actually started
+    assert today != past  # sanity: the completion day differs from the plan day
+
+    cal = client.get(
+        "/api/plan/calendar", params={"start": past, "end": today}
+    ).json()
+    planned_dates = [e["date"] for e in cal if e["kind"] == "planned"]
+    assert past not in planned_dates  # old day no longer marked
+    assert today in planned_dates  # planned marker follows to the completion day
+    # The fulfilling session is ABSORBED into the planned entry (one workout,
+    # one entry) — it must not also appear as its own session card.
+    assert not any(e["kind"] == "session" and e["id"] == ses["id"] for e in cal)
+    moved = next(e for e in cal if e["kind"] == "planned" and e["id"] == pw["id"])
+    assert moved["session_id"] == ses["id"]
 
 
 def test_delete_session_started_from_plan_detaches_and_reverts(client):

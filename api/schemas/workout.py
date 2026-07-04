@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from api.schemas.calendar_event import LoadIntensity, LoadRegions
 from api.schemas.exercise import ExerciseBrief, ExercisePerformance
 
 # Coarse terrain classes accepted for a route-capable activity (→ Pandolf
@@ -20,10 +19,34 @@ Terrain = Literal["treadmill", "road", "trail", "offtrail", "snow"]
 # (SI conversion + metabolic cost) is identical regardless of source.
 RouteSource = Literal["manual", "route_search", "route_draw", "gpx", "health"]
 
+# Coarse structured load vocabulary shared by every activity (retired from
+# the former api.schemas.calendar_event — merge_calendar_events_into_activity).
+LoadRegions = Literal["legs", "upper", "full", "core", "none"]
+LoadIntensity = Literal["light", "moderate", "hard"]
+
+# none | weekly. 'weekly' repeats every 7 days from the activity's own
+# started_at date, expanded server-side on read — never persisted as extra
+# rows (see api.services.recurrence).
+Recurrence = Literal["none", "weekly"]
+
 
 class WorkoutStart(BaseModel):
     template_id: int | None = None  # None => empty/ad-hoc workout
     name: str | None = None
+    # Optional session context, settable at the moment of starting (also
+    # editable later via PATCH): free-text tags/custom labels and a note of
+    # what was eaten/drunk/supplemented pre-workout.
+    tags: list[str] | None = None
+    pre_workout_fuel: str | None = None
+
+
+class WorkoutFinish(BaseModel):
+    """End-of-workout self-report, prompted when finishing. Both optional so a
+    user can just tap Finish and skip the rating; when given, each is a 1–10
+    score (energy/readiness vs. how hard the session was)."""
+
+    energy_level: int | None = Field(default=None, ge=1, le=10)
+    workout_intensity: int | None = Field(default=None, ge=1, le=10)
 
 
 class SetIn(BaseModel):
@@ -134,6 +157,14 @@ class ActivityLogIn(BaseModel):
     ``weight_unit``; distance/elevation in mi/ft when that unit is ``lb``,
     km/m when ``kg``). The router converts to canonical SI once, at the
     boundary.
+
+    Also covers what used to be a separate ``CalendarEvent`` create (a race,
+    a weekly league game, a trip, a rehab window) — ``recurrence`` /
+    ``event_end_date`` / ``objective_id`` / ``sport`` are the event-only
+    axes. There is no separate "planned" flag: a future ``started_at``
+    simply leaves ``ended_at`` null server-side (see
+    ``api.routers.workouts.log_activity``) until the user later logs what
+    happened.
     """
 
     name: str = Field(min_length=1, description="Display name, e.g. 'Indoor top-rope'")
@@ -141,8 +172,19 @@ class ActivityLogIn(BaseModel):
     duration_s: int | None = Field(default=None, ge=0)
     regions: LoadRegions = "full"
     intensity: LoadIntensity = "moderate"
-    # Optional backdate (e.g. logging yesterday's session). Defaults to now server-side.
+    # Optional backdate/future-date (e.g. logging yesterday's session, or
+    # scheduling a future race). Defaults to now server-side.
     started_at: datetime | None = None
+
+    # Event-merge fields (former CalendarEvent axes).
+    sport: str | None = None
+    recurrence: Recurrence = "none"
+    # Last day of a multi-day activity (>= started_at's date); omit for a
+    # single-day activity. Not supported alongside recurrence='weekly'.
+    event_end_date: date | None = None
+    # Set only when this activity IS itself a peak target an Objective
+    # anchors to (e.g. the race).
+    objective_id: int | None = None
 
     # Route capture — optional for every template.
     distance: float | None = Field(default=None, ge=0)
@@ -171,6 +213,21 @@ class ActivityLogIn(BaseModel):
             raise ValueError("bodyweight is required when pack_weight is given")
         return self
 
+    @model_validator(mode="after")
+    def _event_fields_consistent(self) -> ActivityLogIn:
+        if self.recurrence == "weekly" and self.event_end_date is not None:
+            raise ValueError("event_end_date is not supported for a weekly recurrence")
+        # A None started_at defaults to "now" server-side (api.routers.
+        # workouts.log_activity) — validated there against the resolved
+        # value, since "now" isn't known at schema-validation time.
+        if (
+            self.event_end_date is not None
+            and self.started_at is not None
+            and self.event_end_date < self.started_at.date()
+        ):
+            raise ValueError("event_end_date must be on or after the start date")
+        return self
+
 
 class ActivityDetailOut(BaseModel):
     template_key: str = "custom"
@@ -184,6 +241,11 @@ class ActivityDetailOut(BaseModel):
     terrain: str = "trail"
     metabolic_cost_kj: float | None = None
     source: str = "manual"
+    # Former CalendarEvent axes.
+    sport: str | None = None
+    event_end_date: date | None = None
+    recurrence: Recurrence = "none"
+    objective_id: int | None = None
 
 
 class WorkoutSessionOut(BaseModel):
@@ -193,10 +255,83 @@ class WorkoutSessionOut(BaseModel):
     started_at: datetime
     ended_at: datetime | None = None
     notes: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    pre_workout_fuel: str | None = None
+    energy_level: int | None = None
+    workout_intensity: int | None = None
     template_id: int | None = None
     exercises: list[SessionExerciseOut]
     # Present only for session_type == 'activity'.
     activity: ActivityDetailOut | None = None
+    # Set only on a materialized occurrence of a recurring activity — the id
+    # of the recurring "template" session it was expanded from.
+    recurrence_source_id: int | None = None
+
+
+class WorkoutSessionUpdate(BaseModel):
+    """Partial update to a session (``exclude_unset`` — only supplied fields
+    are applied). In practice activity-only today: a strength session is
+    edited via its exercise/set sub-resources, not this endpoint.
+
+    Serves BOTH "edit a still-open future/planned activity" and "log what
+    actually happened on one" — the only difference is whether ``ended_at``
+    is included. Setting it is what closes the row out; there's no separate
+    status transition. Re-opening a closed session (``ended_at`` back to
+    null) isn't supported here — omitted/null under ``exclude_unset`` are
+    indistinguishable, so this endpoint is additive-only on ``ended_at``.
+    """
+
+    name: str | None = Field(default=None, min_length=1)
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+    notes: str | None = None
+
+    # Session-tracking fields — apply to any session type (strength or
+    # activity), unlike the activity-only block below. ``tags`` replaces the
+    # whole list when supplied; the 1–10 ratings can be revised after the fact.
+    tags: list[str] | None = None
+    pre_workout_fuel: str | None = None
+    energy_level: int | None = Field(default=None, ge=1, le=10)
+    workout_intensity: int | None = Field(default=None, ge=1, le=10)
+
+    # Activity-detail fields — rejected (400) if the session isn't
+    # session_type == 'activity'.
+    template_key: str | None = None
+    duration_s: int | None = Field(default=None, ge=0)
+    regions: LoadRegions | None = None
+    intensity: LoadIntensity | None = None
+    distance: float | None = Field(default=None, ge=0)
+    elevation_gain: float | None = Field(default=None, ge=0)
+    terrain: Terrain | None = None
+    source: RouteSource | None = None
+    pack_weight: float | None = Field(default=None, gt=0)
+    bodyweight: float | None = Field(default=None, gt=0)
+
+    # Event-merge fields.
+    sport: str | None = None
+    recurrence: Recurrence | None = None
+    event_end_date: date | None = None
+    objective_id: int | None = None
+
+    @model_validator(mode="after")
+    def _bodyweight_required_with_pack(self) -> WorkoutSessionUpdate:
+        if self.pack_weight is not None and self.bodyweight is None:
+            raise ValueError("bodyweight is required when pack_weight is given")
+        return self
+
+    @model_validator(mode="after")
+    def _recurrence_end_date_exclusive(self) -> WorkoutSessionUpdate:
+        if self.recurrence == "weekly" and self.event_end_date is not None:
+            raise ValueError("event_end_date is not supported for a weekly recurrence")
+        return self
+
+
+class MaterializeOccurrenceIn(BaseModel):
+    """Turn one virtual (expanded-on-read, never-persisted) occurrence of a
+    recurring activity into a real, linked row — see
+    ``api.routers.workouts.materialize_occurrence``."""
+
+    occurrence_date: date
 
 
 class WorkoutSummary(BaseModel):
@@ -210,5 +345,9 @@ class WorkoutSummary(BaseModel):
     total_volume: float = Field(
         default=0.0, description="Sum of reps*weight over completed working sets"
     )
+    # Session-tracking summary bits surfaced on the history row.
+    tags: list[str] = Field(default_factory=list)
+    energy_level: int | None = None
+    workout_intensity: int | None = None
     # Compact activity facts for the history row (None otherwise).
     activity: ActivityDetailOut | None = None

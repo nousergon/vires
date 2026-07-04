@@ -98,6 +98,25 @@ else
   echo "coach: no tuned prompt at ${PROMPT_PARAM} — using public baseline (non-fatal)"
 fi
 
+# --- AI coach open-model provider: hydrate the OpenRouter key from SSM ------- #
+# The coach's ACTIVE provider is the /vires/llm/coach SSM param (krepis adapter;
+# flip live, no redeploy — e.g. "openrouter:moonshotai/kimi-k2.6"; rollback =
+# put-parameter back to "anthropic:claude-haiku-4-5"). NON-FATAL: missing key
+# => the coach 503s only while the active spec points at an OpenRouter provider.
+OR_PARAM="${VIRES_OPENROUTER_SSM_PARAM:-/vires/openrouter_api_key}"
+if ORKEY=$(aws ssm get-parameter --name "$OR_PARAM" --with-decryption \
+             --query Parameter.Value --output text 2>/dev/null) \
+   && [ -n "$ORKEY" ] && [ "$ORKEY" != "None" ]; then
+  grep -v '^VIRES_OPENROUTER_API_KEY=' "$ENV_FILE" > "$ENV_FILE.tmp" || true
+  mv "$ENV_FILE.tmp" "$ENV_FILE"
+  printf 'VIRES_OPENROUTER_API_KEY=%s\n' "$ORKEY" >> "$ENV_FILE"   # value not traced (no set -x)
+  chmod 600 "$ENV_FILE"
+  unset ORKEY
+  echo "coach: hydrated OpenRouter key from ${OR_PARAM}"
+else
+  echo "coach: no key at ${OR_PARAM} — open-model providers unavailable (non-fatal)"
+fi
+
 # --- Speech-to-text: hydrate the STT key from SSM into .env ------------------ #
 # NON-FATAL: missing key => /coach/transcribe 503s and the mic is hidden client-side.
 STT_PARAM="${VIRES_STT_SSM_PARAM:-/vires/stt_api_key}"

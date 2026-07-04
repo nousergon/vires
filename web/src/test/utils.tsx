@@ -107,6 +107,10 @@ export function makeActivityDetail(over: Partial<ActivityDetail> = {}): Activity
     terrain: 'trail',
     metabolic_cost_kj: null,
     source: 'manual',
+    sport: null,
+    event_end_date: null,
+    recurrence: 'none',
+    objective_id: null,
     ...over,
   }
 }
@@ -119,9 +123,14 @@ export function makeSession(over: Partial<WorkoutSession> = {}): WorkoutSession 
     started_at: '2026-06-28T18:00:00Z',
     ended_at: null,
     notes: null,
+    tags: [],
+    pre_workout_fuel: null,
+    energy_level: null,
+    workout_intensity: null,
     template_id: null,
     exercises: [makeSessionExercise()],
     activity: null,
+    recurrence_source_id: null,
     ...over,
   }
 }

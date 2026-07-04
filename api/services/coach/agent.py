@@ -11,9 +11,8 @@ deterministic materializer does the arithmetic.
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date
-
-from pydantic import ValidationError
 
 from api.config import get_settings
 from api.schemas.coach import ProgramSpec
@@ -24,6 +23,8 @@ from api.services.coach.materialize import (
 )
 from api.services.coach.objective_context import CoachObjectiveContext
 from api.services.coach.prompt_loader import load_system_prompt
+
+logger = logging.getLogger(__name__)
 
 TOOL_NAME = "emit_program_spec"
 
@@ -129,7 +130,7 @@ def _objective_block(obj_ctx: CoachObjectiveContext | None, today: date) -> dict
         block["events"] = [
             {
                 "name": e.name,
-                "type": e.type,
+                "template_key": e.template_key,
                 "sport": e.sport,
                 "date": e.occurrence_date.isoformat(),
                 "end_date": e.occurrence_end_date.isoformat()
@@ -301,6 +302,34 @@ def _validate_grounding(
             )
 
 
+def _resolve_spec():
+    """The active coach ModelSpec: VIRES_COACH_LLM env → SSM (60s TTL) → default.
+
+    The code default is the pre-adapter behavior (Anthropic + coach_model),
+    so a deploy with no SSM param seeded is behavior-identical.
+    """
+    from krepis.llm_config import ModelSpec, resolve_model_spec
+
+    settings = get_settings()
+    return resolve_model_spec(
+        settings.coach_llm_ssm_param,
+        env_var="VIRES_COACH_LLM",
+        default=ModelSpec(
+            "anthropic", settings.coach_model, max_tokens=settings.coach_max_tokens
+        ),
+        max_tokens=settings.coach_max_tokens,
+    )
+
+
+def _api_key_for(spec) -> str | None:  # noqa: ANN001
+    """The settings-held key for the active provider (VIRES_-prefixed env,
+    SSM-hydrated at deploy — NOT the bare env vars krepis defaults to)."""
+    settings = get_settings()
+    if spec.provider == "anthropic":
+        return settings.anthropic_api_key
+    return settings.openrouter_api_key
+
+
 def generate_spec(
     message: str,
     ctx: MaterializeContext,
@@ -308,24 +337,34 @@ def generate_spec(
     prior_spec: ProgramSpec | None = None,
     obj_ctx: CoachObjectiveContext | None = None,
 ) -> ProgramSpec:
-    """Call the model (forced tool-use) and return a validated, grounded ProgramSpec.
+    """Call the model (forced structured output) and return a validated,
+    grounded ProgramSpec.
+
+    Runs through the krepis provider-agnostic adapter: forced tool-use on the
+    anthropic transport, strict json_schema on OpenAI-compatible providers —
+    the same validated ``ProgramSpec`` contract either way. The grounding
+    check (`_validate_grounding`) plugs into the adapter's bounded corrective
+    retry, so an ungrounded spec is fed back to the model exactly as before.
 
     When ``obj_ctx`` carries an active objective/constraints, the model is asked
     to reverse-build the mesocycle to peak/taper to the objective's date and to
     train around the constraints (see the system prompt)."""
-    settings = get_settings()
-    if not settings.anthropic_api_key:
-        raise CoachUnavailable("AI coach is not configured (no Anthropic API key).")
-
     # Imported lazily so the app (and its tests) load without the SDK/key present.
-    import anthropic
+    from krepis.llm import LLMClient, LLMError
+    from krepis.llm_config import LLMConfigError
 
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-    tool = {
-        "name": TOOL_NAME,
-        "description": "Emit the structured multi-week training program.",
-        "input_schema": ProgramSpec.model_json_schema(),
-    }
+    try:
+        spec_cfg = _resolve_spec()
+    except LLMConfigError as e:
+        raise CoachUnavailable(f"AI coach model config is invalid: {e}") from e
+    api_key = _api_key_for(spec_cfg)
+    if not api_key:
+        raise CoachUnavailable(
+            f"AI coach is not configured (no API key for provider "
+            f"'{spec_cfg.provider}')."
+        )
+
+    client = LLMClient(spec_cfg, api_key=api_key)
 
     user_text = (
         f"CONTEXT:\n{_context_block(ctx, today, obj_ctx)}\n\nREQUEST:\n{message.strip()}"
@@ -336,45 +375,83 @@ def generate_spec(
             "to it and emit the full updated spec:\n"
             f"{prior_spec.model_dump_json(indent=2)}"
         )
-    messages: list[dict] = [{"role": "user", "content": user_text}]
 
-    last_err: Exception | None = None
-    for _attempt in range(2):  # one initial try + one correction retry
-        resp = client.messages.create(
-            model=settings.coach_model,
-            max_tokens=settings.coach_max_tokens,
+    def _grounding(spec: ProgramSpec) -> None:
+        _validate_grounding(spec, ctx, obj_ctx)
+
+    try:
+        result = client.structured(
             system=load_system_prompt(),
-            tools=[tool],
-            tool_choice={"type": "tool", "name": TOOL_NAME},
-            messages=messages,
+            user_content=user_text,
+            schema=ProgramSpec,
+            schema_name=TOOL_NAME,
+            validate=_grounding,
+            attempts=2,  # one initial try + one correction retry (unchanged)
+            max_tokens=get_settings().coach_max_tokens,
         )
-        tool_input = _extract_tool_input(resp)
-        if tool_input is None:
-            last_err = CoachError("model did not call emit_program_spec")
-            break
-        try:
-            spec = ProgramSpec.model_validate(tool_input)
-            _validate_grounding(spec, ctx, obj_ctx)
-            return spec
-        except (ValidationError, ValueError) as e:
-            last_err = e
-            # Feed the error back and ask for a corrected spec (forced tool again).
-            messages.append({"role": "assistant", "content": resp.content})
-            messages.append(
-                {
-                    "role": "user",
-                    "content": (
-                        f"That emit_program_spec call was invalid: {e}\n"
-                        "Emit a corrected emit_program_spec using only the CONTEXT ids."
-                    ),
-                }
+    except LLMConfigError as e:
+        raise CoachUnavailable(f"AI coach configuration error: {e}") from e
+    except LLMError as e:
+        _record_telemetry(None, spec_cfg, failed_usage=e.usage)
+        raise CoachError(f"coach could not produce a valid program: {e}") from e
+
+    _record_telemetry(result, spec_cfg)
+    return result.parsed
+
+
+def _record_telemetry(result, spec_cfg, *, failed_usage=None) -> None:  # noqa: ANN001
+    """Cost row + SFT distillation capture for one generation (or the spend of
+    a failed one).
+
+    Best-effort by declared exception: the deliverable is the training
+    program; a telemetry failure is (a) the swallowed mode, (b) the program
+    still returns / the CoachError still raises, (c) recorded on a WARNING
+    log line — the fail-loud policy's accepted secondary-observability shape.
+    """
+    from pathlib import Path
+
+    settings = get_settings()
+    try:
+        import json as _json
+
+        from krepis.cost import record_llm_call
+
+        if result is not None:
+            record = record_llm_call(result, extra_fields={"product": "vires_coach"})
+        elif failed_usage is not None:
+            from krepis.llm import LLMResult
+
+            record = record_llm_call(
+                LLMResult(
+                    text="", model=spec_cfg.model, provider=spec_cfg.provider,
+                    usage=failed_usage, raw_request={},
+                ),
+                extra_fields={"product": "vires_coach", "failed": True},
             )
+        else:
+            return
+        log_path = Path(settings.coach_cost_log_path)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a") as fh:
+            fh.write(_json.dumps(record, default=str) + "\n")
+        logger.info(
+            "coach cost: $%.5f (%s %s, in=%d out=%d, source=%s)",
+            record["cost_usd"], record["provider"], record["model"],
+            record["input_tokens"], record["output_tokens"], record["cost_source"],
+        )
+    except Exception as e:  # noqa: BLE001 — telemetry never breaks the coach
+        logger.warning("coach cost telemetry skipped: %s", e)
 
-    raise CoachError(f"coach could not produce a valid program: {last_err}")
+    if result is None:
+        return
+    try:
+        from krepis.llm_capture import capture_llm_call
 
-
-def _extract_tool_input(resp) -> dict | None:  # noqa: ANN001
-    for block in resp.content:
-        if getattr(block, "type", None) == "tool_use" and block.name == TOOL_NAME:
-            return block.input
-    return None
+        capture_llm_call(
+            result,
+            producer="vires_coach",
+            sink_path=settings.coach_sft_sink_path,
+            meta={"provider": spec_cfg.provider},
+        )
+    except Exception as e:  # noqa: BLE001 — telemetry never breaks the coach
+        logger.warning("coach SFT capture skipped: %s", e)

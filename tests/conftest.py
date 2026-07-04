@@ -39,12 +39,20 @@ _USER_TABLES = [
     "template_exercises",
     "workout_templates",
     "programs",
-    "calendar_events",
     "objectives",
     "training_constraints",
     "push_subscriptions",
     "user_settings",
 ]
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_coach_spec(monkeypatch):
+    """Pin the coach ModelSpec via the env override so tests never read the
+    live /vires/llm/coach SSM parameter (the env layer wins before any boto3
+    call in krepis resolve_model_spec). The anthropic transport keeps the
+    existing `anthropic.Anthropic` monkeypatch seams working unchanged."""
+    monkeypatch.setenv("VIRES_COACH_LLM", "anthropic:claude-haiku-4-5")
 
 
 @pytest.fixture(scope="session", autouse=True)

@@ -15,6 +15,9 @@ self.addEventListener('push', (event) => {
       body: data.body || '',
       tag: 'vires-timer',
       renotify: true,
+      // Buzz on the locked screen too, so an end-of-timer alert reaches the
+      // user out of the app (the in-app beep/vibrate can't fire backgrounded).
+      vibrate: [120, 60, 120],
       icon: '/icon-192.png',
       badge: '/icon-192.png',
     }),

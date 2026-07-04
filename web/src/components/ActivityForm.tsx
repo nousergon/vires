@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, type LoadIntensity, type LoadRegions, type Terrain, type WorkoutSession } from '../lib/api'
+import {
+  api,
+  type LoadIntensity,
+  type LoadRegions,
+  type Terrain,
+  type WorkoutSession,
+} from '../lib/api'
 import { useSettings } from '../lib/useSettings'
 import { fmtLoad } from '../lib/units'
 import { isoDate } from '../lib/calendar'
@@ -37,11 +43,20 @@ function num(v: string): number | null {
   return Number.isFinite(n) ? n : null
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string
+  hint?: string
+  children: React.ReactNode
+}) {
   return (
     <label className="block">
       <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">
         {label}
+        {hint && <span className="ml-2 normal-case font-normal text-slate-500">{hint}</span>}
       </span>
       {children}
     </label>
@@ -59,15 +74,21 @@ function startedAtFor(dateStr: string): string {
 export default function ActivityForm({
   open,
   defaultDate,
+  sessionId,
   onClose,
+  onSaved,
 }: {
   open: boolean
   // Seed the log date (e.g. the tapped Plan-calendar day). Omit for "today".
   defaultDate?: string | null
+  // Present = edit/prefill this existing session (via PATCH); absent = create new.
+  sessionId?: number | null
   onClose: () => void
+  onSaved?: () => void
 }) {
   const qc = useQueryClient()
   const { weight_unit } = useSettings()
+  const editing = sessionId != null
 
   const [date, setDate] = useState(() => defaultDate ?? isoDate(new Date()))
   const [templateKey, setTemplateKey] = useState('custom')
@@ -84,18 +105,72 @@ export default function ActivityForm({
   // Load-carriage — optional on every route-capable template.
   const [pack, setPack] = useState(() => localStorage.getItem(LAST_PACK) ?? '')
   const [body, setBody] = useState(() => localStorage.getItem(LAST_BODY) ?? '')
+  // Planning fields (former CalendarEvent axes) — shown when the chosen date
+  // is in the future, or when editing a row that already has one of these set.
+  // NOTE: there is deliberately NO sport field here — the Activity picker IS
+  // the sport for an activity/event (the coach receives template_key). The
+  // sport-keyed needs-analysis (demands_profile_for_sport, e.g. 'alpine')
+  // belongs to Objectives and is set in ObjectiveSheet. The API still accepts
+  // ActivityDetail.sport; this form just never sends it (PATCH is
+  // exclude_unset, so existing values are preserved on edit).
+  const [recurWeekly, setRecurWeekly] = useState(false)
+  const [eventEndDate, setEventEndDate] = useState('')
+  const [objectiveId, setObjectiveId] = useState('')
   const [result, setResult] = useState<WorkoutSession | null>(null)
 
   const packPresets = weight_unit === 'kg' ? [10, 15, 20, 25] : [20, 30, 40, 50]
 
-  // Re-seed the date whenever the sheet (re)opens with a new default — the
-  // sheet stays mounted while hidden, so a mount-time useState initializer
-  // alone wouldn't pick up a changed defaultDate on reopen.
+  const { data: existing, isLoading: loadingExisting } = useQuery({
+    queryKey: ['workout', sessionId],
+    queryFn: () => api.getWorkout(sessionId as number),
+    enabled: open && editing,
+  })
+
+  const { data: objectives = [] } = useQuery({
+    queryKey: ['objectives'],
+    queryFn: api.listObjectives,
+    enabled: open,
+  })
+
+  // Re-seed everything whenever the sheet (re)opens — it stays mounted while
+  // hidden, so a mount-time useState initializer alone wouldn't pick up a
+  // changed defaultDate/sessionId, or the fetched `existing` row, on reopen.
   useEffect(() => {
     if (!open) return
-    setDate(defaultDate ?? isoDate(new Date()))
+    setResult(null)
+    if (editing && existing) {
+      setDate(isoDate(new Date(existing.started_at)))
+      setTemplateKey(existing.activity?.template_key ?? 'custom')
+      setName(existing.name ?? '')
+      setRegions(existing.activity?.regions ?? 'full')
+      setIntensity(existing.activity?.intensity ?? 'moderate')
+      const durS = existing.activity?.duration_s ?? 0
+      setHours(durS ? String(Math.floor(durS / 3600)) : '')
+      setMinutes(durS ? String(Math.floor((durS % 3600) / 60)) : '')
+      setDistance('')
+      setElevation('')
+      setTerrain((existing.activity?.terrain as Terrain) ?? 'trail')
+      setRecurWeekly(existing.activity?.recurrence === 'weekly')
+      setEventEndDate(existing.activity?.event_end_date ?? '')
+      setObjectiveId(existing.activity?.objective_id != null ? String(existing.activity.objective_id) : '')
+    } else if (!editing) {
+      setDate(defaultDate ?? isoDate(new Date()))
+      setTemplateKey('custom')
+      setName('')
+      setRegions('full')
+      setIntensity('moderate')
+      setHours('')
+      setMinutes('')
+      setRouteMode('manual')
+      setDistance('')
+      setElevation('')
+      setTerrain('trail')
+      setRecurWeekly(false)
+      setEventEndDate('')
+      setObjectiveId('')
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, defaultDate])
+  }, [open, editing, existing?.id])
 
   const { data: templates = [] } = useQuery({
     queryKey: ['activity-templates'],
@@ -114,31 +189,49 @@ export default function ActivityForm({
     setIntensity(tpl.intensity)
   }
 
-  const log = useMutation({
-    mutationFn: () => {
-      const durationS = (num(hours) ?? 0) * 3600 + (num(minutes) ?? 0) * 60 || null
-      return api.logActivity({
-        name: name.trim(),
-        template_key: templateKey,
-        duration_s: durationS,
-        regions,
-        intensity,
+  const today = isoDate(new Date())
+  const isFuture = date > today
+  // Shown for a future date, OR when editing a row that already carries one
+  // of these event axes — whether it's planned or happened is solely a
+  // factor of date, never of which template was picked.
+  const showPlanning =
+    isFuture || (editing && !!existing?.activity && (
+      existing.activity.recurrence === 'weekly' ||
+      !!existing.activity.event_end_date ||
+      existing.activity.objective_id != null
+    ))
+
+  function activityFields() {
+    const durationS = (num(hours) ?? 0) * 3600 + (num(minutes) ?? 0) * 60 || null
+    return {
+      name: name.trim(),
+      template_key: templateKey,
+      duration_s: durationS,
+      regions,
+      intensity,
+      ...(isRouteCapable
+        ? {
+            distance: num(distance),
+            elevation_gain: num(elevation),
+            terrain,
+            source: modeSource(routeMode),
+            pack_weight: num(pack),
+            bodyweight: num(body),
+          }
+        : {}),
+      recurrence: (recurWeekly ? 'weekly' : 'none') as 'weekly' | 'none',
+      event_end_date: !recurWeekly && eventEndDate ? eventEndDate : null,
+      objective_id: objectiveId ? Number(objectiveId) : null,
+    }
+  }
+
+  const create = useMutation({
+    mutationFn: () =>
+      api.logActivity({
+        ...activityFields(),
         started_at: startedAtFor(date),
-        ...(isRouteCapable
-          ? {
-              distance: num(distance),
-              elevation_gain: num(elevation),
-              terrain,
-              source: modeSource(routeMode),
-              pack_weight: num(pack),
-              bodyweight: num(body),
-            }
-          : {}),
-      })
-    },
+      }),
     onSuccess: (ws) => {
-      // Only persist pack/bodyweight when this log actually used them — an
-      // unrelated custom entry shouldn't blank out a remembered pack weight.
       if (isRouteCapable) {
         if (pack) localStorage.setItem(LAST_PACK, pack)
         if (body) localStorage.setItem(LAST_BODY, body)
@@ -146,34 +239,58 @@ export default function ActivityForm({
       qc.invalidateQueries({ queryKey: ['workouts'] })
       qc.invalidateQueries({ queryKey: ['calendar'] })
       setResult(ws)
+      onSaved?.()
     },
   })
 
+  const save = useMutation({
+    mutationFn: () => {
+      // Closing a row out (setting ended_at) happens automatically once its
+      // date has arrived — never a separate status action — but only the
+      // FIRST time (an already-closed row keeps its original completion
+      // timestamp; a recurring template is never closed).
+      const closeItOut =
+        existing != null &&
+        existing.ended_at == null &&
+        !recurWeekly &&
+        date <= today
+      return api.updateWorkout(sessionId as number, {
+        ...activityFields(),
+        started_at: startedAtFor(date),
+        ...(closeItOut ? { ended_at: new Date().toISOString() } : {}),
+      })
+    },
+    onSuccess: (ws) => {
+      if (isRouteCapable) {
+        if (pack) localStorage.setItem(LAST_PACK, pack)
+        if (body) localStorage.setItem(LAST_BODY, body)
+      }
+      qc.invalidateQueries({ queryKey: ['workouts'] })
+      qc.invalidateQueries({ queryKey: ['calendar'] })
+      qc.invalidateQueries({ queryKey: ['workout', sessionId] })
+      setResult(ws)
+      onSaved?.()
+    },
+  })
+
+  const submit = editing ? save : create
+
   function reset() {
     setResult(null)
-    setDate(defaultDate ?? isoDate(new Date()))
-    setTemplateKey('custom')
-    setName('')
-    setRegions('full')
-    setIntensity('moderate')
-    setHours('')
-    setMinutes('')
-    setRouteMode('manual')
-    setDistance('')
-    setElevation('')
-    setTerrain('trail')
-    log.reset()
+    submit.reset()
     onClose()
   }
 
-  const canSubmit = name.trim().length > 0 && !log.isPending
+  const canSubmit = name.trim().length > 0 && !submit.isPending
 
   return (
-    <Sheet open={open} onClose={reset} title="Log an activity">
-      {result ? (
+    <Sheet open={open} onClose={reset} title={editing ? 'Edit activity' : 'Add activity'}>
+      {editing && loadingExisting ? (
+        <Spinner />
+      ) : result ? (
         <div className="space-y-4 text-center">
           <div className="text-5xl">{result.activity?.pack_weight_kg != null ? '🎒' : '🏃'}</div>
-          <p className="text-slate-300">{result.name} logged.</p>
+          <p className="text-slate-300">{result.name} {editing ? 'updated' : 'logged'}.</p>
           {result.activity?.metabolic_cost_kj != null && (
             <p className="text-lg font-semibold text-amber-400">
               {fmtLoad(result.activity.metabolic_cost_kj)} of load
@@ -190,42 +307,29 @@ export default function ActivityForm({
               className={inputCls}
               type="date"
               value={date}
-              max={isoDate(new Date())}
               onChange={(e) => setDate(e.target.value)}
             />
           </Field>
 
+          {/* A dropdown, not a pill wall — the catalog is 20+ templates and
+              still growing; scanning pills across seven rows beat the point
+              of a quick-log form. Custom leads (it's the default). */}
           <Field label="Activity">
             {templates.length === 0 ? (
               <Spinner />
             ) : (
-              <div className="flex flex-wrap gap-2">
+              <select
+                className={inputCls}
+                value={templateKey}
+                onChange={(e) => pickTemplate(e.target.value)}
+              >
+                <option value="custom">Custom</option>
                 {templates.map((t) => (
-                  <button
-                    key={t.key}
-                    type="button"
-                    onClick={() => pickTemplate(t.key)}
-                    className={`rounded-full border px-3 py-1.5 text-sm ${
-                      templateKey === t.key
-                        ? 'border-amber-600/60 bg-amber-900/30 text-amber-200'
-                        : 'border-slate-700 text-slate-300 hover:bg-slate-800'
-                    }`}
-                  >
+                  <option key={t.key} value={t.key}>
                     {t.label}
-                  </button>
+                  </option>
                 ))}
-                <button
-                  type="button"
-                  onClick={() => pickTemplate('custom')}
-                  className={`rounded-full border px-3 py-1.5 text-sm ${
-                    templateKey === 'custom'
-                      ? 'border-amber-600/60 bg-amber-900/30 text-amber-200'
-                      : 'border-slate-700 text-slate-300 hover:bg-slate-800'
-                  }`}
-                >
-                  Custom
-                </button>
-              </div>
+              </select>
             )}
           </Field>
 
@@ -237,6 +341,48 @@ export default function ActivityForm({
               placeholder="e.g. Ultimate frisbee"
             />
           </Field>
+
+          {showPlanning && (
+            <div className="space-y-3 rounded-lg border border-fuchsia-800/40 bg-fuchsia-900/10 p-3">
+              <label className="flex items-center gap-2 text-sm text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={recurWeekly}
+                  onChange={(e) => setRecurWeekly(e.target.checked)}
+                  className="h-4 w-4 accent-amber-500"
+                />
+                Repeats weekly
+              </label>
+
+              {!recurWeekly && (
+                <Field label="Ends" hint="optional — last day of a multi-day trip">
+                  <input
+                    className={inputCls}
+                    type="date"
+                    value={eventEndDate}
+                    min={date || undefined}
+                    onChange={(e) => setEventEndDate(e.target.value)}
+                  />
+                </Field>
+              )}
+
+              <Field label="Anchor to objective" hint="optional — this IS the peak target">
+                <select
+                  className={inputCls}
+                  value={objectiveId}
+                  onChange={(e) => setObjectiveId(e.target.value)}
+                >
+                  <option value="">None</option>
+                  {objectives.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+
+            </div>
+          )}
 
           {isRouteCapable ? (
             <>
@@ -365,11 +511,11 @@ export default function ActivityForm({
               Add a pack weight to see a load estimate — distance + time unlock it.
             </p>
           )}
-          {log.isError && (
-            <p className="text-sm text-red-400">Couldn't log the activity. Try again.</p>
+          {submit.isError && (
+            <p className="text-sm text-red-400">Couldn't save the activity. Try again.</p>
           )}
-          <Button className="w-full" onClick={() => log.mutate()} disabled={!canSubmit}>
-            {log.isPending ? 'Logging…' : 'Log activity'}
+          <Button className="w-full" onClick={() => submit.mutate()} disabled={!canSubmit}>
+            {submit.isPending ? 'Saving…' : editing ? 'Save' : isFuture ? 'Add activity' : 'Log activity'}
           </Button>
         </div>
       )}

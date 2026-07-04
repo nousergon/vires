@@ -51,7 +51,10 @@ class EventOccurrenceCtx:
     coach can schedule around."""
 
     name: str
-    type: str  # 'competition' | 'league' | 'recreation' | 'travel' | 'rehab'
+    # Activity-template key (formerly CalendarEvent.type: 'competition' |
+    # 'league' | 'recreation' | 'travel' | 'rehab' — now any
+    # api.services.activity_templates key, e.g. 'race' | 'league_game').
+    template_key: str
     occurrence_date: date
     # Last day of this occurrence (multi-day one-off events only; None otherwise).
     occurrence_end_date: date | None = None

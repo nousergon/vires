@@ -12,11 +12,12 @@ framed to the user as "the coach did this," never asked about.
 
 "Fit to train on" is recovery-aware, not just "the first empty square on the
 calendar": a missed workout must never land the day of, before, or after a
-hard-intensity ``CalendarEvent`` (a big hike, a race — the events the coach
-trains AROUND, see ``api.services.calendar_events``), and PREFERABLY doesn't
-land immediately adjacent to another already-scheduled ``PlannedWorkout``
-either (a soft preference — used as a fallback rather than leaving the
-workout unscheduled).
+hard-intensity activity/event (a big hike, a race — what the coach trains
+AROUND; formerly a separate ``CalendarEvent``, now just an ``ActivityDetail``
+row with ``recurrence``/``event_end_date`` set, see
+``api.services.recurrence``), and PREFERABLY doesn't land immediately
+adjacent to another already-scheduled ``PlannedWorkout`` either (a soft
+preference — used as a fallback rather than leaving the workout unscheduled).
 
 ``plan_reschedule_moves`` is pure (no DB) so it's unit-testable in
 isolation; ``reschedule_missed`` is the thin DB-querying + mutating wrapper —
@@ -32,8 +33,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from api.db.identity import Identity
-from api.db.models import CalendarEvent, PlannedWorkout
-from api.services.calendar_events import expand_occurrences
+from api.db.models import ActivityDetail, PlannedWorkout, WorkoutSession
+from api.services.recurrence import expand_occurrences
 
 # Flat lookahead when a missed workout has no program (or its program has no
 # end_date) to bound the search against.
@@ -55,11 +56,10 @@ def plan_reschedule_moves(
     workout placed earlier in the pass correctly becomes a soft-preference
     neighbor for the next one placed.
 
-    ``hard_blocked`` = every day within reach of a hard-intensity
-    ``CalendarEvent`` (the event's own span plus one day of buffer on each
-    side) — never a valid landing day, no exceptions. A hard event demands
-    rest on BOTH sides (arrive fresh, then recover), so this check is
-    symmetric.
+    ``hard_blocked`` = every day within reach of a hard-intensity activity
+    (the activity's own span plus one day of buffer on each side) — never a
+    valid landing day, no exceptions. A hard activity demands rest on BOTH
+    sides (arrive fresh, then recover), so this check is symmetric.
 
     For each missed workout: walk ``today`` .. its horizon and collect every
     day that is neither in ``occupied`` nor in ``hard_blocked`` (the hard
@@ -106,18 +106,22 @@ def plan_reschedule_moves(
 
 
 def _hard_blocked_dates(
-    events: list[CalendarEvent], window_start: date, window_end: date
+    activity_rows: list[tuple[WorkoutSession, ActivityDetail]],
+    window_start: date,
+    window_end: date,
 ) -> set[date]:
-    """Expand hard-intensity events (weekly recurrence included, via
-    ``calendar_events.expand_occurrences``) into the set of days a missed
-    workout must not land on: the event's own span, plus one day of buffer
-    on each side of that span. 'moderate'/'light' events (and events with no
-    ``load`` at all) impose no buffer."""
+    """Expand hard-intensity activities (weekly recurrence included, via
+    ``api.services.recurrence.expand_occurrences``) into the set of days a
+    missed workout must not land on: the activity's own span, plus one day
+    of buffer on each side of that span. 'moderate'/'light' activities
+    impose no buffer."""
     blocked: set[date] = set()
-    for event in events:
-        if not event.load or event.load.get("intensity") != "hard":
+    for ws, ad in activity_rows:
+        if ad.intensity != "hard":
             continue
-        for occ_start, occ_end in expand_occurrences(event, window_start, window_end):
+        for occ_start, occ_end in expand_occurrences(
+            ws.started_at.date(), ad.event_end_date, ad.recurrence, window_start, window_end
+        ):
             span_end = occ_end or occ_start
             d = occ_start - timedelta(days=1)
             last = span_end + timedelta(days=1)
@@ -173,18 +177,30 @@ def reschedule_missed(
         ).all()
     )
 
-    events = list(
-        db.scalars(
-            select(CalendarEvent).where(
-                CalendarEvent.tenant_id == ident.tenant_id,
-                CalendarEvent.user_id == ident.user_id,
+    # Every activity within reach, regardless of open/closed — a `CalendarEvent`
+    # row was ALWAYS a constraint (it had no `ended_at`/closed concept at
+    # all), and the recovery need a hard-intensity day imposes on its
+    # neighbors doesn't stop mattering just because it's since been logged.
+    # Unlike `_build_event_ctxs` (coach planning — "what's still upcoming,"
+    # correctly `ended_at IS NULL` there), this is a narrower mechanical
+    # adjacency check, and it's already bounded to the near-term window below
+    # (`expand_occurrences`' own span-intersection check excludes anything
+    # outside it) — no separate open/closed gate needed.
+    activity_rows = list(
+        db.execute(
+            select(WorkoutSession, ActivityDetail)
+            .join(ActivityDetail, ActivityDetail.session_id == WorkoutSession.id)
+            .where(
+                WorkoutSession.tenant_id == ident.tenant_id,
+                WorkoutSession.user_id == ident.user_id,
+                WorkoutSession.session_type == "activity",
             )
         ).all()
     )
     # Padded by one day on each side so a hard event just outside the raw
     # horizon still casts its buffer onto the last in-horizon day.
     hard_blocked = _hard_blocked_dates(
-        events, today - timedelta(days=1), horizon_end + timedelta(days=1)
+        activity_rows, today - timedelta(days=1), horizon_end + timedelta(days=1)
     )
 
     moves = plan_reschedule_moves(missed, occupied, hard_blocked, today)

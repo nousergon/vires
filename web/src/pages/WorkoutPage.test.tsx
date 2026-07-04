@@ -54,7 +54,7 @@ describe('WorkoutPage — StartView (no active workout)', () => {
     vi.spyOn(api, 'listActivityTemplates').mockResolvedValue([])
     renderWithProviders(<WorkoutPage />)
     fireEvent.click(await screen.findByText('🏃 Log an activity'))
-    expect(await screen.findByText('Log an activity')).toBeInTheDocument()
+    expect(await screen.findByText('Add activity')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('e.g. Ultimate frisbee')).toBeInTheDocument()
   })
 })
@@ -166,6 +166,52 @@ describe('WorkoutPage — ActiveWorkout', () => {
     await waitFor(() => expect(upd).toHaveBeenCalledWith(10, 100, 1000, { weight: 145 }))
   })
 
+  it('cascades a weight edit into the subsequent sets', async () => {
+    const se = makeSessionExercise({
+      id: 100,
+      sets: [
+        makeSet({ id: 1000, set_number: 1, weight: 135 }),
+        makeSet({ id: 1001, set_number: 2, weight: 135 }),
+        makeSet({ id: 1002, set_number: 3, weight: 135 }),
+      ],
+    })
+    vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession({ exercises: [se] }))
+    const upd = vi.spyOn(api, 'updateSet').mockResolvedValue(makeSet())
+    renderWithProviders(<WorkoutPage />)
+    await screen.findByText('Bench Press')
+    const weights = screen.getAllByDisplayValue('135')
+    fireEvent.change(weights[0], { target: { value: '145' } }) // edit set 1
+    fireEvent.blur(weights[0])
+    // set 1 saved, and sets 2 + 3 auto-populate to 145
+    await waitFor(() => expect(upd).toHaveBeenCalledWith(10, 100, 1000, { weight: 145 }))
+    await waitFor(() => expect(upd).toHaveBeenCalledWith(10, 100, 1001, { weight: 145 }))
+    expect(upd).toHaveBeenCalledWith(10, 100, 1002, { weight: 145 })
+  })
+
+  it('uses the freshly edited rest value when a set is completed immediately', async () => {
+    vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession())
+    vi.spyOn(api, 'updateWorkoutExercise').mockResolvedValue(makeSessionExercise())
+    vi.spyOn(api, 'updateSet').mockResolvedValue(makeSet({ completed_at: 'x' }))
+    renderWithProviders(<WorkoutPage />)
+    const rest = await screen.findByDisplayValue('90') // rest seeded at 90
+    fireEvent.change(rest, { target: { value: '60' } }) // change but don't blur/persist
+    fireEvent.click(screen.getByTitle('Mark done'))
+    // the rest bar counts down from the NEW 60, not the stale persisted 90
+    expect(await screen.findByText('Rest')).toBeInTheDocument()
+    expect((screen.getByLabelText('Set timer seconds') as HTMLInputElement).value).toBe('60')
+  })
+
+  it('vibrates as a confirmation ping when a set is marked done', async () => {
+    const vibrate = vi.fn()
+    Object.defineProperty(navigator, 'vibrate', { value: vibrate, configurable: true, writable: true })
+    vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession())
+    vi.spyOn(api, 'updateSet').mockResolvedValue(makeSet({ completed_at: 'x' }))
+    renderWithProviders(<WorkoutPage />)
+    await screen.findByText('Bench Press')
+    fireEvent.click(screen.getByTitle('Mark done'))
+    await waitFor(() => expect(vibrate).toHaveBeenCalled())
+  })
+
   it('toggles warm-up and deletes a set', async () => {
     vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession())
     const upd = vi.spyOn(api, 'updateSet').mockResolvedValue(makeSet())
@@ -185,13 +231,46 @@ describe('WorkoutPage — ActiveWorkout', () => {
     await waitFor(() => expect(rm).toHaveBeenCalledWith(10, 100))
   })
 
-  it('finishes the workout', async () => {
+  it('finishes the workout by skipping the end-of-workout rating', async () => {
     vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession())
     const fin = vi.spyOn(api, 'finishWorkout').mockResolvedValue(makeSession({ ended_at: 'x' }))
     renderWithProviders(<WorkoutPage />)
-    fireEvent.click(await screen.findByText('Finish'))
-    await waitFor(() => expect(fin).toHaveBeenCalledWith(10))
+    fireEvent.click(await screen.findByText('Finish')) // header → opens the finish sheet
+    fireEvent.click(await screen.findByText('Skip'))
+    await waitFor(() => expect(fin).toHaveBeenCalledWith(10, undefined))
     await waitFor(() => expect(localStorage.getItem(ACTIVE_KEY)).toBeNull())
+  })
+
+  it('records the end-of-workout energy + intensity ratings on finish', async () => {
+    vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession())
+    const fin = vi.spyOn(api, 'finishWorkout').mockResolvedValue(makeSession({ ended_at: 'x' }))
+    renderWithProviders(<WorkoutPage />)
+    fireEvent.click(await screen.findByText('Finish')) // open sheet
+    fireEvent.click(await screen.findByLabelText('Energy level 8'))
+    fireEvent.click(await screen.findByLabelText('Workout intensity 6'))
+    // Two "Finish" buttons now exist (header + sheet) — the sheet's is last.
+    const finishButtons = screen.getAllByText('Finish')
+    fireEvent.click(finishButtons[finishButtons.length - 1])
+    await waitFor(() =>
+      expect(fin).toHaveBeenCalledWith(10, { energy_level: 8, workout_intensity: 6 }),
+    )
+  })
+
+  it('edits session tags and pre-workout fuel', async () => {
+    vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession())
+    const upd = vi.spyOn(api, 'updateWorkout').mockResolvedValue(makeSession())
+    renderWithProviders(<WorkoutPage />)
+    const tagInput = await screen.findByPlaceholderText('+ add tag')
+    fireEvent.change(tagInput, { target: { value: 'fasted' } })
+    fireEvent.keyDown(tagInput, { key: 'Enter' })
+    await waitFor(() => expect(upd).toHaveBeenCalledWith(10, { tags: ['fasted'] }))
+
+    const fuel = screen.getByPlaceholderText(/creatine/)
+    fireEvent.change(fuel, { target: { value: 'coffee' } })
+    fireEvent.blur(fuel)
+    await waitFor(() =>
+      expect(upd).toHaveBeenCalledWith(10, { pre_workout_fuel: 'coffee' }),
+    )
   })
 
   it('discards the workout after confirm', async () => {
