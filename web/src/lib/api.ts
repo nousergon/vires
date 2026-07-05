@@ -564,6 +564,42 @@ export interface ConstraintInput {
   defer_to_professional?: boolean | null
 }
 
+export interface AilmentCheckIn {
+  id: number
+  ailment_id: number
+  check_in_date: string
+  severity: number
+  note: string | null
+  created_at: string
+}
+
+export interface AilmentEpisode {
+  id: number
+  label: string
+  onset_date: string
+  notes: string | null
+  status: 'active' | 'improving' | 'resolved'
+  resolved_at: string | null
+  created_at: string
+  updated_at: string
+  latest_severity: number | null
+  latest_check_in_date: string | null
+  check_ins: AilmentCheckIn[]
+}
+
+export interface PendingAilmentCheckIn {
+  ailment: AilmentEpisode
+  last_severity: number | null
+  last_check_in_date: string | null
+}
+
+export interface AilmentInput {
+  label: string
+  onset_date?: string | null
+  notes?: string | null
+  initial_severity?: number | null
+}
+
 // ---- endpoints ------------------------------------------------------------ //
 export const api = {
   // exercises
@@ -775,6 +811,25 @@ export const api = {
   updateConstraint: (id: number, body: Partial<ConstraintInput & { is_active: boolean }>) =>
     req<Constraint>(`/constraints/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   deleteConstraint: (id: number) => req<void>(`/constraints/${id}`, { method: 'DELETE' }),
+
+  listAilments: (status = 'open') => req<AilmentEpisode[]>(`/ailments?status=${status}`),
+  pendingAilmentCheckIns: (date?: string) =>
+    req<PendingAilmentCheckIn[]>(
+      `/ailments/pending-check-ins${date ? `?date=${date}` : ''}`,
+    ),
+  createAilment: (body: AilmentInput) =>
+    req<AilmentEpisode>('/ailments', { method: 'POST', body: JSON.stringify(body) }),
+  updateAilment: (id: number, body: Partial<AilmentInput & { status: AilmentEpisode['status'] }>) =>
+    req<AilmentEpisode>(`/ailments/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  addAilmentCheckIn: (
+    id: number,
+    body: { severity: number; note?: string | null; check_in_date?: string },
+  ) =>
+    req<AilmentCheckIn>(`/ailments/${id}/check-ins`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  deleteAilment: (id: number) => req<void>(`/ailments/${id}`, { method: 'DELETE' }),
 
   // web push
   pushPublicKey: () => req<{ key: string }>('/push/public-key'),

@@ -32,6 +32,26 @@ class ObjectiveCtx:
 
 
 @dataclass
+class AilmentCheckInCtx:
+    check_in_date: date
+    severity: int
+    note: str | None = None
+
+
+@dataclass
+class AilmentEpisodeCtx:
+    """A date-anchored injury episode with severity trajectory."""
+
+    label: str
+    onset_date: date
+    status: str  # active | improving | resolved
+    notes: str | None = None
+    latest_severity: int | None = None
+    latest_check_in_date: date | None = None
+    check_ins: list[AilmentCheckInCtx] = field(default_factory=list)
+
+
+@dataclass
 class ConstraintCtx:
     """A bound the coach trains *around* (never a goal)."""
 
@@ -121,14 +141,19 @@ class CoachObjectiveContext:
     # Recently logged generic activities (most recent first) — load already
     # absorbed, distinct from `events` (upcoming load to train around).
     recent_activities: list[ActivitySessionCtx] = field(default_factory=list)
+    # Open/improving ailment episodes with recent check-ins — severity trajectory
+    # the coach must honor when prescribing or adapting (distinct from static
+    # schedule/equipment constraints).
+    ailments: list[AilmentEpisodeCtx] = field(default_factory=list)
 
     @property
     def is_empty(self) -> bool:
-        # Events/activities alone (no objective, no constraints) still warrant
-        # grounding — the coach must account for their load even absent a goal.
+        # Events/activities/ailments alone (no objective, no constraints) still
+        # warrant grounding — the coach must account for their load even absent a goal.
         return (
             self.objective is None
             and not self.constraints
             and not self.events
             and not self.recent_activities
+            and not self.ailments
         )

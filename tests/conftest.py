@@ -41,6 +41,8 @@ _USER_TABLES = [
     "programs",
     "objectives",
     "training_constraints",
+    "ailment_check_ins",
+    "ailment_episodes",
     "push_subscriptions",
     "user_settings",
 ]
