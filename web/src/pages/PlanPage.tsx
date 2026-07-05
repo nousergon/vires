@@ -7,11 +7,14 @@ import {
   type Objective,
   type PlannedExercise,
   type PlannedWorkout,
+  type PendingAilmentCheckIn,
 } from '../lib/api'
 import { Button, EmptyState, PageTitle, Sheet, Spinner } from '../components/ui'
 import CoachSheet from '../components/CoachSheet'
+import CoachSummaryView from '../components/CoachSummaryView'
 import ObjectiveSheet from '../components/ObjectiveSheet'
 import ActivityForm from '../components/ActivityForm'
+import { AilmentCheckInForm } from '../components/AilmentsPanel'
 import SessionDetailSheet from '../components/SessionDetailSheet'
 import { useSettings } from '../lib/useSettings'
 import { ACTIVE_KEY } from './WorkoutPage'
@@ -50,6 +53,7 @@ export default function PlanPage() {
   // A completed routine tapped in the DaySheet — opens the shared logged-
   // session detail (view + tag: tags / pre-workout fuel / energy / intensity).
   const [sessionDetailId, setSessionDetailId] = useState<number | null>(null)
+  const [planView, setPlanView] = useState<'calendar' | 'coach'>('calendar')
 
   const openObjective = (id?: number, date?: string) => setObjectiveSheet({ open: true, id, date })
   const openActivity = (id?: number, date?: string) => setActivitySheet({ open: true, id, date })
@@ -107,10 +111,14 @@ export default function PlanPage() {
     return m
   }, [entries])
 
+  const { data: programs = [] } = useQuery({ queryKey: ['programs'], queryFn: api.listPrograms })
+
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['calendar'] })
     qc.invalidateQueries({ queryKey: ['programs'] })
     qc.invalidateQueries({ queryKey: ['active-objective'] })
+    qc.invalidateQueries({ queryKey: ['ailments'] })
+    qc.invalidateQueries({ queryKey: ['ailments-pending'] })
   }
 
   function onStarted(sessionId: number) {
@@ -126,43 +134,67 @@ export default function PlanPage() {
         <RescheduleBanner moved={movedBanner} onDismiss={() => setMovedBanner([])} />
       )}
 
-      <div className="mb-3 flex items-center justify-between">
-        <button className="px-2 py-1 text-slate-400" onClick={() => setMonth(addMonths(month, -1))}>
-          ‹
-        </button>
-        <button
-          className="text-base font-semibold text-slate-100"
-          onClick={() => setMonth(new Date(today.getFullYear(), today.getMonth(), 1))}
-        >
-          {MONTH_LABELS[month.getMonth()]} {month.getFullYear()}
-        </button>
-        <button className="px-2 py-1 text-slate-400" onClick={() => setMonth(addMonths(month, 1))}>
-          ›
-        </button>
+      <div className="mb-4 flex rounded-xl border border-slate-800 bg-slate-900/60 p-1">
+        {(['calendar', 'coach'] as const).map((v) => (
+          <button
+            key={v}
+            onClick={() => setPlanView(v)}
+            className={`flex-1 rounded-lg py-2 text-sm font-medium capitalize ${
+              planView === v
+                ? 'bg-slate-800 text-amber-200'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            {v === 'calendar' ? 'Calendar' : 'Coach'}
+          </button>
+        ))}
       </div>
 
-      {isLoading ? (
-        <Spinner />
+      {planView === 'calendar' ? (
+        <>
+          <div className="mb-3 flex items-center justify-between">
+            <button className="px-2 py-1 text-slate-400" onClick={() => setMonth(addMonths(month, -1))}>
+              ‹
+            </button>
+            <button
+              className="text-base font-semibold text-slate-100"
+              onClick={() => setMonth(new Date(today.getFullYear(), today.getMonth(), 1))}
+            >
+              {MONTH_LABELS[month.getMonth()]} {month.getFullYear()}
+            </button>
+            <button className="px-2 py-1 text-slate-400" onClick={() => setMonth(addMonths(month, 1))}>
+              ›
+            </button>
+          </div>
+
+          {isLoading ? (
+            <Spinner />
+          ) : (
+            <CalendarGrid
+              weeks={weeks}
+              month={month}
+              today={today}
+              byDate={byDate}
+              onPick={setSelected}
+            />
+          )}
+
+          <Legend />
+
+          <ObjectiveSection onEdit={openObjective} onGenerate={() => openCoach(true)} />
+
+          <EventsSection entries={entries} onEdit={openActivityEntry} onAdd={() => openActivity()} />
+
+          <ProgramsSection onModify={setModifyProgram} onChanged={refresh} compact />
+        </>
       ) : (
-        <CalendarGrid
-          weeks={weeks}
-          month={month}
-          today={today}
-          byDate={byDate}
-          onPick={setSelected}
+        <CoachSummaryView
+          programs={programs}
+          onGenerateCoach={() => openCoach(true)}
+          onModifyProgram={setModifyProgram}
+          onChanged={refresh}
         />
       )}
-
-      <Legend />
-
-      <ObjectiveSection
-        onEdit={openObjective}
-        onGenerate={() => openCoach(true)}
-      />
-
-      <EventsSection entries={entries} onEdit={openActivityEntry} onAdd={() => openActivity()} />
-
-      <ProgramsSection onModify={setModifyProgram} onChanged={refresh} />
 
       <DaySheet
         date={selected}
@@ -415,9 +447,11 @@ function EventsSection({
 function ProgramsSection({
   onModify,
   onChanged,
+  compact = false,
 }: {
   onModify: (p: { id: number; name: string }) => void
   onChanged: () => void
+  compact?: boolean
 }) {
   const { data: programs = [] } = useQuery({ queryKey: ['programs'], queryFn: api.listPrograms })
   const active = programs.filter((p) => p.status === 'active')
@@ -455,7 +489,7 @@ function ProgramsSection({
                 </button>
               </div>
             </div>
-            {p.coach_summary && (
+            {p.coach_summary && !compact && (
               <p className="mt-2 border-t border-slate-800 pt-2 text-xs leading-relaxed text-slate-300">
                 {p.coach_summary}
               </p>
@@ -644,11 +678,15 @@ function DaySheet({
 }) {
   const { data: templates = [] } = useQuery({ queryKey: ['templates'], queryFn: api.listTemplates })
   const [busy, setBusy] = useState(false)
+  const [checkInGate, setCheckInGate] = useState<{
+    pending: PendingAilmentCheckIn[]
+    plannedId: number
+  } | null>(null)
   const title = date
     ? date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
     : ''
 
-  async function start(plannedId: number) {
+  async function doStart(plannedId: number) {
     setBusy(true)
     try {
       const ws = await api.startPlanned(plannedId)
@@ -656,6 +694,15 @@ function DaySheet({
     } finally {
       setBusy(false)
     }
+  }
+
+  async function start(plannedId: number) {
+    const pending = await api.pendingAilmentCheckIns(isoDate(new Date()))
+    if (pending.length > 0) {
+      setCheckInGate({ pending, plannedId })
+      return
+    }
+    await doStart(plannedId)
   }
 
   async function remove(plannedId: number) {
@@ -703,7 +750,8 @@ function DaySheet({
       : '🏋 training block'
 
   return (
-    <Sheet open={!!date} onClose={onClose} title={title}>
+    <>
+      <Sheet open={!!date} onClose={onClose} title={title}>
       <div className="space-y-4">
         {entries.length === 0 && (
           <EmptyState title="Nothing scheduled" hint="Schedule a routine below or ask the Coach." />
@@ -821,6 +869,25 @@ function DaySheet({
         )}
       </div>
     </Sheet>
+      <Sheet
+        open={checkInGate != null}
+        onClose={() => setCheckInGate(null)}
+        title="Ailment check-in"
+      >
+        {checkInGate && (
+          <AilmentCheckInForm
+            pending={checkInGate.pending}
+            onCancel={() => setCheckInGate(null)}
+            onDone={() => {
+              const id = checkInGate.plannedId
+              setCheckInGate(null)
+              onChanged()
+              void doStart(id)
+            }}
+          />
+        )}
+      </Sheet>
+    </>
   )
 }
 

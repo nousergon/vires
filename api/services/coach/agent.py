@@ -187,6 +187,36 @@ def _objective_block(obj_ctx: CoachObjectiveContext | None, today: date) -> dict
             }
             for a in obj_ctx.recent_activities
         ]
+    if obj_ctx.ailments:
+        block["ailments"] = [
+            {
+                "label": a.label,
+                "onset_date": a.onset_date.isoformat(),
+                "status": a.status,
+                "notes": a.notes,
+                "latest_severity": a.latest_severity,
+                "latest_check_in_date": a.latest_check_in_date.isoformat()
+                if a.latest_check_in_date
+                else None,
+                "check_ins": [
+                    {
+                        "date": c.check_in_date.isoformat(),
+                        "severity": c.severity,
+                        "note": c.note,
+                    }
+                    for c in a.check_ins
+                ],
+                "note": (
+                    "date-anchored injury episode with daily severity check-ins "
+                    "(0=none, 10=worst): train AROUND the latest severity and "
+                    "trajectory — lighten or omit aggravating patterns when "
+                    "severity is moderate/high or trending worse; NEVER "
+                    "prescribe treatment/rehab (defer to PT). Static "
+                    "constraints may also apply."
+                ),
+            }
+            for a in obj_ctx.ailments
+        ]
     return block
 
 

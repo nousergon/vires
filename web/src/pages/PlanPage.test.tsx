@@ -14,6 +14,8 @@ function mockEmpty() {
   vi.spyOn(api, 'activeObjective').mockResolvedValue(makeActiveObjective())
   vi.spyOn(api, 'listObjectives').mockResolvedValue([])
   vi.spyOn(api, 'rescheduleMissed').mockResolvedValue([])
+  vi.spyOn(api, 'listAilments').mockResolvedValue([])
+  vi.spyOn(api, 'pendingAilmentCheckIns').mockResolvedValue([])
 }
 
 describe('PlanPage', () => {
@@ -36,10 +38,41 @@ describe('PlanPage', () => {
     expect(await screen.findByText(/lays workouts onto your calendar/i)).toBeInTheDocument()
   })
 
+  it('shows coach summary on the Coach tab', async () => {
+    vi.spyOn(api, 'calendar').mockResolvedValue([])
+    vi.spyOn(api, 'listTemplates').mockResolvedValue([])
+    vi.spyOn(api, 'rescheduleMissed').mockResolvedValue([])
+    vi.spyOn(api, 'listObjectives').mockResolvedValue([])
+    vi.spyOn(api, 'listAilments').mockResolvedValue([])
+    vi.spyOn(api, 'pendingAilmentCheckIns').mockResolvedValue([])
+    vi.spyOn(api, 'activeObjective').mockResolvedValue(makeActiveObjective())
+    vi.spyOn(api, 'listPrograms').mockResolvedValue([
+      {
+        id: 1,
+        name: 'Baker Taper',
+        goal_text: null,
+        coach_summary: 'Arrive fresh on summit day.',
+        objective_id: null,
+        start_date: '2026-06-29',
+        end_date: '2026-07-02',
+        status: 'active',
+        planned_count: 2,
+        completed_count: 2,
+      },
+    ])
+    renderWithProviders(<PlanPage />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Coach' }))
+    expect(await screen.findByText('Arrive fresh on summit day.')).toBeInTheDocument()
+  })
+
   it('lists active programs from the API', async () => {
     vi.spyOn(api, 'calendar').mockResolvedValue([])
     vi.spyOn(api, 'listTemplates').mockResolvedValue([])
     vi.spyOn(api, 'rescheduleMissed').mockResolvedValue([])
+    vi.spyOn(api, 'listAilments').mockResolvedValue([])
+    vi.spyOn(api, 'pendingAilmentCheckIns').mockResolvedValue([])
+    vi.spyOn(api, 'activeObjective').mockResolvedValue(makeActiveObjective())
+    vi.spyOn(api, 'listObjectives').mockResolvedValue([])
     vi.spyOn(api, 'listPrograms').mockResolvedValue([
       {
         id: 1,
@@ -58,8 +91,10 @@ describe('PlanPage', () => {
     expect(await screen.findByText('8-Week Block')).toBeInTheDocument()
     expect(screen.getByText(/2\/16 done/)).toBeInTheDocument()
     expect(screen.getByText('Modify')).toBeInTheDocument()
-    // the coach's strategy shows on the program card
-    expect(screen.getByText('Ramp from 10 to 4 reps, deload week 4.')).toBeInTheDocument()
+    // summary lives on the Coach tab, not the compact calendar program card
+    expect(screen.queryByText('Ramp from 10 to 4 reps, deload week 4.')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Coach' }))
+    expect(await screen.findByText('Ramp from 10 to 4 reps, deload week 4.')).toBeInTheDocument()
   })
 
   it("shows the coach's strategy on the focus objective tile", async () => {

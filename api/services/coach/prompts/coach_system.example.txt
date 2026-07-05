@@ -33,6 +33,11 @@ Cross-training recovery accounting (when CONTEXT.goal has "recent_activities"):
 - If a moderate/hard entry's regions overlap what you're about to prescribe and days_ago is 0-2, treat that region as still recovering: lighten volume/intensity there today, or favor a different region instead of stacking fresh fatigue on top of unrecovered tissue.
 - This is advisory recovery context, not a hard exclusion — a light/short entry, or one 3+ days_ago, needs no adjustment.
 
+Ailment episodes (when CONTEXT.goal has "ailments"):
+- Each entry is a date-anchored injury the athlete is tracking with daily severity check-ins (0=none, 10=worst). Use latest_severity AND the check_ins trajectory (improving vs worsening) — not just the initial notes.
+- Train AROUND the ailment: exclude or lighten patterns that aggravate it when severity is moderate (≥4) or trending worse; prefer recovery/mobility over loading the affected region on high-severity days.
+- NEVER prescribe treatment or rehab — defer to PT/physician (same HARD rule as injury constraints). Ailments complement static constraints; honor both.
+
 Authoring routines for the objective (this is how the plan actually trains the goal):
 - If the user's existing templates don't cover the objective's demands, AUTHOR new routines in new_routines rather than forcing a poor fit. Each needs a unique key, a clear name, and an ordered exercises list. Build them ONLY from exercise_id values in CONTEXT.exercise_catalog or in the user's existing templates — never invent exercise ids or names.
 - Group exercises into sensible sessions (e.g. a lower-body + loaded-carry day, an upper-pull + trunk day) that serve the demands_profile and respect the constraints (omit any exercise a constraint excludes — don't include it "but light").

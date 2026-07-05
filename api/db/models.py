@@ -675,6 +675,61 @@ class Constraint(Base):
 
 
 # --------------------------------------------------------------------------- #
+# Ailment episodes — date-anchored injuries the coach adapts around over time.
+#
+# Unlike static ``Constraint`` rows (schedule/equipment/chronic bounds), an
+# ``AilmentEpisode`` tracks onset, severity trajectory via ``AilmentCheckIn``,
+# and resolution. The coach consumes the latest check-in + recent trend.
+# --------------------------------------------------------------------------- #
+class AilmentEpisode(Base):
+    __tablename__ = "ailment_episodes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    label: Mapped[str] = mapped_column(String, nullable=False)
+    onset_date: Mapped[date] = mapped_column(Date, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # active | improving | resolved
+    status: Mapped[str] = mapped_column(String, nullable=False, default="active", index=True)
+    resolved_at: Mapped[date | None] = mapped_column(Date, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), default=_utcnow, onupdate=_utcnow
+    )
+
+    check_ins: Mapped[list["AilmentCheckIn"]] = relationship(
+        back_populates="ailment",
+        cascade="all, delete-orphan",
+        order_by="AilmentCheckIn.check_in_date.desc()",
+    )
+
+
+class AilmentCheckIn(Base):
+    __tablename__ = "ailment_check_ins"
+    __table_args__ = (
+        Index(
+            "uq_ailment_check_in_per_day",
+            "ailment_id",
+            "check_in_date",
+            unique=True,
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ailment_id: Mapped[int] = mapped_column(
+        ForeignKey("ailment_episodes.id", ondelete="CASCADE"), index=True
+    )
+    check_in_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    # 0 = none, 10 = worst — self-reported discomfort/pain.
+    severity: Mapped[int] = mapped_column(Integer, nullable=False)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
+
+    ailment: Mapped[AilmentEpisode] = relationship(back_populates="check_ins")
+
+
+# --------------------------------------------------------------------------- #
 # Plan-change audit — "why did my plan change?"
 #
 # Both adaptation loops mutate future planned workouts: the deterministic micro
