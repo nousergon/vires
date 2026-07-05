@@ -698,7 +698,7 @@ class AilmentEpisode(Base):
         UTCDateTime(), default=_utcnow, onupdate=_utcnow
     )
 
-    check_ins: Mapped[list["AilmentCheckIn"]] = relationship(
+    check_ins: Mapped[list[AilmentCheckIn]] = relationship(
         back_populates="ailment",
         cascade="all, delete-orphan",
         order_by="AilmentCheckIn.check_in_date.desc()",

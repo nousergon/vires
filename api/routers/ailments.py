@@ -43,7 +43,11 @@ def _get_owned(db: Session, ailment_id: int, ident: Identity) -> AilmentEpisode:
 
 def _episode_out(ep: AilmentEpisode, *, include_check_ins: bool = True) -> AilmentEpisodeOut:
     latest = latest_check_in(ep)
-    check_ins = sorted(ep.check_ins, key=lambda c: c.check_in_date, reverse=True) if include_check_ins else []
+    check_ins = (
+        sorted(ep.check_ins, key=lambda c: c.check_in_date, reverse=True)
+        if include_check_ins
+        else []
+    )
     return AilmentEpisodeOut(
         id=ep.id,
         label=ep.label,

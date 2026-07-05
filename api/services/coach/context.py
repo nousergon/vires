@@ -15,7 +15,6 @@ from sqlalchemy.orm import Session
 from api.db.identity import Identity, get_or_create_settings
 from api.db.models import (
     ActivityDetail,
-    AilmentEpisode,
     Constraint,
     Exercise,
     Objective,
@@ -24,6 +23,7 @@ from api.db.models import (
     WorkoutSession,
     WorkoutTemplate,
 )
+from api.services.ailments import latest_check_in, load_open_ailments
 from api.services.coach.materialize import (
     ExerciseMeta,
     MaterializeContext,
@@ -40,7 +40,6 @@ from api.services.coach.objective_context import (
     ExerciseCandidate,
     ObjectiveCtx,
 )
-from api.services.ailments import latest_check_in, load_open_ailments
 from api.services.objective_focus import (
     dated_timeline,
     load_objectives,

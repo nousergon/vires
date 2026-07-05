@@ -40,7 +40,6 @@ def test_pending_check_ins_excludes_checked_today(client):
 
 def test_add_check_in_updates_severity(client):
     ep = client.post("/api/ailments", json={"label": "Disc"}).json()
-    today = date.today().isoformat()
     r = client.post(
         f"/api/ailments/{ep['id']}/check-ins",
         json={"severity": 5, "note": "Walking hurts"},
