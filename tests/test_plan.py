@@ -266,6 +266,96 @@ def test_start_planned_seeds_session_from_prescription_and_links(client):
     assert got["session_id"] == ses["id"]
 
 
+def _lower_body_routine(client, name: str = "Legs") -> dict:
+    e = _ex_id(client, "squat")
+    return client.post(
+        "/api/templates",
+        json={
+            "name": name,
+            "exercises": [
+                {"exercise_id": e, "target_sets": 3, "target_reps": 5, "target_weight": 100}
+            ],
+        },
+    ).json()
+
+
+# --------------------------------------------------------------------------- #
+# Same-day ailment gate (vires-ops#50) — deterministic, rules-first: warns at
+# severity >=5 on a lower-body/knee episode, blocks outright at severity >=8.
+# --------------------------------------------------------------------------- #
+def test_starting_lower_body_workout_with_knee_severity_seven_surfaces_warning(client):
+    tpl = _lower_body_routine(client)
+    pw = client.post(
+        "/api/plan/planned",
+        json={"scheduled_date": "2026-07-01", "template_id": tpl["id"]},
+    ).json()
+    client.post(
+        "/api/ailments",
+        json={"label": "Right knee", "onset_date": "2020-01-01", "initial_severity": 7},
+    )
+
+    r = client.post(f"/api/plan/planned/{pw['id']}/start")
+    assert r.status_code == 201, r.text
+    ses = r.json()
+    se = ses["exercises"][0]
+    assert se["notes"] is not None
+    assert "knee" in se["notes"].lower()
+    assert "7/10" in se["notes"]
+
+
+def test_starting_lower_body_workout_with_knee_severity_eight_is_blocked(client):
+    tpl = _lower_body_routine(client)
+    pw = client.post(
+        "/api/plan/planned",
+        json={"scheduled_date": "2026-07-01", "template_id": tpl["id"]},
+    ).json()
+    client.post(
+        "/api/ailments",
+        json={"label": "Right knee", "onset_date": "2020-01-01", "initial_severity": 8},
+    )
+
+    r = client.post(f"/api/plan/planned/{pw['id']}/start")
+    assert r.status_code == 409
+    assert "knee" in r.json()["detail"].lower()
+    # never materialized — no session was created.
+    assert client.get(f"/api/plan/planned/{pw['id']}").json()["status"] == "planned"
+
+
+def test_upper_body_exercise_gets_no_warning_note(client):
+    # A knee ailment at warn-level severity (7, below the 8 block threshold)
+    # flags lower-body exercises but leaves an upper-body prescription's notes
+    # untouched — the warning is exercise-scoped, not blanket.
+    tpl = _routine(client)  # bench press — not lower-body
+    pw = client.post(
+        "/api/plan/planned",
+        json={"scheduled_date": "2026-07-01", "template_id": tpl["id"]},
+    ).json()
+    client.post(
+        "/api/ailments",
+        json={"label": "Right knee", "onset_date": "2020-01-01", "initial_severity": 7},
+    )
+
+    r = client.post(f"/api/plan/planned/{pw['id']}/start")
+    assert r.status_code == 201, r.text
+    assert r.json()["exercises"][0]["notes"] is None
+
+
+def test_mild_knee_ailment_does_not_warn_or_block(client):
+    tpl = _lower_body_routine(client)
+    pw = client.post(
+        "/api/plan/planned",
+        json={"scheduled_date": "2026-07-01", "template_id": tpl["id"]},
+    ).json()
+    client.post(
+        "/api/ailments",
+        json={"label": "Right knee", "onset_date": "2020-01-01", "initial_severity": 3},
+    )
+
+    r = client.post(f"/api/plan/planned/{pw['id']}/start")
+    assert r.status_code == 201
+    assert r.json()["exercises"][0]["notes"] is None
+
+
 def test_completing_planned_on_a_different_day_moves_marker_to_that_day(client):
     # Doing Thursday's planned workout on Friday should show it on Friday and
     # clear the Thursday marker (the day it actually happened wins). The stored

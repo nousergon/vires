@@ -67,6 +67,22 @@ def test_replan_check_404_for_unknown_program(client):
     assert client.get("/api/coach/programs/99999/replan-check").status_code == 404
 
 
+def test_severity_seven_check_in_suggests_ailment_changed(client):
+    """vires-ops#50: a severity-7 check-in on an open episode fires
+    ailment_changed through the replan-check endpoint (not just the pure
+    evaluate_triggers unit test in test_replan.py)."""
+    prog, _ = _program(client)
+    ep = client.post(
+        "/api/ailments",
+        json={"label": "Right knee", "onset_date": "2020-01-01", "initial_severity": 2},
+    ).json()
+    client.post(f"/api/ailments/{ep['id']}/check-ins", json={"severity": 7})
+
+    r = client.get(f"/api/coach/programs/{prog['id']}/replan-check").json()
+    assert r["suggested"] is True
+    assert "ailment_changed" in {t["kind"] for t in r["triggers"]}
+
+
 # --------------------------------------------------------------------------- #
 # replan (LLM proposal)
 # --------------------------------------------------------------------------- #
