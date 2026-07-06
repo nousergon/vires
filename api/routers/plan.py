@@ -11,12 +11,13 @@ import secrets
 from datetime import UTC, date, datetime, time, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from api.db.identity import Identity, current_identity, get_or_create_settings
 from api.db.models import (
     ActivityDetail,
+    AilmentEpisode,
     Exercise,
     Objective,
     PlannedExercise,
@@ -300,6 +301,32 @@ def calendar(
                         objective_name=o.name,
                     )
                 )
+
+    # Ailment episodes as calendar bands — date-anchored injuries the coach
+    # trains around (already fed into coach context via api.services.coach).
+    # Unresolved episodes are clipped to *today*, not the future: unlike a
+    # training block, an ailment's course isn't planned ahead of time.
+    today = _now().date()
+    ailments = db.scalars(
+        select(AilmentEpisode).where(
+            AilmentEpisode.tenant_id == ident.tenant_id,
+            AilmentEpisode.user_id == ident.user_id,
+            AilmentEpisode.onset_date <= end,
+            or_(AilmentEpisode.resolved_at.is_(None), AilmentEpisode.resolved_at >= start),
+        )
+    ).all()
+    for ep in ailments:
+        span_end = ep.resolved_at or today
+        for d in _days_clipped(ep.onset_date, span_end, start, end):
+            entries.append(
+                CalendarEntry(
+                    kind="ailment",
+                    date=d,
+                    id=ep.id,
+                    name=ep.label,
+                    status=ep.status,
+                )
+            )
 
     entries.sort(key=lambda e: (e.date, 0 if e.kind == "session" else 1))
     return entries

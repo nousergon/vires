@@ -1,10 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
 import { api, type ProgramSummary } from '../lib/api'
 import ConstraintsPanel from './ConstraintsPanel'
-import AilmentsPanel from './AilmentsPanel'
 import { Button } from './ui'
 
-/** Coach tab — strategy summary, constraints, and ailment episodes. */
+/** Coach tab — strategy summary + the constraints (incl. ailments) it trains around. */
 export default function CoachSummaryView({
   programs,
   onGenerateCoach,
@@ -74,8 +73,6 @@ export default function CoachSummaryView({
           </div>
         )}
       </section>
-
-      <AilmentsPanel onChanged={onChanged} />
 
       <ConstraintsPanel constraints={active?.constraints ?? []} onChanged={onChanged} compact />
     </div>

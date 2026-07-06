@@ -15,6 +15,7 @@ export default function ObjectiveSheet({
   open,
   objectiveId,
   defaultDate,
+  defaultKind,
   onClose,
   onSaved,
 }: {
@@ -23,6 +24,9 @@ export default function ObjectiveSheet({
   objectiveId?: number | null
   // Seed target_date for a new dated objective (e.g. the tapped calendar day).
   defaultDate?: string | null
+  // Seed the Type toggle for a new objective (e.g. 'open_ended' from the
+  // Status tab's general-objectives list, which has no date to anchor to).
+  defaultKind?: 'dated' | 'open_ended'
   onClose: () => void
   onSaved: () => void
 }) {
@@ -60,13 +64,13 @@ export default function ObjectiveSheet({
     if (!open) return
     setError(null)
     setName(editing?.name ?? '')
-    setKind(editing?.kind ?? 'dated')
+    setKind(editing?.kind ?? defaultKind ?? 'dated')
     setTargetDate(editing?.target_date ?? defaultDate ?? '')
     setEventEndDate(editing?.event_end_date ?? '')
     setSport(editing?.sport ?? 'alpine')
     setPriority(editing?.priority ?? 0)
     setIsPrimary(editing?.is_primary ?? false)
-  }, [open, editing?.id, defaultDate]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, editing?.id, defaultDate, defaultKind]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['active-objective'] })

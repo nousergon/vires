@@ -337,12 +337,12 @@ export interface ExerciseRecords {
 
 // ---- plan / calendar / coach ---------------------------------------------- //
 export interface CalendarEntry {
-  kind: 'session' | 'planned' | 'objective' | 'objective_block'
+  kind: 'session' | 'planned' | 'objective' | 'objective_block' | 'ailment'
   date: string // YYYY-MM-DD
   id: number
   name: string | null
   // session: completed|in_progress|upcoming; planned: planned|completed|skipped;
-  // objective: peak|event; objective_block: block
+  // objective: peak|event; objective_block: block; ailment: active|improving|resolved
   status: string
   program_id?: number | null
   template_id?: number | null
