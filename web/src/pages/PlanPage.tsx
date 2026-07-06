@@ -14,7 +14,7 @@ import CoachSheet from '../components/CoachSheet'
 import CoachSummaryView from '../components/CoachSummaryView'
 import ObjectiveSheet from '../components/ObjectiveSheet'
 import ActivityForm from '../components/ActivityForm'
-import { AilmentCheckInForm } from '../components/AilmentsPanel'
+import AilmentsPanel, { AilmentCheckInForm, AilmentSheet } from '../components/AilmentsPanel'
 import SessionDetailSheet from '../components/SessionDetailSheet'
 import { useSettings } from '../lib/useSettings'
 import { ACTIVE_KEY } from './WorkoutPage'
@@ -36,8 +36,15 @@ export default function PlanPage() {
   const [coachOpen, setCoachOpen] = useState(false)
   const [coachAutoStart, setCoachAutoStart] = useState(false)
   // { open } with an optional id — id present = edit that objective, absent = add
-  // new (optionally seeded with the tapped day via `date`, dated objectives only).
-  const [objectiveSheet, setObjectiveSheet] = useState<{ open: boolean; id?: number; date?: string }>({
+  // new (optionally seeded with the tapped day via `date`, dated objectives only,
+  // or forced to a `kind` — e.g. the Status tab's "general objectives" list,
+  // which always seeds `open_ended` since it has no date to anchor to).
+  const [objectiveSheet, setObjectiveSheet] = useState<{
+    open: boolean
+    id?: number
+    date?: string
+    kind?: 'dated' | 'open_ended'
+  }>({
     open: false,
   })
   // Add/edit-activity sheet — id present = edit that session (via PATCH),
@@ -48,15 +55,21 @@ export default function PlanPage() {
   const [activitySheet, setActivitySheet] = useState<{ open: boolean; id?: number; date?: string }>({
     open: false,
   })
+  // New-ailment sheet — always a create flow (ailments are edited/checked-in
+  // inline via AilmentsPanel, never re-opened here); `date` seeds onset_date
+  // when opened from a calendar day tap.
+  const [ailmentSheet, setAilmentSheet] = useState<{ open: boolean; date?: string }>({ open: false })
   const [modifyProgram, setModifyProgram] = useState<{ id: number; name: string } | null>(null)
   const [movedBanner, setMovedBanner] = useState<PlannedWorkout[]>([])
   // A completed routine tapped in the DaySheet — opens the shared logged-
   // session detail (view + tag: tags / pre-workout fuel / energy / intensity).
   const [sessionDetailId, setSessionDetailId] = useState<number | null>(null)
-  const [planView, setPlanView] = useState<'calendar' | 'coach'>('calendar')
+  const [planView, setPlanView] = useState<'calendar' | 'coach' | 'status'>('calendar')
 
-  const openObjective = (id?: number, date?: string) => setObjectiveSheet({ open: true, id, date })
+  const openObjective = (id?: number, date?: string, kind?: 'dated' | 'open_ended') =>
+    setObjectiveSheet({ open: true, id, date, kind })
   const openActivity = (id?: number, date?: string) => setActivitySheet({ open: true, id, date })
+  const openAilment = (date?: string) => setAilmentSheet({ open: true, date })
 
   // Tapping a virtual (never-materialized) recurring occurrence turns it
   // into a real, linked row first, then opens it for editing — a real id
@@ -135,7 +148,7 @@ export default function PlanPage() {
       )}
 
       <div className="mb-4 flex rounded-xl border border-slate-800 bg-slate-900/60 p-1">
-        {(['calendar', 'coach'] as const).map((v) => (
+        {(['calendar', 'coach', 'status'] as const).map((v) => (
           <button
             key={v}
             onClick={() => setPlanView(v)}
@@ -145,7 +158,7 @@ export default function PlanPage() {
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            {v === 'calendar' ? 'Calendar' : 'Coach'}
+            {v === 'calendar' ? 'Calendar' : v === 'coach' ? 'Coach' : 'Status'}
           </button>
         ))}
       </div>
@@ -187,13 +200,15 @@ export default function PlanPage() {
 
           <ProgramsSection onModify={setModifyProgram} onChanged={refresh} compact />
         </>
-      ) : (
+      ) : planView === 'coach' ? (
         <CoachSummaryView
           programs={programs}
           onGenerateCoach={() => openCoach(true)}
           onModifyProgram={setModifyProgram}
           onChanged={refresh}
         />
+      ) : (
+        <StatusView onAddAilment={() => openAilment()} onChanged={refresh} onEditObjective={openObjective} />
       )}
 
       <DaySheet
@@ -206,12 +221,14 @@ export default function PlanPage() {
         onOpenSession={setSessionDetailId}
         onAddActivity={() => (selected ? openActivity(undefined, isoDate(selected)) : openActivity())}
         onAddObjective={() => (selected ? openObjective(undefined, isoDate(selected)) : openObjective())}
+        onAddAilment={() => (selected ? openAilment(isoDate(selected)) : openAilment())}
       />
       <SessionDetailSheet sessionId={sessionDetailId} onClose={() => setSessionDetailId(null)} />
       <ObjectiveSheet
         open={objectiveSheet.open}
         objectiveId={objectiveSheet.id}
         defaultDate={objectiveSheet.date}
+        defaultKind={objectiveSheet.kind}
         onClose={() => setObjectiveSheet({ open: false })}
         onSaved={refresh}
       />
@@ -220,6 +237,12 @@ export default function PlanPage() {
         sessionId={activitySheet.id}
         defaultDate={activitySheet.date}
         onClose={() => setActivitySheet({ open: false })}
+        onSaved={refresh}
+      />
+      <AilmentSheet
+        open={ailmentSheet.open}
+        defaultDate={ailmentSheet.date}
+        onClose={() => setAilmentSheet({ open: false })}
         onSaved={refresh}
       />
       <CoachSheet
@@ -444,6 +467,101 @@ function EventsSection({
 }
 
 // --------------------------------------------------------------------------- //
+// Status tab: ailments + standing (non-dated) objectives — context the coach
+// factors in but that has no calendar anchor of its own (dated objectives +
+// their bands stay on the Calendar tab, where they're spatially meaningful).
+function StatusView({
+  onAddAilment,
+  onChanged,
+  onEditObjective,
+}: {
+  onAddAilment: () => void
+  onChanged: () => void
+  onEditObjective: (id?: number, date?: string, kind?: 'dated' | 'open_ended') => void
+}) {
+  return (
+    <div className="space-y-6">
+      <AilmentsPanel onAdd={onAddAilment} onChanged={onChanged} />
+      <GeneralObjectivesSection onEdit={onEditObjective} />
+    </div>
+  )
+}
+
+function GeneralObjectivesSection({
+  onEdit,
+}: {
+  onEdit: (id?: number, date?: string, kind?: 'dated' | 'open_ended') => void
+}) {
+  const qc = useQueryClient()
+  const { data: all = [] } = useQuery({ queryKey: ['objectives'], queryFn: api.listObjectives })
+  const standing = all.filter((o) => o.kind === 'open_ended')
+
+  const milestoneCount = (id: number) => all.filter((o) => o.parent_objective_id === id).length
+
+  async function remove(o: Objective) {
+    if (!confirm(`Delete "${o.name}"? Its plans + history stay.`)) return
+    await api.deleteObjective(o.id)
+    qc.invalidateQueries({ queryKey: ['active-objective'] })
+    qc.invalidateQueries({ queryKey: ['objectives'] })
+  }
+
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
+          General objectives
+        </h2>
+        <button
+          className="text-sm text-amber-300 hover:text-amber-200"
+          onClick={() => onEdit(undefined, undefined, 'open_ended')}
+        >
+          + Add
+        </button>
+      </div>
+      <p className="mb-2 text-xs text-slate-500">
+        Standing goals with no target date — e.g. "build a bigger squat." The coach
+        falls back to one of these as its focus when nothing dated is closer.
+      </p>
+
+      {standing.length === 0 ? (
+        <button
+          onClick={() => onEdit(undefined, undefined, 'open_ended')}
+          className="block w-full rounded-xl border border-dashed border-slate-700 p-3 text-left text-sm text-slate-400 hover:bg-slate-800/40"
+        >
+          Add a standing goal — no date required.
+        </button>
+      ) : (
+        <div className="space-y-2">
+          {standing.map((o) => {
+            const ms = milestoneCount(o.id)
+            return (
+              <div key={o.id} className="rounded-xl border border-slate-800 bg-slate-800/40 p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <button onClick={() => onEdit(o.id)} className="block min-w-0 flex-1 text-left">
+                    <div className="truncate text-sm font-semibold text-slate-100">{o.name}</div>
+                    <div className="mt-0.5 text-xs text-slate-400">
+                      {o.sport && `${o.sport}`}
+                      {ms > 0 && ` · ${ms} milestone${ms === 1 ? '' : 's'}`}
+                    </div>
+                  </button>
+                  <button
+                    className="shrink-0 text-slate-600 hover:text-red-400"
+                    onClick={() => remove(o)}
+                    aria-label={`Delete ${o.name}`}
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// --------------------------------------------------------------------------- //
 function ProgramsSection({
   onModify,
   onChanged,
@@ -553,6 +671,7 @@ function CalendarGrid({
           const eventCount = es.filter(
             (e) => e.kind === 'session' && e.session_type === 'activity' && e.status === 'upcoming',
           ).length
+          const hasAilment = es.some((e) => e.kind === 'ailment')
           const isToday = sameDay(d, today)
           return (
             <button
@@ -570,6 +689,13 @@ function CalendarGrid({
                   className="absolute right-0.5 top-0.5 h-2 w-2 rounded-full border border-sky-400 bg-transparent"
                   aria-label="athletic event"
                   title="athletic event"
+                />
+              )}
+              {hasAilment && (
+                <span
+                  className="absolute left-0.5 top-0.5 h-2 w-2 rounded-full border border-rose-400 bg-transparent"
+                  aria-label="ailment"
+                  title="ailment"
                 />
               )}
               <span>{d.getDate()}</span>
@@ -650,6 +776,9 @@ function Legend() {
         <span className="h-2 w-2 rounded-full border border-sky-400 bg-transparent" /> upcoming
         activity
       </span>
+      <span className="flex items-center gap-1">
+        <span className="h-2 w-2 rounded-full border border-rose-400 bg-transparent" /> ailment
+      </span>
     </div>
   )
 }
@@ -665,6 +794,7 @@ function DaySheet({
   onOpenSession,
   onAddActivity,
   onAddObjective,
+  onAddAilment,
 }: {
   date: Date | null
   entries: CalendarEntry[]
@@ -675,6 +805,7 @@ function DaySheet({
   onOpenSession: (sessionId: number) => void
   onAddActivity: () => void
   onAddObjective: () => void
+  onAddAilment: () => void
 }) {
   const { data: templates = [] } = useQuery({ queryKey: ['templates'], queryFn: api.listTemplates })
   const [busy, setBusy] = useState(false)
@@ -741,6 +872,7 @@ function DaySheet({
     if (!prev || e.kind === 'objective') objectiveById.set(e.id, e)
   }
   const objectives = [...objectiveById.values()]
+  const ailments = entries.filter((e) => e.kind === 'ailment')
 
   const objectiveLabel = (e: CalendarEntry) =>
     e.kind === 'objective'
@@ -796,6 +928,14 @@ function DaySheet({
           </button>
         ))}
 
+        {/* Ailment bands for this day — same rose styling as AilmentsPanel. */}
+        {ailments.map((e) => (
+          <div key={`a${e.id}`} className="rounded-xl border border-rose-800/40 bg-rose-900/10 p-3">
+            <div className="text-sm font-semibold text-rose-100">{e.name}</div>
+            <div className="mt-0.5 text-xs text-rose-200/70">{e.status}</div>
+          </div>
+        ))}
+
         <div className="flex gap-2">
           <button
             onClick={onAddActivity}
@@ -808,6 +948,12 @@ function DaySheet({
             className="flex-1 rounded-xl border border-dashed border-fuchsia-800/60 p-2.5 text-center text-xs text-fuchsia-300/80 hover:bg-fuchsia-900/10"
           >
             🎯 New objective
+          </button>
+          <button
+            onClick={onAddAilment}
+            className="flex-1 rounded-xl border border-dashed border-rose-800/60 p-2.5 text-center text-xs text-rose-300/80 hover:bg-rose-900/10"
+          >
+            🩹 Add ailment
           </button>
         </div>
 

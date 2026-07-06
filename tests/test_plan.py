@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import date as _date
+from datetime import timedelta as _timedelta
+
 
 def _ex_id(client, q: str) -> int:
     return client.get("/api/exercises/search", params={"q": q}).json()[0]["exercise"]["id"]
@@ -172,6 +175,58 @@ def test_calendar_objective_clipped_to_window(client):
     # Peak is outside this window -> no objective entries.
     cal = _cal(client, "2026-07-01", "2026-07-31")
     assert not any(c["kind"] in ("objective", "objective_block") for c in cal)
+
+
+# --------------------------------------------------------------------------- #
+# Ailment episodes as calendar bands. `resolved_at` is always stamped as
+# real-world "today" by the ailments endpoint (not settable via the API), so
+# these anchor onset/window dates relative to `date.today()` rather than
+# fixed calendar strings, to stay correct regardless of when the suite runs.
+# --------------------------------------------------------------------------- #
+def test_calendar_emits_resolved_ailment_band(client):
+    onset = _date.today() - _timedelta(days=10)
+    ep = client.post(
+        "/api/ailments",
+        json={"label": "Right knee", "onset_date": onset.isoformat()},
+    ).json()
+    client.patch(f"/api/ailments/{ep['id']}", json={"status": "resolved"})
+
+    win_start = onset - _timedelta(days=5)
+    win_end = _date.today() + _timedelta(days=5)
+    cal = _cal(client, win_start.isoformat(), win_end.isoformat())
+    band = sorted((c for c in cal if c["kind"] == "ailment"), key=lambda c: c["date"])
+    assert band, "expected an ailment band on the calendar"
+    assert all(c["id"] == ep["id"] and c["name"] == "Right knee" for c in band)
+    # band spans onset -> resolved_at (today), inclusive
+    assert band[0]["date"] == onset.isoformat()
+    assert band[-1]["date"] == _date.today().isoformat()
+
+
+def test_calendar_unresolved_ailment_clipped_to_today_not_future(client):
+    onset = _date.today() - _timedelta(days=3)
+    client.post("/api/ailments", json={"label": "Shoulder", "onset_date": onset.isoformat()})
+
+    win_start = onset - _timedelta(days=2)
+    win_end = _date.today() + _timedelta(days=30)
+    cal = _cal(client, win_start.isoformat(), win_end.isoformat())
+    band = [c["date"] for c in cal if c["kind"] == "ailment"]
+    # An unresolved episode's course isn't planned ahead of time — the band
+    # stops at today even though the query window extends well past it.
+    assert max(band) == _date.today().isoformat()
+
+
+def test_calendar_ailment_clipped_to_window(client):
+    onset = _date.today() - _timedelta(days=5)
+    client.post(
+        "/api/ailments",
+        json={"label": "Old ankle sprain", "onset_date": onset.isoformat()},
+    )
+
+    # A window entirely before onset_date doesn't intersect the band at all.
+    win_start = onset - _timedelta(days=60)
+    win_end = onset - _timedelta(days=20)
+    cal = _cal(client, win_start.isoformat(), win_end.isoformat())
+    assert not any(c["kind"] == "ailment" for c in cal)
 
 
 # --------------------------------------------------------------------------- #
