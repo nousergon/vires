@@ -170,7 +170,7 @@ def build_coach_objective_context(
     candidates = _build_exercise_candidates(db, ident, obj_ctx)
     events = _build_event_ctxs(db, ident, timeline, date.today())
     recent_activities = _build_recent_activities(db, ident, date.today())
-    ailments = _build_ailment_ctxs(db, ident)
+    ailments = build_ailment_ctxs(db, ident)
     return CoachObjectiveContext(
         objective=obj_ctx,
         constraints=con_ctxs,
@@ -182,8 +182,12 @@ def build_coach_objective_context(
     )
 
 
-def _build_ailment_ctxs(db: Session, ident: Identity) -> list[AilmentEpisodeCtx]:
-    """Open/improving episodes with check-ins from the last 14 days."""
+def build_ailment_ctxs(db: Session, ident: Identity) -> list[AilmentEpisodeCtx]:
+    """Open/improving episodes with check-ins from the last 14 days.
+
+    Shared with ``api.services.coach.replan`` — the macro re-plan loop reads
+    the same trajectory the coach itself is grounded on, so a trigger firing
+    and the coach's own reasoning are never out of sync."""
     today = date.today()
     window_start = today - timedelta(days=14)
     out: list[AilmentEpisodeCtx] = []

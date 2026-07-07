@@ -280,7 +280,9 @@ class ProgramModifyPreview(BaseModel):
 class ReplanTriggerOut(BaseModel):
     """One structural reason the coach suggests re-planning."""
 
-    kind: str  # missed_sessions | plan_exhausted | objective_passed | objective_changed
+    # missed_sessions | plan_exhausted | objective_passed | objective_changed |
+    # ailment_changed
+    kind: str
     reason: str
 
 

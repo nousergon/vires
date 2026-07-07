@@ -62,7 +62,10 @@ export default function AilmentsPanel({
         </button>
       </div>
       <p className="mb-2 text-xs text-slate-500">
-        Acute or changing injuries — log severity today; the coach reads your trend before prescribing.
+        Acute or changing injuries — log severity today; the coach reads your trend before
+        prescribing. A severity of 6+ (or a big jump between check-ins) may prompt the coach to
+        suggest a plan refresh, and a severe lower-body/knee flare-up can warn or pause today's
+        session before you start it.
       </p>
 
       {isLoading ? (
