@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type AilmentEpisode } from '../lib/api'
-import { Button } from './ui'
+import { Button, Sheet } from './ui'
 import { isoDate } from '../lib/calendar'
 
 function severityLabel(n: number): string {
@@ -13,42 +13,24 @@ function severityLabel(n: number): string {
 }
 
 /** Date-anchored injury episodes with daily severity check-ins. */
-export default function AilmentsPanel({ onChanged }: { onChanged?: () => void }) {
+export default function AilmentsPanel({
+  onAdd,
+  onChanged,
+}: {
+  onAdd: () => void
+  onChanged?: () => void
+}) {
   const qc = useQueryClient()
   const { data: ailments = [], isLoading } = useQuery({
     queryKey: ['ailments', 'open'],
     queryFn: () => api.listAilments('open'),
   })
-  const [adding, setAdding] = useState(false)
-  const [label, setLabel] = useState('')
-  const [notes, setNotes] = useState('')
-  const [severity, setSeverity] = useState('3')
   const [busy, setBusy] = useState(false)
 
   function refresh() {
     qc.invalidateQueries({ queryKey: ['ailments'] })
     qc.invalidateQueries({ queryKey: ['ailments-pending'] })
     onChanged?.()
-  }
-
-  async function register() {
-    if (!label.trim()) return
-    setBusy(true)
-    try {
-      await api.createAilment({
-        label: label.trim(),
-        onset_date: isoDate(new Date()),
-        notes: notes.trim() || null,
-        initial_severity: severity === '' ? null : Number(severity),
-      })
-      setLabel('')
-      setNotes('')
-      setSeverity('3')
-      setAdding(false)
-      refresh()
-    } finally {
-      setBusy(false)
-    }
   }
 
   async function checkIn(ep: AilmentEpisode, sev: number, note?: string) {
@@ -75,11 +57,9 @@ export default function AilmentsPanel({ onChanged }: { onChanged?: () => void })
     <div>
       <div className="mb-2 flex items-center justify-between">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Ailments</h2>
-        {!adding && (
-          <button className="text-sm text-amber-300 hover:text-amber-200" onClick={() => setAdding(true)}>
-            + Register
-          </button>
-        )}
+        <button className="text-sm text-amber-300 hover:text-amber-200" onClick={onAdd}>
+          + Register
+        </button>
       </div>
       <p className="mb-2 text-xs text-slate-500">
         Acute or changing injuries — log severity today; the coach reads your trend before
@@ -90,8 +70,13 @@ export default function AilmentsPanel({ onChanged }: { onChanged?: () => void })
 
       {isLoading ? (
         <p className="text-sm text-slate-500">Loading…</p>
-      ) : ailments.length === 0 && !adding ? (
-        <p className="text-sm text-slate-500">No active ailments.</p>
+      ) : ailments.length === 0 ? (
+        <button
+          onClick={onAdd}
+          className="block w-full rounded-xl border border-dashed border-rose-800/40 p-3 text-left text-sm text-slate-400 hover:bg-rose-900/10"
+        >
+          Register an ailment — the coach reads its severity trend before prescribing.
+        </button>
       ) : (
         <div className="space-y-2">
           {ailments.map((a) => (
@@ -105,44 +90,89 @@ export default function AilmentsPanel({ onChanged }: { onChanged?: () => void })
           ))}
         </div>
       )}
-
-      {adding && (
-        <div className="mt-2 space-y-2 rounded-lg border border-rose-800/40 bg-rose-900/10 p-3">
-          <input
-            value={label}
-            onChange={(e) => setLabel(e.target.value)}
-            placeholder="e.g. Right knee"
-            className="input"
-          />
-          <textarea
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            rows={2}
-            placeholder="What happened, what provokes it (optional)"
-            className="input"
-          />
-          <label className="block text-xs text-slate-400">
-            Severity today (0–10)
-            <input
-              type="number"
-              min={0}
-              max={10}
-              value={severity}
-              onChange={(e) => setSeverity(e.target.value)}
-              className="input mt-1"
-            />
-          </label>
-          <div className="flex gap-2">
-            <Button className="flex-1" onClick={register} disabled={busy || !label.trim()}>
-              {busy ? 'Saving…' : 'Register ailment'}
-            </Button>
-            <Button variant="secondary" onClick={() => setAdding(false)} disabled={busy}>
-              Cancel
-            </Button>
-          </div>
-        </div>
-      )}
     </div>
+  )
+}
+
+/** Add-ailment modal — shared by the Status tab and a calendar day's "+ Ailment". */
+export function AilmentSheet({
+  open,
+  defaultDate,
+  onClose,
+  onSaved,
+}: {
+  open: boolean
+  // Seed onset_date (e.g. the tapped calendar day); defaults to today.
+  defaultDate?: string | null
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const [label, setLabel] = useState('')
+  const [notes, setNotes] = useState('')
+  const [severity, setSeverity] = useState('3')
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    setLabel('')
+    setNotes('')
+    setSeverity('3')
+  }, [open])
+
+  async function register() {
+    if (!label.trim()) return
+    setBusy(true)
+    try {
+      await api.createAilment({
+        label: label.trim(),
+        onset_date: defaultDate || isoDate(new Date()),
+        notes: notes.trim() || null,
+        initial_severity: severity === '' ? null : Number(severity),
+      })
+      onSaved()
+      onClose()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Sheet open={open} onClose={onClose} title="🩹 New ailment">
+      <div className="space-y-2">
+        <input
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          placeholder="e.g. Right knee"
+          className="input"
+        />
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          rows={2}
+          placeholder="What happened, what provokes it (optional)"
+          className="input"
+        />
+        <label className="block text-xs text-slate-400">
+          Severity today (0–10)
+          <input
+            type="number"
+            min={0}
+            max={10}
+            value={severity}
+            onChange={(e) => setSeverity(e.target.value)}
+            className="input mt-1"
+          />
+        </label>
+        <div className="flex gap-2 pt-1">
+          <Button className="flex-1" onClick={register} disabled={busy || !label.trim()}>
+            {busy ? 'Saving…' : 'Register ailment'}
+          </Button>
+          <Button variant="secondary" onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    </Sheet>
   )
 }
 
