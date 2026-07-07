@@ -247,7 +247,7 @@ describe('PlanPage', () => {
     renderWithProviders(<PlanPage />)
     // the legend documents the distinct upcoming-activity marker
     expect(await screen.findByText(/upcoming\s*activity/)).toBeInTheDocument()
-    // it also surfaces in the flat "Upcoming activities" list
+    // it also surfaces in the merged Agenda list
     expect(await screen.findByText('Tuesday league game')).toBeInTheDocument()
     // tapping the day surfaces the activity as a marker chip (not a fuchsia band)
     fireEvent.click(await screen.findByLabelText(iso))
@@ -255,11 +255,18 @@ describe('PlanPage', () => {
     expect(screen.getByText('upcoming')).toBeInTheDocument()
   })
 
-  it('opens the add-activity sheet from the Upcoming activities section', async () => {
+  it('opens the add-activity sheet from the Agenda section header', async () => {
     mockEmpty()
     renderWithProviders(<PlanPage />)
-    fireEvent.click(await screen.findByText(/Add a race, league game, trip/))
+    fireEvent.click(await screen.findByText('+ Activity'))
     expect(await screen.findByText('Add activity')).toBeInTheDocument()
+  })
+
+  it('opens the add-objective sheet from the Agenda empty state', async () => {
+    mockEmpty()
+    renderWithProviders(<PlanPage />)
+    fireEvent.click(await screen.findByText(/Set a goal/))
+    expect(await screen.findByText('Add objective')).toBeInTheDocument()
   })
 
   it('shows the reschedule banner and invalidates the calendar when a workout moves', async () => {

@@ -194,9 +194,14 @@ export default function PlanPage() {
 
           <Legend />
 
-          <ObjectiveSection onEdit={openObjective} onGenerate={() => openCoach(true)} />
-
-          <EventsSection entries={entries} onEdit={openActivityEntry} onAdd={() => openActivity()} />
+          <AgendaSection
+            entries={entries}
+            onEditObjective={openObjective}
+            onAddObjective={() => openObjective()}
+            onGenerate={() => openCoach(true)}
+            onEditActivity={openActivityEntry}
+            onAddActivity={() => openActivity()}
+          />
 
           <ProgramsSection onModify={setModifyProgram} onChanged={refresh} compact />
         </>
@@ -262,12 +267,31 @@ export default function PlanPage() {
 }
 
 // --------------------------------------------------------------------------- //
-function ObjectiveSection({
-  onEdit,
+// Agenda: dated objectives (goals the coach peaks TOWARD) + upcoming
+// activities (constraints the coach trains AROUND), merged into one
+// chronological list. Both are date-anchored and already render as markers
+// on the month grid above (fuchsia band/peak for objectives, sky ring badge
+// for activities — see CalendarGrid / DaySheet), so this is a discovery list
+// over data already on the calendar, not a second source of truth. Standing
+// (undated) objectives have no calendar anchor and live on the Status tab
+// instead (GeneralObjectivesSection) — scoped OUT here so they aren't listed
+// twice. The derived FOCUS objective is always shown in full regardless of
+// kind (even if it's a standing goal), since it drives Generate/Regenerate
+// plan — that action belongs on the Calendar tab regardless of what's focused.
+function AgendaSection({
+  entries,
+  onEditObjective,
+  onAddObjective,
   onGenerate,
+  onEditActivity,
+  onAddActivity,
 }: {
-  onEdit: (id?: number) => void
+  entries: CalendarEntry[]
+  onEditObjective: (id?: number) => void
+  onAddObjective: () => void
   onGenerate: () => void
+  onEditActivity: (e: CalendarEntry) => void
+  onAddActivity: () => void
 }) {
   const qc = useQueryClient()
   const { data: active } = useQuery({
@@ -278,14 +302,24 @@ function ObjectiveSection({
   const { data: all = [] } = useQuery({ queryKey: ['objectives'], queryFn: api.listObjectives })
   const { data: programs = [] } = useQuery({ queryKey: ['programs'], queryFn: api.listPrograms })
 
-  const objectives = active?.objectives ?? []
-  const focusId = active?.objective?.id ?? null
+  const focus = active?.objective ?? null
   const hasActivePlan = programs.some((p) => p.status === 'active')
+  const milestoneCount = (id: number) => all.filter((o) => o.parent_objective_id === id).length
 
-  const milestoneCount = (id: number) =>
-    all.filter((o) => o.parent_objective_id === id).length
+  const otherDated = (active?.objectives ?? []).filter((o) => o.kind === 'dated' && o.id !== focus?.id)
+  const upcoming = entries
+    .filter((e) => e.kind === 'session' && e.session_type === 'activity' && e.status === 'upcoming')
+    .sort((a, b) => a.date.localeCompare(b.date))
 
-  async function remove(o: Objective) {
+  type Row =
+    | { type: 'objective'; date: string; o: Objective }
+    | { type: 'activity'; date: string; e: CalendarEntry }
+  const rows: Row[] = [
+    ...otherDated.map((o): Row => ({ type: 'objective', date: o.target_date ?? '', o })),
+    ...upcoming.map((e): Row => ({ type: 'activity', date: e.date, e })),
+  ].sort((a, b) => a.date.localeCompare(b.date))
+
+  async function removeObjective(o: Objective) {
     if (
       !confirm(
         `Delete "${o.name}"? Its plans + history stay; any training milestones become standalone objectives.`,
@@ -300,95 +334,127 @@ function ObjectiveSection({
   return (
     <div className="mt-6">
       <div className="mb-2 flex items-center justify-between">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Objectives</h2>
-        <button className="text-sm text-amber-300 hover:text-amber-200" onClick={() => onEdit()}>
-          + Add
-        </button>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Agenda</h2>
+        <div className="flex gap-3">
+          <button className="text-sm text-fuchsia-300 hover:text-fuchsia-200" onClick={onAddObjective}>
+            + Objective
+          </button>
+          <button className="text-sm text-sky-300 hover:text-sky-200" onClick={onAddActivity}>
+            + Activity
+          </button>
+        </div>
       </div>
 
-      {objectives.length === 0 ? (
+      {!focus && rows.length === 0 ? (
         <button
-          onClick={() => onEdit()}
+          onClick={onAddObjective}
           className="block w-full rounded-xl border border-dashed border-slate-700 p-3 text-left text-sm text-slate-400 hover:bg-slate-800/40"
         >
-          Set a goal (e.g. “Climb Baker”) — the coach will periodize a plan toward it.
+          Set a goal (e.g. “Climb Baker”) — the coach will periodize a plan toward it. Or add a race,
+          trip, or rehab window the coach should train around.
         </button>
       ) : (
         <div className="space-y-2">
-          {objectives.map((o) => {
-            const isFocus = o.id === focusId
-            const ms = milestoneCount(o.id)
-            return (
-              <div
-                key={o.id}
-                className={`rounded-xl border p-3 ${
-                  isFocus
-                    ? 'border-amber-700/40 bg-amber-900/15'
-                    : 'border-slate-800 bg-slate-800/40'
-                }`}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <button onClick={() => onEdit(o.id)} className="block min-w-0 flex-1 text-left">
-                    <div
-                      className={`flex items-center gap-2 text-sm font-semibold ${
-                        isFocus ? 'text-amber-200' : 'text-slate-100'
-                      }`}
-                    >
-                      <span>{isFocus ? '🎯' : '📌'}</span>
-                      <span className="truncate">{o.name}</span>
-                      {isFocus && (
-                        <span className="shrink-0 rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-300">
-                          Focus
-                        </span>
-                      )}
-                    </div>
-                    <div className="mt-0.5 text-xs text-slate-400">
-                      {o.kind === 'dated' && o.target_date
-                        ? objectiveDateLabel(o.target_date, o.event_end_date)
-                        : 'open-ended'}
-                      {o.sport && ` · ${o.sport}`}
-                      {ms > 0 && ` · ${ms} milestone${ms === 1 ? '' : 's'}`}
-                    </div>
-                  </button>
-                  <button
-                    className="shrink-0 text-slate-600 hover:text-red-400"
-                    onClick={() => remove(o)}
-                    aria-label={`Delete ${o.name}`}
-                  >
-                    ✕
-                  </button>
-                </div>
-
-                {isFocus && (active?.constraints.length ?? 0) > 0 && (
-                  <div className="mt-1 text-xs text-slate-400">
-                    Training around: {active!.constraints.map((c) => c.label).join(', ')}
+          {focus && (
+            <div className="rounded-xl border border-amber-700/40 bg-amber-900/15 p-3">
+              <div className="flex items-start justify-between gap-2">
+                <button onClick={() => onEditObjective(focus.id)} className="block min-w-0 flex-1 text-left">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-amber-200">
+                    <span>🎯</span>
+                    <span className="truncate">{focus.name}</span>
+                    <span className="shrink-0 rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-300">
+                      Focus
+                    </span>
                   </div>
-                )}
-
-                {isFocus && active?.active_program?.coach_summary && (
-                  <div className="mt-2 rounded-lg border border-slate-700/60 bg-slate-800/40 p-2.5">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                      Coach&apos;s strategy
-                    </p>
-                    <p className="mt-0.5 text-xs leading-relaxed text-slate-300">
-                      {active.active_program.coach_summary}
-                    </p>
+                  <div className="mt-0.5 text-xs text-slate-400">
+                    {focus.kind === 'dated' && focus.target_date
+                      ? objectiveDateLabel(focus.target_date, focus.event_end_date)
+                      : 'open-ended'}
+                    {focus.sport && ` · ${focus.sport}`}
+                    {milestoneCount(focus.id) > 0 &&
+                      ` · ${milestoneCount(focus.id)} milestone${milestoneCount(focus.id) === 1 ? '' : 's'}`}
                   </div>
-                )}
-
-                {isFocus && (
-                  <>
-                    <Button className="mt-3 w-full" onClick={onGenerate}>
-                      {hasActivePlan ? '✨ Regenerate plan' : '✨ Generate plan'}
-                    </Button>
-                    <p className="mt-1.5 text-center text-[11px] text-slate-500">
-                      The coach builds &amp; periodizes a plan toward your focus objective.
-                    </p>
-                  </>
-                )}
+                </button>
+                <button
+                  className="shrink-0 text-slate-600 hover:text-red-400"
+                  onClick={() => removeObjective(focus)}
+                  aria-label={`Delete ${focus.name}`}
+                >
+                  ✕
+                </button>
               </div>
-            )
-          })}
+
+              {(active?.constraints.length ?? 0) > 0 && (
+                <div className="mt-1 text-xs text-slate-400">
+                  Training around: {active!.constraints.map((c) => c.label).join(', ')}
+                </div>
+              )}
+
+              {active?.active_program?.coach_summary && (
+                <div className="mt-2 rounded-lg border border-slate-700/60 bg-slate-800/40 p-2.5">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                    Coach&apos;s strategy
+                  </p>
+                  <p className="mt-0.5 text-xs leading-relaxed text-slate-300">
+                    {active.active_program.coach_summary}
+                  </p>
+                </div>
+              )}
+
+              <Button className="mt-3 w-full" onClick={onGenerate}>
+                {hasActivePlan ? '✨ Regenerate plan' : '✨ Generate plan'}
+              </Button>
+              <p className="mt-1.5 text-center text-[11px] text-slate-500">
+                The coach builds &amp; periodizes a plan toward your focus objective.
+              </p>
+            </div>
+          )}
+
+          {rows.map((r) =>
+            r.type === 'objective' ? (
+              <div
+                key={`o${r.o.id}`}
+                className="flex items-start justify-between gap-2 rounded-xl border border-fuchsia-700/40 bg-fuchsia-900/10 p-3"
+              >
+                <button
+                  onClick={() => onEditObjective(r.o.id)}
+                  className="block min-w-0 flex-1 text-left"
+                >
+                  <div className="flex items-center gap-2 text-sm font-semibold text-fuchsia-200">
+                    <span>📌</span>
+                    <span className="truncate">{r.o.name}</span>
+                  </div>
+                  <div className="mt-0.5 text-xs text-fuchsia-300/70">
+                    {r.o.target_date ? objectiveDateLabel(r.o.target_date, r.o.event_end_date) : ''}
+                    {r.o.sport && ` · ${r.o.sport}`}
+                    {milestoneCount(r.o.id) > 0 &&
+                      ` · ${milestoneCount(r.o.id)} milestone${milestoneCount(r.o.id) === 1 ? '' : 's'}`}
+                  </div>
+                </button>
+                <button
+                  className="shrink-0 text-slate-600 hover:text-red-400"
+                  onClick={() => removeObjective(r.o)}
+                  aria-label={`Delete ${r.o.name}`}
+                >
+                  ✕
+                </button>
+              </div>
+            ) : (
+              <button
+                key={`e${r.e.id}-${r.e.date}`}
+                onClick={() => onEditActivity(r.e)}
+                className="flex w-full items-center justify-between gap-2 rounded-xl border border-sky-700/40 bg-sky-900/15 p-3 text-left"
+              >
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-sky-200">
+                    <span>📍</span>
+                    <span className="truncate">{r.e.name}</span>
+                  </div>
+                  <div className="mt-0.5 text-xs text-sky-300/70">{r.e.date}</div>
+                </div>
+              </button>
+            ),
+          )}
         </div>
       )}
     </div>
@@ -402,68 +468,6 @@ function objectiveDateLabel(iso: string, eventEnd?: string | null): string {
   const weeks = Math.max(0, Math.round((d.getTime() - Date.now()) / (7 * 864e5)))
   const range = eventEnd ? `${fmt(d)} – ${fmt(new Date(eventEnd + 'T00:00:00'))}` : fmt(d)
   return `${range} · ~${weeks} wk${weeks === 1 ? '' : 's'} out`
-}
-
-// --------------------------------------------------------------------------- //
-// Upcoming activities/events: constraints the coach trains AROUND (races,
-// weekly league games, trips, rehab windows) — distinct from Objectives,
-// which are goals the coach peaks TOWARD. Same 'session' kind as a logged
-// activity — filtered to status='upcoming' — so this is a discovery list
-// over the SAME feed the month grid renders, not a separate concept. Listed
-// here as a flat list; upcoming activities also render as markers on the
-// month grid above (see CalendarGrid / DaySheet).
-function EventsSection({
-  entries,
-  onEdit,
-  onAdd,
-}: {
-  entries: CalendarEntry[]
-  onEdit: (e: CalendarEntry) => void
-  onAdd: () => void
-}) {
-  const upcoming = entries
-    .filter((e) => e.kind === 'session' && e.session_type === 'activity' && e.status === 'upcoming')
-    .sort((a, b) => a.date.localeCompare(b.date))
-
-  return (
-    <div className="mt-6">
-      <div className="mb-2 flex items-center justify-between">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
-          Upcoming activities
-        </h2>
-        <button className="text-sm text-amber-300 hover:text-amber-200" onClick={onAdd}>
-          + Add
-        </button>
-      </div>
-
-      {upcoming.length === 0 ? (
-        <button
-          onClick={onAdd}
-          className="block w-full rounded-xl border border-dashed border-slate-700 p-3 text-left text-sm text-slate-400 hover:bg-slate-800/40"
-        >
-          Add a race, league game, trip, or rehab window — the coach trains around it.
-        </button>
-      ) : (
-        <div className="space-y-2">
-          {upcoming.map((e) => (
-            <button
-              key={`${e.id}-${e.date}`}
-              onClick={() => onEdit(e)}
-              className="flex w-full items-center justify-between gap-2 rounded-xl border border-sky-700/40 bg-sky-900/15 p-3 text-left"
-            >
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 text-sm font-semibold text-sky-200">
-                  <span>📍</span>
-                  <span className="truncate">{e.name}</span>
-                </div>
-                <div className="mt-0.5 text-xs text-sky-300/70">{e.date}</div>
-              </div>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
 }
 
 // --------------------------------------------------------------------------- //
