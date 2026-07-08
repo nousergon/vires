@@ -94,6 +94,10 @@ export default function ObjectiveSheet({
     onSuccess: () => {
       refresh()
       onSaved()
+      // Close on success (mirrors AilmentSheet) — leaving the sheet open with
+      // the just-saved values still filled in reads as "did that work?" and
+      // invites a second, now-duplicate submission of the same objective.
+      onClose()
     },
     onError: (e) => setError((e as Error).message.replace(/^\d+:\s*/, '')),
   })

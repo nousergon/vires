@@ -35,6 +35,24 @@ describe('ObjectiveSheet', () => {
     )
   })
 
+  it('closes the sheet after a successful save (prevents a stale-form double submit)', async () => {
+    vi.spyOn(api, 'activeObjective').mockResolvedValue(makeActiveObjective())
+    vi.spyOn(api, 'listObjectives').mockResolvedValue([])
+    const create = vi.spyOn(api, 'createObjective').mockResolvedValue(OBJECTIVE)
+    const onClose = vi.fn()
+    renderWithProviders(<ObjectiveSheet open onClose={onClose} onSaved={() => {}} />)
+
+    fireEvent.change(await screen.findByPlaceholderText('e.g. Climb Baker'), {
+      target: { value: 'Climb Kangaroo Temple' },
+    })
+    const dateInput = document.querySelector('input[type="date"]') as HTMLInputElement
+    fireEvent.change(dateInput, { target: { value: '2026-08-01' } })
+
+    fireEvent.click(screen.getByText('Add objective'))
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
+  })
+
   it('pin-as-focus sends is_primary: true', async () => {
     vi.spyOn(api, 'activeObjective').mockResolvedValue(makeActiveObjective())
     vi.spyOn(api, 'listObjectives').mockResolvedValue([])
