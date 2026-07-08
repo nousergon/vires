@@ -124,8 +124,12 @@ def build_materialize_context(db: Session, ident: Identity) -> MaterializeContex
                 for te in tpl.exercises
             ],
         )
-    unit = get_or_create_settings(db, ident).weight_unit
-    return MaterializeContext(templates=templates, weight_unit=unit)
+    settings = get_or_create_settings(db, ident)
+    return MaterializeContext(
+        templates=templates,
+        weight_unit=settings.weight_unit,
+        preferred_weekdays=settings.preferred_weekdays,
+    )
 
 
 def build_coach_objective_context(

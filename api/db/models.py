@@ -86,6 +86,11 @@ class UserSettings(Base):
     timer_vibration: Mapped[bool] = mapped_column(Boolean, default=True)
     timer_notification: Mapped[bool] = mapped_column(Boolean, default=False)
     timer_keep_awake: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Durable weekly-lifting day preference (e.g. ["monday", "thursday"]) — set
+    # once here so the coach honors it on every generation without the user
+    # re-stating it in each conversation. Empty = no standing preference, let
+    # the coach/user's message pick the day(s) as before.
+    preferred_weekdays: Mapped[list] = mapped_column(JSON, default=list)
     updated_at: Mapped[datetime] = mapped_column(
         UTCDateTime(), default=_utcnow, onupdate=_utcnow
     )

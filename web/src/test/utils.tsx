@@ -38,6 +38,7 @@ export const SETTINGS: Settings = {
   timer_vibration: true,
   timer_notification: false,
   timer_keep_awake: true,
+  preferred_weekdays: [],
 }
 
 // ---- typed fixture builders ----------------------------------------------- //

@@ -112,6 +112,9 @@ class TemplateCtx:
 class MaterializeContext:
     templates: dict[int, TemplateCtx]
     weight_unit: str = "lb"
+    # Durable weekly-lifting day preference (e.g. ["monday", "thursday"]) the
+    # coach should default to when the user's request doesn't name a day.
+    preferred_weekdays: list[str] = field(default_factory=list)
 
 
 # --------------------------------------------------------------------------- #
