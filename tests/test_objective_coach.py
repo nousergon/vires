@@ -1,5 +1,6 @@
 """Objective-driven generation: the objective + constraints reach the model,
-and the public baseline prompt carries the periodization + safety rules."""
+and the public baseline prompt carries the schema mechanism + safety rules
+(never the coaching methodology — see the public/private split, vires-ops#53)."""
 
 from __future__ import annotations
 
@@ -227,31 +228,19 @@ def test_no_events_key_when_none_present():
     assert "events" not in block
 
 
-def test_baseline_prompt_has_event_load_accounting_language():
+def test_baseline_prompt_mentions_events_and_recent_activities_fields():
+    """The public baseline must still READ every CONTEXT field mechanically
+    (so a self-hosted deploy behaves correctly for a user with events/recent
+    activities set) — but the load-accounting/fatigue-in HEURISTICS are the
+    private coaching edge, not asserted here. See
+    test_baseline_prompt_stays_generic_no_proprietary_methodology."""
     from api.services.coach.prompt_loader import load_system_prompt
 
     load_system_prompt.cache_clear()
     text = load_system_prompt().lower()
     try:
-        assert "events" in text  # events are grounded as load constraints
-        assert "load-accounting" in text or "load accounting" in text
-        assert "trained around" in text or "train around" in text or "around" in text
-        assert "already spent" in text  # fatigue-in accounting
-        assert "objective_id" in text  # peak/taper anchoring exception
-    finally:
-        load_system_prompt.cache_clear()
-
-
-def test_baseline_prompt_has_recent_activity_recovery_language():
-    from api.services.coach.prompt_loader import load_system_prompt
-
-    load_system_prompt.cache_clear()
-    text = load_system_prompt().lower()
-    try:
-        assert "recent_activities" in text
-        assert "already logged" in text  # past load, not a future constraint
-        assert "days_ago" in text
-        assert "recover" in text
+        assert "events" in text and "objective_id" in text
+        assert "recent_activities" in text and "days_ago" in text
     finally:
         load_system_prompt.cache_clear()
 
@@ -502,19 +491,49 @@ def test_generate_feeds_full_dated_timeline(client, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# the public baseline prompt carries the new rules
+# the public baseline prompt carries the mechanism (never the methodology) —
+# see the public/private split note in prompt_loader.py + vires-ops#53.
 # --------------------------------------------------------------------------- #
-def test_baseline_prompt_has_periodization_and_safety_language():
+def test_baseline_prompt_has_objective_awareness_and_safety_language():
     from api.services.coach.prompt_loader import load_system_prompt
 
     load_system_prompt.cache_clear()
     text = load_system_prompt().lower()
     try:
-        assert "target_date" in text and "taper" in text  # periodize-to-date
-        assert "deload_weeks" in text  # taper mechanism
-        assert "never prescribe" in text  # injury safety
+        assert "target_date" in text  # reads the objective's date
+        assert "deload_weeks" in text  # schema mechanism
+        assert "never prescribe" in text  # injury safety (always public — never traded for IP)
         assert "pt/physician" in text or "physician" in text  # defer to professional
-        assert "demands_profile" in text  # honor the needs-analysis
+        assert "demands_profile" in text  # reads the needs-analysis field
+    finally:
+        load_system_prompt.cache_clear()
+
+
+def test_baseline_prompt_stays_generic_no_proprietary_methodology():
+    """Guards the public/private split (2026-07-08, vires-ops#53): the
+    committed baseline is a competent-but-generic example — the actual
+    coaching depth (periodization phase sequencing, event/cross-training
+    load-accounting heuristics, the season-phase algorithm's specific
+    transition rules) lives ONLY in the private tuned prompt
+    (vires-ops/prompts/coach_system.txt, hydrated via SSM), never here."""
+    from api.services.coach.prompt_loader import load_system_prompt
+
+    load_system_prompt.cache_clear()
+    text = load_system_prompt().lower()
+    try:
+        for phrase in [
+            "max strength",
+            "muscular-endurance conversion",
+            "load-accounting",
+            "load accounting",
+            "already spent",  # fatigue-in accounting
+            "freshest",  # recovery-around heuristic
+            "sport-specific",  # season-phase sequencing language
+        ]:
+            assert phrase not in text, (
+                f"proprietary coaching methodology leaked into the public "
+                f"baseline: {phrase!r}"
+            )
     finally:
         load_system_prompt.cache_clear()
 
@@ -590,16 +609,17 @@ def test_generate_accepts_and_materializes_a_phased_season(client, monkeypatch):
     assert f'"objective_id": {o1["id"]}' in user_text
 
 
-def test_baseline_prompt_has_season_phase_language():
+def test_baseline_prompt_knows_to_use_phases_for_a_multi_peak_timeline():
+    """Schema mechanism, not strategy: with 2+ dated peaks the coach must use
+    ProgramSpec's `phases` field instead of a flat `schedule`, or a self-hosted
+    multi-objective season silently collapses to nonsense. The actual block-
+    sequencing/transition RULES are the private edge — not asserted here."""
     from api.services.coach.prompt_loader import load_system_prompt
 
     load_system_prompt.cache_clear()
     text = load_system_prompt().lower()
     try:
-        assert "season" in text  # plans the whole season up front
         assert "phases" in text and "objective_id" in text  # emit phased spec
-        assert "event_end_date" in text  # chain blocks past the multi-day event
-        assert "sport-specific" in text  # each block specific to its objective
     finally:
         load_system_prompt.cache_clear()
 
