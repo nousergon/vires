@@ -40,6 +40,33 @@ describe('SettingsPage', () => {
     expect(update.mock.calls[0][0]).toMatchObject({ timer_vibration: false })
   })
 
+  it('sets preferred training days and saves', async () => {
+    mockApis()
+    const update = vi.spyOn(api, 'updateSettings').mockResolvedValue(LOADED)
+    renderWithProviders(<SettingsPage />)
+    await screen.findByDisplayValue('111') // settings loaded
+    expect(screen.getByText('Training schedule')).toBeInTheDocument()
+    fireEvent.click(screen.getByLabelText('monday'))
+    fireEvent.click(screen.getByLabelText('thursday'))
+    fireEvent.click(screen.getByText('Save settings'))
+    await waitFor(() => expect(update).toHaveBeenCalled())
+    expect(update.mock.calls[0][0]).toMatchObject({
+      preferred_weekdays: ['monday', 'thursday'],
+    })
+  })
+
+  it('toggling a selected day off removes it', async () => {
+    mockApis()
+    const update = vi.spyOn(api, 'updateSettings').mockResolvedValue(LOADED)
+    renderWithProviders(<SettingsPage />)
+    await screen.findByDisplayValue('111')
+    fireEvent.click(screen.getByLabelText('monday'))
+    fireEvent.click(screen.getByLabelText('monday')) // toggle back off
+    fireEvent.click(screen.getByText('Save settings'))
+    await waitFor(() => expect(update).toHaveBeenCalled())
+    expect(update.mock.calls[0][0]).toMatchObject({ preferred_weekdays: [] })
+  })
+
   it('renders the calendar-feed subscribe URL', async () => {
     mockApis()
     renderWithProviders(<SettingsPage />)

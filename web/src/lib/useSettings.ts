@@ -10,6 +10,7 @@ export const DEFAULT_SETTINGS: Settings = {
   timer_vibration: true,
   timer_notification: false,
   timer_keep_awake: true,
+  preferred_weekdays: [],
 }
 
 /** Current user settings, with defaults applied while loading. Never undefined. */

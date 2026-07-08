@@ -253,6 +253,8 @@ def _context_block(
         "weight_unit": ctx.weight_unit,
         "templates": templates,
     }
+    if ctx.preferred_weekdays:
+        payload["preferred_weekdays"] = ctx.preferred_weekdays
     objective = _objective_block(obj_ctx, today)
     if objective is not None:
         payload["goal"] = objective

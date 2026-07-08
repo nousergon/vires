@@ -304,6 +304,15 @@ export interface TemplateExerciseInput {
 
 export type WeightUnit = 'lb' | 'kg'
 
+export type Weekday =
+  | 'monday'
+  | 'tuesday'
+  | 'wednesday'
+  | 'thursday'
+  | 'friday'
+  | 'saturday'
+  | 'sunday'
+
 export interface Settings {
   weight_unit: WeightUnit
   default_rest_seconds: number
@@ -313,6 +322,10 @@ export interface Settings {
   timer_vibration: boolean
   timer_notification: boolean
   timer_keep_awake: boolean
+  // Durable weekly-lifting day preference the coach honors on every
+  // generation (e.g. ['monday', 'thursday']) — empty = no standing
+  // preference, unchanged behavior.
+  preferred_weekdays: Weekday[]
 }
 
 // ---- personal records ----------------------------------------------------- //

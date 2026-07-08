@@ -74,6 +74,18 @@ def test_context_block_includes_objective_and_constraints():
     assert goal["constraints"][0]["defer_to_professional"] is True
 
 
+def test_context_block_carries_preferred_weekdays_when_set():
+    ctx = _mat_ctx()
+    ctx.preferred_weekdays = ["monday", "thursday"]
+    block = json.loads(_context_block(ctx, date(2026, 6, 28), None))
+    assert block["preferred_weekdays"] == ["monday", "thursday"]
+
+
+def test_context_block_omits_preferred_weekdays_when_unset():
+    block = json.loads(_context_block(_mat_ctx(), date(2026, 6, 28), None))
+    assert "preferred_weekdays" not in block
+
+
 def test_objective_block_computes_weeks_until_target():
     block = _objective_block(_obj_ctx(), date(2026, 8, 1))
     # 2026-08-01 -> 2026-09-05 is 35 days = 5 weeks

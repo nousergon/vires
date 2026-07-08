@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, type Settings, type WeightUnit } from '../lib/api'
+import { api, type Settings, type Weekday, type WeightUnit } from '../lib/api'
 import { useSettings } from '../lib/useSettings'
 import { requestNotificationPermission } from '../lib/timer'
 import { ensurePushSubscription, disablePush } from '../lib/push'
@@ -68,6 +68,18 @@ export default function SettingsPage() {
             onChange={(v) => set('default_reps', v)}
           />
         </div>
+      </Card>
+
+      <Card className="mt-4 space-y-2">
+        <h2 className="text-sm font-semibold text-slate-200">Training schedule</h2>
+        <p className="text-xs text-slate-400">
+          The coach defaults to these days when you don't name specific ones in a
+          request — set once here instead of repeating it every conversation.
+        </p>
+        <WeekdayPicker
+          selected={draft.preferred_weekdays}
+          onChange={(v) => set('preferred_weekdays', v)}
+        />
       </Card>
 
       <Card className="mt-4 space-y-1">
@@ -175,6 +187,48 @@ function CalendarFeed() {
         </button>
       </div>
     </Card>
+  )
+}
+
+const WEEKDAYS: { day: Weekday; label: string }[] = [
+  { day: 'monday', label: 'M' },
+  { day: 'tuesday', label: 'Tu' },
+  { day: 'wednesday', label: 'W' },
+  { day: 'thursday', label: 'Th' },
+  { day: 'friday', label: 'F' },
+  { day: 'saturday', label: 'Sa' },
+  { day: 'sunday', label: 'Su' },
+]
+
+function WeekdayPicker({
+  selected,
+  onChange,
+}: {
+  selected: Weekday[]
+  onChange: (v: Weekday[]) => void
+}) {
+  const toggle = (day: Weekday) =>
+    onChange(selected.includes(day) ? selected.filter((d) => d !== day) : [...selected, day])
+
+  return (
+    <div className="flex gap-1.5">
+      {WEEKDAYS.map(({ day, label }) => (
+        <button
+          key={day}
+          type="button"
+          onClick={() => toggle(day)}
+          aria-pressed={selected.includes(day)}
+          aria-label={day}
+          className={`flex-1 rounded-lg py-2 text-xs font-semibold ${
+            selected.includes(day)
+              ? 'bg-amber-500 text-slate-950'
+              : 'bg-slate-800 text-slate-300'
+          }`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
   )
 }
 
