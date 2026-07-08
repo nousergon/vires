@@ -10,6 +10,13 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
+      // We register the SW ourselves (App.tsx, via `virtual:pwa-register/react`)
+      // so we can auto-reload an already-open tab once a new SW activates —
+      // the plugin's default injected <script> just calls .register() with no
+      // update/reload wiring at all, so `registerType: 'autoUpdate'` silently
+      // did nothing for anyone with the PWA already open (a deploy would land
+      // on the server but never reach an open tab until it was fully closed).
+      injectRegister: null,
       includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       manifest: {
         name: 'Vires',
