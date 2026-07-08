@@ -1,4 +1,5 @@
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
+import { useRegisterSW } from 'virtual:pwa-register/react'
 import WorkoutPage from './pages/WorkoutPage'
 import TemplatesPage from './pages/TemplatesPage'
 import PlanPage from './pages/PlanPage'
@@ -16,6 +17,12 @@ const tabs = [
 ]
 
 export default function App() {
+  // `registerType: 'autoUpdate'` (vite.config.ts) only auto-reloads on a new
+  // deploy if something actually wires the update listener — `immediate`
+  // registers on load; the reload itself is silent (no prompt), matching
+  // the "auto" in autoUpdate.
+  useRegisterSW({ immediate: true })
+
   return (
     <div className="mx-auto flex h-full max-w-2xl flex-col">
       <main className="flex-1 overflow-y-auto px-4 pb-24 pt-4 safe-top">
