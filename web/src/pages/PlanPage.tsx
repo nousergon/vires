@@ -226,6 +226,7 @@ export default function PlanPage() {
         onOpenSession={setSessionDetailId}
         onAddActivity={() => (selected ? openActivity(undefined, isoDate(selected)) : openActivity())}
         onAddObjective={() => (selected ? openObjective(undefined, isoDate(selected)) : openObjective())}
+        onEditObjective={(id) => openObjective(id)}
         onAddAilment={() => (selected ? openAilment(isoDate(selected)) : openAilment())}
       />
       <SessionDetailSheet sessionId={sessionDetailId} onClose={() => setSessionDetailId(null)} />
@@ -798,6 +799,7 @@ function DaySheet({
   onOpenSession,
   onAddActivity,
   onAddObjective,
+  onEditObjective,
   onAddAilment,
 }: {
   date: Date | null
@@ -809,8 +811,10 @@ function DaySheet({
   onOpenSession: (sessionId: number) => void
   onAddActivity: () => void
   onAddObjective: () => void
+  onEditObjective: (id: number) => void
   onAddAilment: () => void
 }) {
+  const qc = useQueryClient()
   const { data: templates = [] } = useQuery({ queryKey: ['templates'], queryFn: api.listTemplates })
   const [busy, setBusy] = useState(false)
   const [checkInGate, setCheckInGate] = useState<{
@@ -861,6 +865,21 @@ function DaySheet({
     }
   }
 
+  async function removeObjective(e: CalendarEntry) {
+    const label = e.objective_name ?? e.name ?? 'this objective'
+    if (!confirm(`Delete "${label}"? Its plans + history stay; any training milestones become standalone objectives.`))
+      return
+    setBusy(true)
+    try {
+      await api.deleteObjective(e.id)
+      qc.invalidateQueries({ queryKey: ['objectives'] })
+      qc.invalidateQueries({ queryKey: ['active-objective'] })
+      onChanged()
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const planned = entries.filter((e) => e.kind === 'planned')
   const sessions = entries.filter((e) => e.kind === 'session' && e.session_type !== 'activity')
   // Activities — logged OR upcoming/planned/recurring (formerly a separate
@@ -896,12 +915,22 @@ function DaySheet({
         {objectives.map((e) => (
           <div
             key={`o${e.id}`}
-            className="rounded-xl border border-fuchsia-700/40 bg-fuchsia-900/15 p-3"
+            className="flex items-start justify-between gap-2 rounded-xl border border-fuchsia-700/40 bg-fuchsia-900/15 p-3"
           >
-            <div className="text-sm font-semibold text-fuchsia-200">
-              {e.objective_name ?? e.name}
-            </div>
-            <div className="mt-0.5 text-xs text-fuchsia-300/80">{objectiveLabel(e)}</div>
+            <button onClick={() => onEditObjective(e.id)} className="block min-w-0 flex-1 text-left">
+              <div className="truncate text-sm font-semibold text-fuchsia-200">
+                {e.objective_name ?? e.name}
+              </div>
+              <div className="mt-0.5 text-xs text-fuchsia-300/80">{objectiveLabel(e)}</div>
+            </button>
+            <button
+              className="shrink-0 text-slate-600 hover:text-red-400"
+              onClick={() => removeObjective(e)}
+              disabled={busy}
+              aria-label={`Delete ${e.objective_name ?? e.name}`}
+            >
+              ✕
+            </button>
           </div>
         ))}
 

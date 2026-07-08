@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { screen, fireEvent } from '@testing-library/react'
+import { screen, fireEvent, waitFor } from '@testing-library/react'
 import { renderWithProviders, SETTINGS, makeObjective, makeActiveObjective, makeSession } from '../test/utils'
 import PlanPage from './PlanPage'
 import { api } from '../lib/api'
@@ -170,6 +170,68 @@ describe('PlanPage', () => {
     fireEvent.click(await screen.findByLabelText(iso))
     expect(await screen.findByText('Climb Baker')).toBeInTheDocument()
     expect(screen.getByText('🎯 peak / target day')).toBeInTheDocument()
+  })
+
+  it('deletes an objective from the day sheet after confirming', async () => {
+    const iso = isoDate(new Date())
+    vi.spyOn(api, 'calendar').mockResolvedValue([
+      {
+        kind: 'objective',
+        date: iso,
+        id: 9,
+        name: 'Climb Baker',
+        status: 'peak',
+        objective_id: 9,
+        objective_name: 'Climb Baker',
+        exercise_count: 0,
+      },
+    ])
+    vi.spyOn(api, 'listPrograms').mockResolvedValue([])
+    vi.spyOn(api, 'listTemplates').mockResolvedValue([])
+    vi.spyOn(api, 'listObjectives').mockResolvedValue([])
+    vi.spyOn(api, 'activeObjective').mockResolvedValue(makeActiveObjective())
+    vi.spyOn(api, 'rescheduleMissed').mockResolvedValue([])
+    const del = vi.spyOn(api, 'deleteObjective').mockResolvedValue(undefined)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    renderWithProviders(<PlanPage />)
+    fireEvent.click(await screen.findByLabelText(iso))
+    fireEvent.click(await screen.findByLabelText('Delete Climb Baker'))
+
+    await waitFor(() => expect(del).toHaveBeenCalledWith(9))
+  })
+
+  it('opens the objective for editing when its day-sheet chip is tapped', async () => {
+    const iso = isoDate(new Date())
+    vi.spyOn(api, 'calendar').mockResolvedValue([
+      {
+        kind: 'objective',
+        date: iso,
+        id: 9,
+        name: 'Climb Baker',
+        status: 'peak',
+        objective_id: 9,
+        objective_name: 'Climb Baker',
+        exercise_count: 0,
+      },
+    ])
+    vi.spyOn(api, 'listPrograms').mockResolvedValue([])
+    vi.spyOn(api, 'listTemplates').mockResolvedValue([])
+    // Focus left unset (default makeActiveObjective()) so the Agenda section
+    // below the calendar doesn't ALSO render a "Climb Baker" tile — this test
+    // is only about the day sheet's own chip, and a focus tile would make the
+    // text query ambiguous.
+    vi.spyOn(api, 'listObjectives').mockResolvedValue([
+      makeObjective({ id: 9, name: 'Climb Baker', is_primary: true }),
+    ])
+    vi.spyOn(api, 'activeObjective').mockResolvedValue(makeActiveObjective())
+    vi.spyOn(api, 'rescheduleMissed').mockResolvedValue([])
+
+    renderWithProviders(<PlanPage />)
+    fireEvent.click(await screen.findByLabelText(iso))
+    fireEvent.click(await screen.findByText('Climb Baker'))
+
+    expect(await screen.findByText('🎯 Edit objective')).toBeInTheDocument()
   })
 
   it('reviews a planned routine without starting it', async () => {
