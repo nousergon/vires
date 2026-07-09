@@ -100,8 +100,20 @@ describe('WorkoutPage — ActiveWorkout', () => {
     const log = vi.spyOn(api, 'logSet').mockResolvedValue(makeSet({ id: 1001 }))
     renderWithProviders(<WorkoutPage />)
     fireEvent.click(await screen.findByText('+ Add set'))
+    // Set creation now goes through the offline-first path (vires-ops#48): when
+    // online it POSTs immediately, but carries a client-generated UUID for
+    // idempotent replay, so the body includes a non-deterministic client_uuid.
     await waitFor(() =>
-      expect(log).toHaveBeenCalledWith(10, 100, { reps: 8, weight: 135, done: false }),
+      expect(log).toHaveBeenCalledWith(
+        10,
+        100,
+        expect.objectContaining({
+          reps: 8,
+          weight: 135,
+          done: false,
+          client_uuid: expect.any(String),
+        }),
+      ),
     )
   })
 
