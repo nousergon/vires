@@ -231,6 +231,23 @@ def save_program(
     if not rows:
         raise HTTPException(400, "Spec produced no workouts (unknown templates?).")
 
+    # Deactivate any other active programs: keep completed workouts, drop future
+    # ones (same semantics as apply_program's cutover). A user has at most one
+    # live plan; regenerating creates a new program, not a parallel one.
+    old_active = db.scalars(
+        select(Program).where(
+            Program.tenant_id == ident.tenant_id,
+            Program.user_id == ident.user_id,
+            Program.status == "active",
+        )
+    ).all()
+    for old in old_active:
+        old.status = "superseded"
+        # Remove future (non-completed) workouts — they belong to the superseded plan.
+        old.planned_workouts = [
+            pw for pw in old.planned_workouts if pw.status == "completed"
+        ]
+
     program = Program(
         tenant_id=ident.tenant_id,
         user_id=ident.user_id,
