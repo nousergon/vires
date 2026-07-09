@@ -29,6 +29,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -323,8 +324,25 @@ class SetEntry(Base):
     is_warmup: Mapped[bool] = mapped_column(Boolean, default=False)
     completed_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
+    # Client-generated UUID for an offline-first set log (vires-ops#48). The PWA
+    # mints this with crypto.randomUUID() BEFORE the POST, so a write queued in
+    # IndexedDB while offline carries a stable identity across replays. The
+    # unique index below makes replay idempotent: re-POSTing the same UUID under
+    # the same exercise returns the existing row instead of appending a
+    # duplicate (append-wins on a client-supplied identity — the groomer's
+    # settled conflict semantics for this append-only set log). Nullable: online
+    # writes and every pre-existing row have no client UUID.
+    client_uuid: Mapped[str | None] = mapped_column(String(), nullable=True)
 
     session_exercise: Mapped[SessionExercise] = relationship(back_populates="sets")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "session_exercise_id",
+            "client_uuid",
+            name="uq_set_entries_se_client_uuid",
+        ),
+    )
 
 
 class ActivityDetail(Base):

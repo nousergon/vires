@@ -39,9 +39,12 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // Layer our push / notificationclick handlers onto the generated SW
-        // (keeps the offline precache; avoids an injectManifest migration).
-        importScripts: ['/push-sw.js'],
+        // Layer our push / notificationclick handlers AND the offline set-log
+        // sync drainer onto the generated SW (keeps the offline precache;
+        // avoids an injectManifest migration). sync-sw.js handles the
+        // Background-Sync 'sync' event for the queued-writes replay
+        // (vires-ops#48) — independent of push.
+        importScripts: ['/push-sw.js', '/sync-sw.js'],
         // App shell offline; API GETs cached network-first so history is
         // viewable offline (writes still need connectivity — MVP).
         // `cacheableResponse` restricts what NetworkFirst is allowed to cache

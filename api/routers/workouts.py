@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from api.config import get_settings
@@ -73,6 +74,7 @@ def _set_out(s: SetEntry) -> SetOut:
         duration_seconds=s.duration_seconds,
         is_warmup=s.is_warmup,
         completed_at=s.completed_at,
+        client_uuid=s.client_uuid,
     )
 
 
@@ -770,6 +772,18 @@ def log_set(
 ) -> SetOut:
     ws = _get_session(db, session_id, ident)
     se = _get_se(db, ws, se_id)
+    # Offline-first idempotency (vires-ops#48): the PWA mints a client_uuid per
+    # logged set and replays queued writes on reconnect. A replay of a set that
+    # already landed must NOT append a duplicate — return the existing row.
+    # Matches this codebase's idempotent-by-predicate style (see
+    # materialize_occurrence). The (session_exercise_id, client_uuid) unique
+    # index is the backstop against a concurrent-replay race.
+    if body.client_uuid is not None:
+        existing = next(
+            (s for s in se.sets if s.client_uuid == body.client_uuid), None
+        )
+        if existing is not None:
+            return _set_out(existing)
     number = body.set_number or (max((s.set_number for s in se.sets), default=0) + 1)
     s = SetEntry(
         session_exercise_id=se.id,
@@ -780,9 +794,26 @@ def log_set(
         duration_seconds=body.duration_seconds,
         is_warmup=body.is_warmup,
         completed_at=_now() if body.done else None,
+        client_uuid=body.client_uuid,
     )
     db.add(s)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Lost the race to a concurrent replay of the same client_uuid — the
+        # other request created the row. Roll back and return the winner, so
+        # both replays see success (idempotent).
+        db.rollback()
+        if body.client_uuid is not None:
+            winner = db.scalars(
+                select(SetEntry).where(
+                    SetEntry.session_exercise_id == se.id,
+                    SetEntry.client_uuid == body.client_uuid,
+                )
+            ).first()
+            if winner is not None:
+                return _set_out(winner)
+        raise
     db.refresh(s)
     return _set_out(s)
 

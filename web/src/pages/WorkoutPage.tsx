@@ -5,6 +5,7 @@ import { api, type SessionExercise, type SetEntry, type WorkoutSession } from '.
 import { useCountdown, fmtClock, fireTimerAlert, firePing } from '../lib/timer'
 import { useWakeLock } from '../lib/wakeLock'
 import { schedulePush, cancelPush } from '../lib/push'
+import { logSetOfflineFirst } from '../lib/setSync'
 import { useSettings } from '../lib/useSettings'
 import { Button, Card, EmptyState, PageTitle, Sheet, Spinner } from '../components/ui'
 import ExercisePicker from '../components/ExercisePicker'
@@ -587,7 +588,11 @@ function ExerciseBlock({
     body.weight = showWeight ? (ghost?.weight ?? se.target_weight ?? null) : 0
     if (showReps) body.reps = ghost?.reps ?? se.target_reps ?? null
     if (showTimer) body.duration_seconds = holdSecs
-    await api.logSet(session.id, se.id, body)
+    // Offline-first (vires-ops#48): POSTs immediately when online, otherwise
+    // queues the write in IndexedDB (keyed by a client UUID) and registers a
+    // background-sync tag so the SW replays it on reconnect. Never throws on a
+    // network failure — the set is durably queued instead of lost.
+    await logSetOfflineFirst(session.id, se.id, body)
     onChanged()
   }
 

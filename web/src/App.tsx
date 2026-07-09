@@ -1,5 +1,7 @@
+import { useEffect } from 'react'
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
 import { useRegisterSW } from 'virtual:pwa-register/react'
+import { installOnlineReplay } from './lib/setSync'
 import WorkoutPage from './pages/WorkoutPage'
 import TemplatesPage from './pages/TemplatesPage'
 import PlanPage from './pages/PlanPage'
@@ -22,6 +24,13 @@ export default function App() {
   // registers on load; the reload itself is silent (no prompt), matching
   // the "auto" in autoUpdate.
   useRegisterSW({ immediate: true })
+
+  // Fallback replay for browsers without the Background Sync API: drain the
+  // offline set-log queue whenever the tab regains connectivity (vires-ops#48).
+  // Idempotent — safe to call on every mount.
+  useEffect(() => {
+    installOnlineReplay()
+  }, [])
 
   return (
     <div className="mx-auto flex h-full max-w-2xl flex-col">

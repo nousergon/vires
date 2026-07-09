@@ -341,3 +341,87 @@ def test_tracking_fields_surface_in_history_list(client):
     row = next(w for w in client.get("/api/workouts").json() if w["id"] == ws["id"])
     assert row["tags"] == ["morning"]
     assert row["energy_level"] == 6 and row["workout_intensity"] == 7
+
+
+# --- offline-first set logging: client_uuid idempotency (vires-ops#48) -------- #
+def _session_with_exercise(client):
+    ex = _ex_id(client, "barbell deadlift")
+    ws = client.post("/api/workouts", json={"name": "Offline"}).json()
+    se = client.post(
+        f"/api/workouts/{ws['id']}/exercises", json={"exercise_id": ex}
+    ).json()
+    return ws, se
+
+
+def test_log_set_echoes_client_uuid(client):
+    ws, se = _session_with_exercise(client)
+    uuid = "11111111-1111-4111-8111-111111111111"
+    s = client.post(
+        f"/api/workouts/{ws['id']}/exercises/{se['id']}/sets",
+        json={"reps": 5, "weight": 225, "client_uuid": uuid},
+    ).json()
+    assert s["client_uuid"] == uuid
+
+
+def test_replayed_set_is_deduped_on_client_uuid(client):
+    """A queued offline write replayed twice must create exactly one row and
+    return the same set both times (append-wins on client UUID)."""
+    ws, se = _session_with_exercise(client)
+    uuid = "22222222-2222-4222-8222-222222222222"
+    body = {"reps": 5, "weight": 225, "client_uuid": uuid}
+    r1 = client.post(
+        f"/api/workouts/{ws['id']}/exercises/{se['id']}/sets", json=body
+    )
+    r2 = client.post(
+        f"/api/workouts/{ws['id']}/exercises/{se['id']}/sets", json=body
+    )
+    assert r1.status_code == 201 and r2.status_code == 201
+    assert r1.json()["id"] == r2.json()["id"]  # same row, not a duplicate
+    fin = client.get(f"/api/workouts/{ws['id']}").json()
+    assert len(fin["exercises"][0]["sets"]) == 1
+
+
+def test_distinct_client_uuids_create_distinct_sets(client):
+    ws, se = _session_with_exercise(client)
+    a = client.post(
+        f"/api/workouts/{ws['id']}/exercises/{se['id']}/sets",
+        json={"reps": 5, "client_uuid": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"},
+    ).json()
+    b = client.post(
+        f"/api/workouts/{ws['id']}/exercises/{se['id']}/sets",
+        json={"reps": 5, "client_uuid": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"},
+    ).json()
+    assert a["id"] != b["id"]
+    assert a["set_number"] == 1 and b["set_number"] == 2
+
+
+def test_log_set_without_client_uuid_still_works(client):
+    """Online writes send no UUID; behavior (and null echo) unchanged."""
+    ws, se = _session_with_exercise(client)
+    s = client.post(
+        f"/api/workouts/{ws['id']}/exercises/{se['id']}/sets",
+        json={"reps": 8, "weight": 100},
+    ).json()
+    assert s["client_uuid"] is None
+    assert s["set_number"] == 1
+
+
+def test_same_uuid_under_different_exercises_is_not_deduped(client):
+    """The dedup is scoped per session_exercise — the same UUID under a
+    different exercise is a distinct set (NULLs/collisions can't cross rows)."""
+    ex2 = _ex_id(client, "bench press")
+    ws, se1 = _session_with_exercise(client)
+    se2 = client.post(
+        f"/api/workouts/{ws['id']}/exercises", json={"exercise_id": ex2}
+    ).json()
+    uuid = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+    r1 = client.post(
+        f"/api/workouts/{ws['id']}/exercises/{se1['id']}/sets",
+        json={"reps": 5, "client_uuid": uuid},
+    )
+    r2 = client.post(
+        f"/api/workouts/{ws['id']}/exercises/{se2['id']}/sets",
+        json={"reps": 5, "client_uuid": uuid},
+    )
+    assert r1.status_code == 201 and r2.status_code == 201
+    assert r1.json()["id"] != r2.json()["id"]

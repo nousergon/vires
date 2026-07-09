@@ -57,6 +57,11 @@ class SetIn(BaseModel):
     # set). The app passes False from "+ Add set" so an empty row appears unchecked
     # for the user to fill in and tick off themselves.
     done: bool = True
+    # Client-generated UUID (crypto.randomUUID()) for offline-first logging
+    # (vires-ops#48). Sent so a set queued offline and replayed on reconnect is
+    # idempotent server-side — a duplicate replay returns the original row
+    # instead of appending a second one. Omitted for plain online writes.
+    client_uuid: str | None = None
 
 
 class SetUpdate(BaseModel):
@@ -78,6 +83,9 @@ class SetOut(BaseModel):
     duration_seconds: int | None = None
     is_warmup: bool = False
     completed_at: datetime | None = None
+    # Echoed back so the client can reconcile a replayed offline write against
+    # its IndexedDB queue entry (vires-ops#48).
+    client_uuid: str | None = None
 
 
 class SessionExerciseIn(BaseModel):
