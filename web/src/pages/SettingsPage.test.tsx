@@ -14,6 +14,11 @@ const LOADED = { ...SETTINGS, default_rest_seconds: 111 }
 function mockApis() {
   vi.spyOn(api, 'getSettings').mockResolvedValue(LOADED)
   vi.spyOn(api, 'feedUrl').mockResolvedValue({ token: 'tok123', ics_path: '/api/plan/feed/tok123.ics' })
+  vi.spyOn(api, 'getMe').mockResolvedValue({
+    email: 'brian@example.com',
+    display_name: null,
+    is_admin: true,
+  })
 }
 
 describe('SettingsPage', () => {
@@ -72,5 +77,15 @@ describe('SettingsPage', () => {
     renderWithProviders(<SettingsPage />)
     expect(await screen.findByText(/feed\/tok123\.ics/)).toBeInTheDocument()
     expect(screen.getByText('Add to calendar')).toBeInTheDocument()
+  })
+
+  it('shows the logged-in account and logs out', async () => {
+    mockApis()
+    const logout = vi.spyOn(api, 'logout').mockResolvedValue(undefined)
+    renderWithProviders(<SettingsPage />)
+    expect(await screen.findByText('brian@example.com')).toBeInTheDocument()
+    expect(screen.getByText(/admin/)).toBeInTheDocument()
+    fireEvent.click(screen.getByText('Log out'))
+    await waitFor(() => expect(logout).toHaveBeenCalled())
   })
 })

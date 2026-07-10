@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type Settings, type Weekday, type WeightUnit } from '../lib/api'
 import { useSettings } from '../lib/useSettings'
+import { useAuth } from '../lib/useAuth'
 import { requestNotificationPermission } from '../lib/timer'
 import { ensurePushSubscription, disablePush } from '../lib/push'
 import { Button, Card, PageTitle } from '../components/ui'
@@ -126,10 +128,41 @@ export default function SettingsPage() {
 
       <CalendarFeed />
 
+      <Account />
+
       <p className="mt-6 text-center text-xs text-slate-500">
         Vires · vires acquirit eundo
       </p>
     </div>
+  )
+}
+
+function Account() {
+  const { me } = useAuth()
+  const nav = useNavigate()
+  const logout = useMutation({
+    mutationFn: api.logout,
+    onSuccess: () => nav('/login', { replace: true }),
+  })
+
+  if (!me) return null
+
+  return (
+    <Card className="mt-4 space-y-2">
+      <h2 className="text-sm font-semibold text-slate-200">Account</h2>
+      <p className="text-xs text-slate-400">
+        Logged in as <span className="text-slate-200">{me.email}</span>
+        {me.is_admin && ' · admin'}
+      </p>
+      <Button
+        variant="secondary"
+        className="w-full"
+        disabled={logout.isPending}
+        onClick={() => logout.mutate()}
+      >
+        Log out
+      </Button>
+    </Card>
   )
 }
 
