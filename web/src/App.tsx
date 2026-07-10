@@ -2,12 +2,15 @@ import { useEffect } from 'react'
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
 import { useRegisterSW } from 'virtual:pwa-register/react'
 import { installOnlineReplay } from './lib/setSync'
+import RequireAuth from './components/RequireAuth'
 import WorkoutPage from './pages/WorkoutPage'
 import TemplatesPage from './pages/TemplatesPage'
 import PlanPage from './pages/PlanPage'
 import HistoryPage from './pages/HistoryPage'
 import ExercisesPage from './pages/ExercisesPage'
 import SettingsPage from './pages/SettingsPage'
+import LoginPage from './pages/LoginPage'
+import VerifyPage from './pages/VerifyPage'
 
 const tabs = [
   { to: '/train', label: 'Train', icon: '🏋️' },
@@ -18,20 +21,7 @@ const tabs = [
   { to: '/settings', label: 'Settings', icon: '⚙️' },
 ]
 
-export default function App() {
-  // `registerType: 'autoUpdate'` (vite.config.ts) only auto-reloads on a new
-  // deploy if something actually wires the update listener — `immediate`
-  // registers on load; the reload itself is silent (no prompt), matching
-  // the "auto" in autoUpdate.
-  useRegisterSW({ immediate: true })
-
-  // Fallback replay for browsers without the Background Sync API: drain the
-  // offline set-log queue whenever the tab regains connectivity (vires-ops#48).
-  // Idempotent — safe to call on every mount.
-  useEffect(() => {
-    installOnlineReplay()
-  }, [])
-
+function AuthedApp() {
   return (
     <div className="mx-auto flex h-full max-w-2xl flex-col">
       <main className="flex-1 overflow-y-auto px-4 pb-24 pt-4 safe-top">
@@ -66,5 +56,35 @@ export default function App() {
         </div>
       </nav>
     </div>
+  )
+}
+
+export default function App() {
+  // `registerType: 'autoUpdate'` (vite.config.ts) only auto-reloads on a new
+  // deploy if something actually wires the update listener — `immediate`
+  // registers on load; the reload itself is silent (no prompt), matching
+  // the "auto" in autoUpdate.
+  useRegisterSW({ immediate: true })
+
+  // Fallback replay for browsers without the Background Sync API: drain the
+  // offline set-log queue whenever the tab regains connectivity (vires-ops#48).
+  // Idempotent — safe to call on every mount.
+  useEffect(() => {
+    installOnlineReplay()
+  }, [])
+
+  return (
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+      <Route path="/auth/verify" element={<VerifyPage />} />
+      <Route
+        path="/*"
+        element={
+          <RequireAuth>
+            <AuthedApp />
+          </RequireAuth>
+        }
+      />
+    </Routes>
   )
 }

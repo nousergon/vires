@@ -3,11 +3,26 @@
 
 const BASE = '/api'
 
+// Paths whose own 401 is an expected, handled state — never auto-redirect for
+// these (avoids a loop: useAuth's own "am I logged in" probe 401s by design
+// for a fresh visitor, and RequireAuth already redirects off that result).
+const AUTH_PROBE_PATH = '/auth/me'
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(BASE + path, {
     headers: { 'Content-Type': 'application/json' },
     ...init,
   })
+  // A session that expires mid-use anywhere else in the app forces
+  // re-login — without this, every call site would need its own 401 check.
+  if (
+    res.status === 401 &&
+    path !== AUTH_PROBE_PATH &&
+    !location.pathname.startsWith('/login') &&
+    !location.pathname.startsWith('/auth/verify')
+  ) {
+    window.location.href = '/login'
+  }
   if (!res.ok) {
     let detail = res.statusText
     try {
@@ -612,8 +627,36 @@ export interface AilmentInput {
   initial_severity?: number | null
 }
 
+// ---- auth ------------------------------------------------------------------ //
+export interface Me {
+  email: string | null
+  display_name: string | null
+  is_admin: boolean
+}
+
+export interface AllowlistEntry {
+  email: string
+  created_at: string
+  used_at: string | null
+}
+
 // ---- endpoints ------------------------------------------------------------ //
 export const api = {
+  // auth
+  requestMagicLink: (email: string) =>
+    req<{ message: string }>('/auth/magic-link', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    }),
+  verifyMagicLink: (token: string) =>
+    req<Me>('/auth/magic-link/verify', { method: 'POST', body: JSON.stringify({ token }) }),
+  logout: () => req<void>('/auth/logout', { method: 'POST' }),
+  getMe: () => req<Me>('/auth/me'),
+  // Admin-only: pre-approve an email so it can sign up without any code.
+  addToAllowlist: (email: string, note?: string) =>
+    req<AllowlistEntry>('/auth/allowlist', { method: 'POST', body: JSON.stringify({ email, note }) }),
+  listAllowlist: () => req<AllowlistEntry[]>('/auth/allowlist'),
+
   // exercises
   searchExercises: (q: string, limit = 25) =>
     req<SearchHit[]>(`/exercises/search?q=${encodeURIComponent(q)}&limit=${limit}`),

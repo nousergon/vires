@@ -249,7 +249,7 @@ def test_baseline_prompt_mentions_events_and_recent_activities_fields():
 # DB integration: a logged recurring event reaches the coach context expanded
 # --------------------------------------------------------------------------- #
 def test_recurring_event_is_expanded_into_coach_context(client, db):
-    from api.db.identity import current_identity
+    from api.db.identity import ensure_dev_identity
     from api.services.coach.context import build_coach_objective_context
 
     # A weekly leg-heavy commitment anchored on an in-window Tuesday.
@@ -266,7 +266,7 @@ def test_recurring_event_is_expanded_into_coach_context(client, db):
         },
     )
     assert r.status_code == 201, r.text
-    ctx = build_coach_objective_context(db, current_identity())
+    ctx = build_coach_objective_context(db, ensure_dev_identity(db))
     assert ctx.events, "the recurring event should expand into the coach context"
     # weekly cadence => multiple in-window occurrences, all the same series
     assert {e.name for e in ctx.events} == {"Wednesday hoops"}
@@ -323,7 +323,7 @@ def test_recent_activities_reach_the_grounding_context_even_without_an_objective
 
 
 def test_logged_activity_reaches_the_coach_context(client, db):
-    from api.db.identity import current_identity
+    from api.db.identity import ensure_dev_identity
     from api.services.coach.context import build_coach_objective_context
 
     r = client.post(
@@ -337,7 +337,7 @@ def test_logged_activity_reaches_the_coach_context(client, db):
         },
     )
     assert r.status_code == 201, r.text
-    ctx = build_coach_objective_context(db, current_identity())
+    ctx = build_coach_objective_context(db, ensure_dev_identity(db))
     assert ctx.recent_activities, "the logged activity should reach the coach context"
     a = ctx.recent_activities[0]
     assert a.name == "Indoor top-rope"
@@ -351,7 +351,7 @@ def test_logged_activity_reaches_the_coach_context(client, db):
 
 
 def test_activity_outside_the_lookback_window_does_not_reach_the_coach(client, db):
-    from api.db.identity import current_identity
+    from api.db.identity import ensure_dev_identity
     from api.services.coach.context import build_coach_objective_context
 
     r = client.post(
@@ -364,7 +364,7 @@ def test_activity_outside_the_lookback_window_does_not_reach_the_coach(client, d
         },
     )
     assert r.status_code == 201, r.text
-    ctx = build_coach_objective_context(db, current_identity())
+    ctx = build_coach_objective_context(db, ensure_dev_identity(db))
     assert ctx.recent_activities == []
 
 
@@ -631,7 +631,7 @@ def test_baseline_prompt_knows_to_use_phases_for_a_multi_peak_timeline():
 # started_at/ended_at vs. "now" (merge_calendar_events_into_activity).
 # --------------------------------------------------------------------------- #
 def test_future_activity_is_an_event_not_a_recent_activity(client, db):
-    from api.db.identity import current_identity
+    from api.db.identity import ensure_dev_identity
     from api.services.coach.context import build_coach_objective_context
 
     client.post(
@@ -644,13 +644,13 @@ def test_future_activity_is_an_event_not_a_recent_activity(client, db):
             "started_at": (datetime.now(UTC) + timedelta(days=10)).isoformat(),
         },
     )
-    ctx = build_coach_objective_context(db, current_identity())
+    ctx = build_coach_objective_context(db, ensure_dev_identity(db))
     assert any(e.name == "Boston Marathon" for e in ctx.events)
     assert not any(a.name == "Boston Marathon" for a in ctx.recent_activities)
 
 
 def test_closed_out_past_activity_is_recent_not_an_event(client, db):
-    from api.db.identity import current_identity
+    from api.db.identity import ensure_dev_identity
     from api.services.coach.context import build_coach_objective_context
 
     client.post(
@@ -662,6 +662,6 @@ def test_closed_out_past_activity_is_recent_not_an_event(client, db):
             "intensity": "moderate",
         },
     )
-    ctx = build_coach_objective_context(db, current_identity())
+    ctx = build_coach_objective_context(db, ensure_dev_identity(db))
     assert any(a.name == "Morning run" for a in ctx.recent_activities)
     assert not any(e.name == "Morning run" for e in ctx.events)
