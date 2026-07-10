@@ -3,11 +3,26 @@
 
 const BASE = '/api'
 
+// Paths whose own 401 is an expected, handled state — never auto-redirect for
+// these (avoids a loop: useAuth's own "am I logged in" probe 401s by design
+// for a fresh visitor, and RequireAuth already redirects off that result).
+const AUTH_PROBE_PATH = '/auth/me'
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(BASE + path, {
     headers: { 'Content-Type': 'application/json' },
     ...init,
   })
+  // A session that expires mid-use anywhere else in the app forces
+  // re-login — without this, every call site would need its own 401 check.
+  if (
+    res.status === 401 &&
+    path !== AUTH_PROBE_PATH &&
+    !location.pathname.startsWith('/login') &&
+    !location.pathname.startsWith('/auth/verify')
+  ) {
+    window.location.href = '/login'
+  }
   if (!res.ok) {
     let detail = res.statusText
     try {
@@ -59,6 +74,7 @@ export interface PerformedSet {
   reps: number | null
   weight: number | null
   rpe: number | null
+  duration_seconds: number | null
   is_warmup: boolean
 }
 
@@ -185,7 +201,6 @@ export interface WorkoutSessionUpdate {
   // Session-tracking fields — valid on any session type. `tags` replaces the
   // whole list; the 1–10 ratings can be revised after finishing.
   tags?: string[]
-  pre_workout_fuel?: string | null
   energy_level?: number | null
   workout_intensity?: number | null
   template_key?: string
@@ -233,10 +248,9 @@ export interface WorkoutSession {
   started_at: string
   ended_at: string | null
   notes: string | null
-  // Free-text labels (reusable tags + one-off custom inputs).
+  // Free-text labels (reusable tags + one-off custom inputs, including what
+  // was eaten/drunk/supplemented pre-workout).
   tags: string[]
-  // Pre-workout food/drink/supplements, free text.
-  pre_workout_fuel: string | null
   // End-of-workout 1–10 self-report (null until finished with a rating).
   energy_level: number | null
   workout_intensity: number | null
@@ -304,6 +318,15 @@ export interface TemplateExerciseInput {
 
 export type WeightUnit = 'lb' | 'kg'
 
+export type Weekday =
+  | 'monday'
+  | 'tuesday'
+  | 'wednesday'
+  | 'thursday'
+  | 'friday'
+  | 'saturday'
+  | 'sunday'
+
 export interface Settings {
   weight_unit: WeightUnit
   default_rest_seconds: number
@@ -313,6 +336,10 @@ export interface Settings {
   timer_vibration: boolean
   timer_notification: boolean
   timer_keep_awake: boolean
+  // Durable weekly-lifting day preference the coach honors on every
+  // generation (e.g. ['monday', 'thursday']) — empty = no standing
+  // preference, unchanged behavior.
+  preferred_weekdays: Weekday[]
 }
 
 // ---- personal records ----------------------------------------------------- //
@@ -337,12 +364,12 @@ export interface ExerciseRecords {
 
 // ---- plan / calendar / coach ---------------------------------------------- //
 export interface CalendarEntry {
-  kind: 'session' | 'planned' | 'objective' | 'objective_block'
+  kind: 'session' | 'planned' | 'objective' | 'objective_block' | 'ailment'
   date: string // YYYY-MM-DD
   id: number
   name: string | null
   // session: completed|in_progress|upcoming; planned: planned|completed|skipped;
-  // objective: peak|event; objective_block: block
+  // objective: peak|event; objective_block: block; ailment: active|improving|resolved
   status: string
   program_id?: number | null
   template_id?: number | null
@@ -564,8 +591,72 @@ export interface ConstraintInput {
   defer_to_professional?: boolean | null
 }
 
+export interface AilmentCheckIn {
+  id: number
+  ailment_id: number
+  check_in_date: string
+  severity: number
+  note: string | null
+  created_at: string
+}
+
+export interface AilmentEpisode {
+  id: number
+  label: string
+  onset_date: string
+  notes: string | null
+  status: 'active' | 'improving' | 'resolved'
+  resolved_at: string | null
+  created_at: string
+  updated_at: string
+  latest_severity: number | null
+  latest_check_in_date: string | null
+  check_ins: AilmentCheckIn[]
+}
+
+export interface PendingAilmentCheckIn {
+  ailment: AilmentEpisode
+  last_severity: number | null
+  last_check_in_date: string | null
+}
+
+export interface AilmentInput {
+  label: string
+  onset_date?: string | null
+  notes?: string | null
+  initial_severity?: number | null
+}
+
+// ---- auth ------------------------------------------------------------------ //
+export interface Me {
+  email: string | null
+  display_name: string | null
+  is_admin: boolean
+}
+
+export interface AllowlistEntry {
+  email: string
+  created_at: string
+  used_at: string | null
+}
+
 // ---- endpoints ------------------------------------------------------------ //
 export const api = {
+  // auth
+  requestMagicLink: (email: string) =>
+    req<{ message: string }>('/auth/magic-link', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    }),
+  verifyMagicLink: (token: string) =>
+    req<Me>('/auth/magic-link/verify', { method: 'POST', body: JSON.stringify({ token }) }),
+  logout: () => req<void>('/auth/logout', { method: 'POST' }),
+  getMe: () => req<Me>('/auth/me'),
+  // Admin-only: pre-approve an email so it can sign up without any code.
+  addToAllowlist: (email: string, note?: string) =>
+    req<AllowlistEntry>('/auth/allowlist', { method: 'POST', body: JSON.stringify({ email, note }) }),
+  listAllowlist: () => req<AllowlistEntry[]>('/auth/allowlist'),
+
   // exercises
   searchExercises: (q: string, limit = 25) =>
     req<SearchHit[]>(`/exercises/search?q=${encodeURIComponent(q)}&limit=${limit}`),
@@ -593,7 +684,6 @@ export const api = {
     template_id?: number | null
     name?: string | null
     tags?: string[]
-    pre_workout_fuel?: string | null
   }) => req<WorkoutSession>('/workouts', { method: 'POST', body: JSON.stringify(body) }),
   listActivityTemplates: () => req<ActivityTemplate[]>('/workouts/activity-templates'),
   logActivity: (body: ActivityLogInput) =>
@@ -608,6 +698,9 @@ export const api = {
   importGpx: (gpxText: string) =>
     req<RouteStats>('/routes/import-gpx', { method: 'POST', body: gpxText }),
   listWorkouts: () => req<WorkoutSummary[]>('/workouts'),
+  // Every tag the user has ever applied to a session, most-used first —
+  // powers the tag quick-complete chips in TagsEditor.
+  listWorkoutTags: () => req<string[]>('/workouts/tags'),
   getWorkout: (id: number) => req<WorkoutSession>(`/workouts/${id}`),
   updateWorkout: (id: number, body: WorkoutSessionUpdate) =>
     req<WorkoutSession>(`/workouts/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
@@ -648,6 +741,14 @@ export const api = {
     req<SessionExercise>(`/workouts/${sessionId}/exercises/${seId}`, {
       method: 'PATCH',
       body: JSON.stringify(body),
+    }),
+  // Drag-and-drop reorder: `exercise_ids` is the FULL list of this session's
+  // exercise ids in their new order; order_index is reassigned 0..n-1 in one
+  // transaction (vs. N-1 pairwise swaps for an arbitrary drag distance).
+  reorderWorkoutExercises: (sessionId: number, exerciseIds: number[]) =>
+    req<SessionExercise[]>(`/workouts/${sessionId}/exercises/reorder`, {
+      method: 'PATCH',
+      body: JSON.stringify({ exercise_ids: exerciseIds }),
     }),
   removeWorkoutExercise: (sessionId: number, seId: number) =>
     req<void>(`/workouts/${sessionId}/exercises/${seId}`, { method: 'DELETE' }),
@@ -775,6 +876,25 @@ export const api = {
   updateConstraint: (id: number, body: Partial<ConstraintInput & { is_active: boolean }>) =>
     req<Constraint>(`/constraints/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   deleteConstraint: (id: number) => req<void>(`/constraints/${id}`, { method: 'DELETE' }),
+
+  listAilments: (status = 'open') => req<AilmentEpisode[]>(`/ailments?status=${status}`),
+  pendingAilmentCheckIns: (date?: string) =>
+    req<PendingAilmentCheckIn[]>(
+      `/ailments/pending-check-ins${date ? `?date=${date}` : ''}`,
+    ),
+  createAilment: (body: AilmentInput) =>
+    req<AilmentEpisode>('/ailments', { method: 'POST', body: JSON.stringify(body) }),
+  updateAilment: (id: number, body: Partial<AilmentInput & { status: AilmentEpisode['status'] }>) =>
+    req<AilmentEpisode>(`/ailments/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  addAilmentCheckIn: (
+    id: number,
+    body: { severity: number; note?: string | null; check_in_date?: string },
+  ) =>
+    req<AilmentCheckIn>(`/ailments/${id}/check-ins`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  deleteAilment: (id: number) => req<void>(`/ailments/${id}`, { method: 'DELETE' }),
 
   // web push
   pushPublicKey: () => req<{ key: string }>('/push/public-key'),

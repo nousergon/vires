@@ -10,6 +10,13 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
+      // We register the SW ourselves (App.tsx, via `virtual:pwa-register/react`)
+      // so we can auto-reload an already-open tab once a new SW activates —
+      // the plugin's default injected <script> just calls .register() with no
+      // update/reload wiring at all, so `registerType: 'autoUpdate'` silently
+      // did nothing for anyone with the PWA already open (a deploy would land
+      // on the server but never reach an open tab until it was fully closed).
+      injectRegister: null,
       includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       manifest: {
         name: 'Vires',
@@ -32,9 +39,12 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // Layer our push / notificationclick handlers onto the generated SW
-        // (keeps the offline precache; avoids an injectManifest migration).
-        importScripts: ['/push-sw.js'],
+        // Layer our push / notificationclick handlers AND the offline set-log
+        // sync drainer onto the generated SW (keeps the offline precache;
+        // avoids an injectManifest migration). sync-sw.js handles the
+        // Background-Sync 'sync' event for the queued-writes replay
+        // (vires-ops#48) — independent of push.
+        importScripts: ['/push-sw.js', '/sync-sw.js'],
         // App shell offline; API GETs cached network-first so history is
         // viewable offline (writes still need connectivity — MVP).
         // `cacheableResponse` restricts what NetworkFirst is allowed to cache

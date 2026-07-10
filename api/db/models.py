@@ -29,6 +29,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -57,9 +58,76 @@ class User(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
-    email: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Lowercased at write time. Nullable (the hardcoded dev user has none) but
+    # unique when present — SQL treats multiple NULLs as distinct, so this
+    # doesn't block the dev row while still enforcing one account per email
+    # for real signups.
+    email: Mapped[str | None] = mapped_column(String, nullable=True, unique=True, index=True)
     display_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    # True only for the bootstrap first user (see auth.py's _is_bootstrap)
+    # or a user an admin later promotes by hand. Gates POST /auth/allowlist.
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
+
+
+# --------------------------------------------------------------------------- #
+# Auth (magic-link + session) — see api.routers.auth, api.db.identity
+# --------------------------------------------------------------------------- #
+class MagicLinkToken(Base):
+    """A one-time login link sent to an email. Single-use: ``consumed_at`` is
+    set atomically on verify (rowcount-checked update — see auth.py) so a
+    replayed/double-clicked link can't be redeemed twice."""
+
+    __tablename__ = "magic_link_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    email: Mapped[str] = mapped_column(String, index=True)
+    # SHA-256 hex digest of the raw token mailed to the user — the raw value
+    # is never persisted, mirroring how a password would be hashed at rest.
+    token_hash: Mapped[str] = mapped_column(String, unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime())
+    consumed_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    # Coarse abuse signal for the request-rate check (count recent rows per
+    # email/IP) — not used for anything beyond that.
+    request_ip: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class UserSession(Base):
+    """A logged-in session, keyed by the SHA-256 hash of the opaque random
+    token set in the ``vires_session`` cookie — never the raw value, so a DB
+    leak doesn't hand over usable session tokens. Deliberately NOT a JWT:
+    an opaque, DB-backed token can be revoked (logout deletes the row)."""
+
+    __tablename__ = "user_sessions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime())
+    last_seen_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
+
+
+class AllowedEmail(Base):
+    """An admin-approved email — a brand-new signup is only permitted (past
+    the bootstrap first user) when their address is a row here, keyed by the
+    address itself rather than a shared secret code the user has to type in.
+    ``used_at``/``used_by_user_id`` are audit-only: unlike a shared invite
+    code, a single email can't race to create two accounts anyway (see the
+    unique index on ``users.email``), so there's no single-use enforcement
+    to get right here — just a record of when/whether it was actually used."""
+
+    __tablename__ = "allowed_emails"
+
+    email: Mapped[str] = mapped_column(String, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
+    created_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+    used_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    used_by_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    note: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class UserSettings(Base):
@@ -86,6 +154,11 @@ class UserSettings(Base):
     timer_vibration: Mapped[bool] = mapped_column(Boolean, default=True)
     timer_notification: Mapped[bool] = mapped_column(Boolean, default=False)
     timer_keep_awake: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Durable weekly-lifting day preference (e.g. ["monday", "thursday"]) — set
+    # once here so the coach honors it on every generation without the user
+    # re-stating it in each conversation. Empty = no standing preference, let
+    # the coach/user's message pick the day(s) as before.
+    preferred_weekdays: Mapped[list] = mapped_column(JSON, default=list)
     updated_at: Mapped[datetime] = mapped_column(
         UTCDateTime(), default=_utcnow, onupdate=_utcnow
     )
@@ -195,7 +268,10 @@ class TemplateExercise(Base):
     order_index: Mapped[int] = mapped_column(Integer, default=0)
     target_sets: Mapped[int | None] = mapped_column(Integer, nullable=True)
     target_reps: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # Placeholder starting weight (user-set; the AI coach will propose it later).
+    # Placeholder starting weight (user-set; the AI coach will propose it
+    # later). For a dumbbell-equipment exercise this is the bilateral TOTAL
+    # (e.g. 90 for a pair of 45s) — halved into a per-hand value when it seeds
+    # a live SessionExercise/SetEntry (see api.serializers.dumbbell_seed_weight).
     target_weight: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Target hold duration (seconds) for timed exercises (e.g. plank).
     target_duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -231,13 +307,13 @@ class WorkoutSession(Base):
     ended_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Free-text labels for the session — a mix of reusable tags ("push day",
-    # "fasted") and one-off custom inputs. Stored as a JSON list of strings so a
-    # user can coin a new tag inline without a lookup table. Empty list => none.
+    # "fasted") and one-off custom inputs, including what was eaten/drunk/
+    # supplemented before training (e.g. "black coffee", "creatine"). Stored as
+    # a JSON list of strings so a user can coin a new tag inline without a
+    # lookup table. Empty list => none. Formerly split across this field and a
+    # separate ``pre_workout_fuel`` free-text field (dropped — see
+    # e1f2a3b4c5d7_drop_pre_workout_fuel_into_tags).
     tags: Mapped[list] = mapped_column(JSON, default=list)
-    # What was eaten/drunk/supplemented before training (food, drink, caffeine,
-    # creatine, ...). Free text — kept as one field rather than a structured
-    # intake log, which is out of scope for this tracker.
-    pre_workout_fuel: Mapped[str | None] = mapped_column(Text, nullable=True)
     # End-of-workout self-report on a 1–10 scale, prompted when the session is
     # finished. ``energy_level`` = how the body felt (readiness);
     # ``workout_intensity`` = how hard the session was (RPE-like, whole-session).
@@ -318,8 +394,25 @@ class SetEntry(Base):
     is_warmup: Mapped[bool] = mapped_column(Boolean, default=False)
     completed_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
+    # Client-generated UUID for an offline-first set log (vires-ops#48). The PWA
+    # mints this with crypto.randomUUID() BEFORE the POST, so a write queued in
+    # IndexedDB while offline carries a stable identity across replays. The
+    # unique index below makes replay idempotent: re-POSTing the same UUID under
+    # the same exercise returns the existing row instead of appending a
+    # duplicate (append-wins on a client-supplied identity — the groomer's
+    # settled conflict semantics for this append-only set log). Nullable: online
+    # writes and every pre-existing row have no client UUID.
+    client_uuid: Mapped[str | None] = mapped_column(String(), nullable=True)
 
     session_exercise: Mapped[SessionExercise] = relationship(back_populates="sets")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "session_exercise_id",
+            "client_uuid",
+            name="uq_set_entries_se_client_uuid",
+        ),
+    )
 
 
 class ActivityDetail(Base):
@@ -550,6 +643,7 @@ class PlannedExercise(Base):
     order_index: Mapped[int] = mapped_column(Integer, default=0)
     target_sets: Mapped[int | None] = mapped_column(Integer, nullable=True)
     target_reps: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Bilateral TOTAL for a dumbbell exercise (see TemplateExercise.target_weight).
     target_weight: Mapped[float | None] = mapped_column(Float, nullable=True)
     target_duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     rest_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -672,6 +766,61 @@ class Constraint(Base):
     updated_at: Mapped[datetime] = mapped_column(
         UTCDateTime(), default=_utcnow, onupdate=_utcnow
     )
+
+
+# --------------------------------------------------------------------------- #
+# Ailment episodes — date-anchored injuries the coach adapts around over time.
+#
+# Unlike static ``Constraint`` rows (schedule/equipment/chronic bounds), an
+# ``AilmentEpisode`` tracks onset, severity trajectory via ``AilmentCheckIn``,
+# and resolution. The coach consumes the latest check-in + recent trend.
+# --------------------------------------------------------------------------- #
+class AilmentEpisode(Base):
+    __tablename__ = "ailment_episodes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    label: Mapped[str] = mapped_column(String, nullable=False)
+    onset_date: Mapped[date] = mapped_column(Date, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # active | improving | resolved
+    status: Mapped[str] = mapped_column(String, nullable=False, default="active", index=True)
+    resolved_at: Mapped[date | None] = mapped_column(Date, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), default=_utcnow, onupdate=_utcnow
+    )
+
+    check_ins: Mapped[list[AilmentCheckIn]] = relationship(
+        back_populates="ailment",
+        cascade="all, delete-orphan",
+        order_by="AilmentCheckIn.check_in_date.desc()",
+    )
+
+
+class AilmentCheckIn(Base):
+    __tablename__ = "ailment_check_ins"
+    __table_args__ = (
+        Index(
+            "uq_ailment_check_in_per_day",
+            "ailment_id",
+            "check_in_date",
+            unique=True,
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ailment_id: Mapped[int] = mapped_column(
+        ForeignKey("ailment_episodes.id", ondelete="CASCADE"), index=True
+    )
+    check_in_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    # 0 = none, 10 = worst — self-reported discomfort/pain.
+    severity: Mapped[int] = mapped_column(Integer, nullable=False)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
+
+    ailment: Mapped[AilmentEpisode] = relationship(back_populates="check_ins")
 
 
 # --------------------------------------------------------------------------- #

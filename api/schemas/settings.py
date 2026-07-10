@@ -6,6 +6,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from api.schemas.coach import Weekday
+
 WeightUnit = Literal["lb", "kg"]
 
 
@@ -18,6 +20,10 @@ class SettingsOut(BaseModel):
     timer_vibration: bool
     timer_notification: bool
     timer_keep_awake: bool
+    # Durable weekly-lifting day preference the coach honors on every
+    # generation (e.g. ["monday", "thursday"]) — empty = no standing
+    # preference, unchanged behavior.
+    preferred_weekdays: list[Weekday]
 
 
 class SettingsUpdate(BaseModel):
@@ -29,3 +35,4 @@ class SettingsUpdate(BaseModel):
     timer_vibration: bool | None = None
     timer_notification: bool | None = None
     timer_keep_awake: bool | None = None
+    preferred_weekdays: list[Weekday] | None = None

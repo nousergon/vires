@@ -52,3 +52,23 @@ def test_timer_alert_prefs_update(client):
     assert body["timer_sound"] is True  # untouched
     # persisted
     assert client.get("/api/settings").json()["timer_notification"] is True
+
+
+def test_preferred_weekdays_defaults_empty(client):
+    assert client.get("/api/settings").json()["preferred_weekdays"] == []
+
+
+def test_preferred_weekdays_update_and_persist(client):
+    r = client.put("/api/settings", json={"preferred_weekdays": ["monday", "thursday"]})
+    assert r.status_code == 200
+    assert r.json()["preferred_weekdays"] == ["monday", "thursday"]
+    # persisted
+    assert client.get("/api/settings").json()["preferred_weekdays"] == ["monday", "thursday"]
+    # untouched by an unrelated update
+    r2 = client.put("/api/settings", json={"weight_unit": "kg"})
+    assert r2.json()["preferred_weekdays"] == ["monday", "thursday"]
+
+
+def test_preferred_weekdays_rejects_invalid_day(client):
+    r = client.put("/api/settings", json={"preferred_weekdays": ["someday"]})
+    assert r.status_code == 422

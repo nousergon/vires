@@ -15,6 +15,9 @@ _TMP = tempfile.mkdtemp(prefix="vires-test-")
 os.environ["VIRES_DATABASE_URL"] = f"sqlite:///{_TMP}/test.db"
 os.environ["VIRES_VECTOR_STORE_PATH"] = f"{_TMP}/test.npz"
 os.environ["VIRES_NAME_VECTOR_STORE_PATH"] = f"{_TMP}/test_names.npz"
+# No RESEND_API_KEY in tests -> magic-link requests use the dev-mode
+# log-only fallback (see api.services.email) instead of a real network call.
+os.environ["VIRES_ENV"] = "development"
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -41,8 +44,13 @@ _USER_TABLES = [
     "programs",
     "objectives",
     "training_constraints",
+    "ailment_check_ins",
+    "ailment_episodes",
     "push_subscriptions",
     "user_settings",
+    "user_sessions",
+    "magic_link_tokens",
+    "allowed_emails",
 ]
 
 
@@ -93,16 +101,50 @@ def db():
         session.execute(text("UPDATE planned_workouts SET session_id = NULL"))
         for table in _USER_TABLES:
             session.execute(text(f"DELETE FROM {table}"))
+        # Real signups (test_auth.py) create non-dev users/tenants — clean
+        # those up too, but never the dev row every other test relies on.
+        from api.config import get_settings
+
+        s = get_settings()
+        session.execute(text("DELETE FROM users WHERE id != :id"), {"id": s.dev_user_id})
+        session.execute(text("DELETE FROM tenants WHERE id != :id"), {"id": s.dev_tenant_id})
         session.commit()
         session.close()
 
 
 @pytest.fixture()
 def client(db):
+    from api.config import get_settings
+    from api.db.identity import Identity, current_identity
+    from api.db.session import get_db
+    from api.main import app
+
+    settings = get_settings()
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[current_identity] = lambda: Identity(
+        tenant_id=settings.dev_tenant_id, user_id=settings.dev_user_id
+    )
+    with TestClient(app) as c:
+        yield c
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture()
+def raw_client(db):
+    """Like `client`, but WITHOUT the current_identity override — exercises
+    the real cookie-based auth flow end to end (test_auth.py).
+
+    ``base_url="https://testserver"``: the session cookie is `Secure`
+    (correctly, for production) — httpx's cookie jar silently drops/never
+    resends a Secure cookie over a plain-http connection, and TestClient
+    defaults to ``http://testserver``. No real TLS handshake happens either
+    way (ASGI transport, not a socket) — this only affects how httpx's
+    cookie jar classifies the scheme.
+    """
     from api.db.session import get_db
     from api.main import app
 
     app.dependency_overrides[get_db] = lambda: db
-    with TestClient(app) as c:
+    with TestClient(app, base_url="https://testserver") as c:
         yield c
     app.dependency_overrides.clear()

@@ -38,6 +38,7 @@ export const SETTINGS: Settings = {
   timer_vibration: true,
   timer_notification: false,
   timer_keep_awake: true,
+  preferred_weekdays: [],
 }
 
 // ---- typed fixture builders ----------------------------------------------- //
@@ -124,7 +125,6 @@ export function makeSession(over: Partial<WorkoutSession> = {}): WorkoutSession 
     ended_at: null,
     notes: null,
     tags: [],
-    pre_workout_fuel: null,
     energy_level: null,
     workout_intensity: null,
     template_id: null,

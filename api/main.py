@@ -17,6 +17,8 @@ from fastapi.staticfiles import StaticFiles
 
 from api.config import get_settings
 from api.routers import (
+    ailments,
+    auth,
     coach,
     constraints,
     exercises,
@@ -46,6 +48,7 @@ app.add_middleware(
 # Health stays at root (deploy/nginx healthcheck); feature APIs live under /api
 # so they never collide with the SPA's client-side routes served at root.
 app.include_router(health.router)
+app.include_router(auth.router, prefix="/api")
 app.include_router(exercises.router, prefix="/api")
 app.include_router(templates.router, prefix="/api")
 app.include_router(workouts.router, prefix="/api")
@@ -54,6 +57,7 @@ app.include_router(plan.router, prefix="/api")
 app.include_router(coach.router, prefix="/api")
 app.include_router(objectives.router, prefix="/api")
 app.include_router(constraints.router, prefix="/api")
+app.include_router(ailments.router, prefix="/api")
 app.include_router(records.router, prefix="/api")
 app.include_router(push.router, prefix="/api")
 app.include_router(routes.router, prefix="/api")

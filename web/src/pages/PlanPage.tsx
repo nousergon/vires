@@ -7,11 +7,14 @@ import {
   type Objective,
   type PlannedExercise,
   type PlannedWorkout,
+  type PendingAilmentCheckIn,
 } from '../lib/api'
 import { Button, EmptyState, PageTitle, Sheet, Spinner } from '../components/ui'
 import CoachSheet from '../components/CoachSheet'
+import CoachSummaryView from '../components/CoachSummaryView'
 import ObjectiveSheet from '../components/ObjectiveSheet'
 import ActivityForm from '../components/ActivityForm'
+import AilmentsPanel, { AilmentCheckInForm, AilmentSheet } from '../components/AilmentsPanel'
 import SessionDetailSheet from '../components/SessionDetailSheet'
 import { useSettings } from '../lib/useSettings'
 import { ACTIVE_KEY } from './WorkoutPage'
@@ -33,8 +36,15 @@ export default function PlanPage() {
   const [coachOpen, setCoachOpen] = useState(false)
   const [coachAutoStart, setCoachAutoStart] = useState(false)
   // { open } with an optional id — id present = edit that objective, absent = add
-  // new (optionally seeded with the tapped day via `date`, dated objectives only).
-  const [objectiveSheet, setObjectiveSheet] = useState<{ open: boolean; id?: number; date?: string }>({
+  // new (optionally seeded with the tapped day via `date`, dated objectives only,
+  // or forced to a `kind` — e.g. the Status tab's "general objectives" list,
+  // which always seeds `open_ended` since it has no date to anchor to).
+  const [objectiveSheet, setObjectiveSheet] = useState<{
+    open: boolean
+    id?: number
+    date?: string
+    kind?: 'dated' | 'open_ended'
+  }>({
     open: false,
   })
   // Add/edit-activity sheet — id present = edit that session (via PATCH),
@@ -45,14 +55,21 @@ export default function PlanPage() {
   const [activitySheet, setActivitySheet] = useState<{ open: boolean; id?: number; date?: string }>({
     open: false,
   })
+  // New-ailment sheet — always a create flow (ailments are edited/checked-in
+  // inline via AilmentsPanel, never re-opened here); `date` seeds onset_date
+  // when opened from a calendar day tap.
+  const [ailmentSheet, setAilmentSheet] = useState<{ open: boolean; date?: string }>({ open: false })
   const [modifyProgram, setModifyProgram] = useState<{ id: number; name: string } | null>(null)
   const [movedBanner, setMovedBanner] = useState<PlannedWorkout[]>([])
   // A completed routine tapped in the DaySheet — opens the shared logged-
   // session detail (view + tag: tags / pre-workout fuel / energy / intensity).
   const [sessionDetailId, setSessionDetailId] = useState<number | null>(null)
+  const [planView, setPlanView] = useState<'calendar' | 'coach' | 'status'>('calendar')
 
-  const openObjective = (id?: number, date?: string) => setObjectiveSheet({ open: true, id, date })
+  const openObjective = (id?: number, date?: string, kind?: 'dated' | 'open_ended') =>
+    setObjectiveSheet({ open: true, id, date, kind })
   const openActivity = (id?: number, date?: string) => setActivitySheet({ open: true, id, date })
+  const openAilment = (date?: string) => setAilmentSheet({ open: true, date })
 
   // Tapping a virtual (never-materialized) recurring occurrence turns it
   // into a real, linked row first, then opens it for editing — a real id
@@ -107,10 +124,14 @@ export default function PlanPage() {
     return m
   }, [entries])
 
+  const { data: programs = [] } = useQuery({ queryKey: ['programs'], queryFn: api.listPrograms })
+
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['calendar'] })
     qc.invalidateQueries({ queryKey: ['programs'] })
     qc.invalidateQueries({ queryKey: ['active-objective'] })
+    qc.invalidateQueries({ queryKey: ['ailments'] })
+    qc.invalidateQueries({ queryKey: ['ailments-pending'] })
   }
 
   function onStarted(sessionId: number) {
@@ -126,43 +147,74 @@ export default function PlanPage() {
         <RescheduleBanner moved={movedBanner} onDismiss={() => setMovedBanner([])} />
       )}
 
-      <div className="mb-3 flex items-center justify-between">
-        <button className="px-2 py-1 text-slate-400" onClick={() => setMonth(addMonths(month, -1))}>
-          ‹
-        </button>
-        <button
-          className="text-base font-semibold text-slate-100"
-          onClick={() => setMonth(new Date(today.getFullYear(), today.getMonth(), 1))}
-        >
-          {MONTH_LABELS[month.getMonth()]} {month.getFullYear()}
-        </button>
-        <button className="px-2 py-1 text-slate-400" onClick={() => setMonth(addMonths(month, 1))}>
-          ›
-        </button>
+      <div className="mb-4 flex rounded-xl border border-slate-800 bg-slate-900/60 p-1">
+        {(['calendar', 'coach', 'status'] as const).map((v) => (
+          <button
+            key={v}
+            onClick={() => setPlanView(v)}
+            className={`flex-1 rounded-lg py-2 text-sm font-medium capitalize ${
+              planView === v
+                ? 'bg-slate-800 text-amber-200'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            {v === 'calendar' ? 'Calendar' : v === 'coach' ? 'Coach' : 'Status'}
+          </button>
+        ))}
       </div>
 
-      {isLoading ? (
-        <Spinner />
-      ) : (
-        <CalendarGrid
-          weeks={weeks}
-          month={month}
-          today={today}
-          byDate={byDate}
-          onPick={setSelected}
+      {planView === 'calendar' ? (
+        <>
+          <div className="mb-3 flex items-center justify-between">
+            <button className="px-2 py-1 text-slate-400" onClick={() => setMonth(addMonths(month, -1))}>
+              ‹
+            </button>
+            <button
+              className="text-base font-semibold text-slate-100"
+              onClick={() => setMonth(new Date(today.getFullYear(), today.getMonth(), 1))}
+            >
+              {MONTH_LABELS[month.getMonth()]} {month.getFullYear()}
+            </button>
+            <button className="px-2 py-1 text-slate-400" onClick={() => setMonth(addMonths(month, 1))}>
+              ›
+            </button>
+          </div>
+
+          {isLoading ? (
+            <Spinner />
+          ) : (
+            <CalendarGrid
+              weeks={weeks}
+              month={month}
+              today={today}
+              byDate={byDate}
+              onPick={setSelected}
+            />
+          )}
+
+          <Legend />
+
+          <AgendaSection
+            entries={entries}
+            onEditObjective={openObjective}
+            onAddObjective={() => openObjective()}
+            onGenerate={() => openCoach(true)}
+            onEditActivity={openActivityEntry}
+            onAddActivity={() => openActivity()}
+          />
+
+          <ProgramsSection onModify={setModifyProgram} onChanged={refresh} compact />
+        </>
+      ) : planView === 'coach' ? (
+        <CoachSummaryView
+          programs={programs}
+          onGenerateCoach={() => openCoach(true)}
+          onModifyProgram={setModifyProgram}
+          onChanged={refresh}
         />
+      ) : (
+        <StatusView onAddAilment={() => openAilment()} onChanged={refresh} onEditObjective={openObjective} />
       )}
-
-      <Legend />
-
-      <ObjectiveSection
-        onEdit={openObjective}
-        onGenerate={() => openCoach(true)}
-      />
-
-      <EventsSection entries={entries} onEdit={openActivityEntry} onAdd={() => openActivity()} />
-
-      <ProgramsSection onModify={setModifyProgram} onChanged={refresh} />
 
       <DaySheet
         date={selected}
@@ -174,12 +226,15 @@ export default function PlanPage() {
         onOpenSession={setSessionDetailId}
         onAddActivity={() => (selected ? openActivity(undefined, isoDate(selected)) : openActivity())}
         onAddObjective={() => (selected ? openObjective(undefined, isoDate(selected)) : openObjective())}
+        onEditObjective={(id) => openObjective(id)}
+        onAddAilment={() => (selected ? openAilment(isoDate(selected)) : openAilment())}
       />
       <SessionDetailSheet sessionId={sessionDetailId} onClose={() => setSessionDetailId(null)} />
       <ObjectiveSheet
         open={objectiveSheet.open}
         objectiveId={objectiveSheet.id}
         defaultDate={objectiveSheet.date}
+        defaultKind={objectiveSheet.kind}
         onClose={() => setObjectiveSheet({ open: false })}
         onSaved={refresh}
       />
@@ -188,6 +243,12 @@ export default function PlanPage() {
         sessionId={activitySheet.id}
         defaultDate={activitySheet.date}
         onClose={() => setActivitySheet({ open: false })}
+        onSaved={refresh}
+      />
+      <AilmentSheet
+        open={ailmentSheet.open}
+        defaultDate={ailmentSheet.date}
+        onClose={() => setAilmentSheet({ open: false })}
         onSaved={refresh}
       />
       <CoachSheet
@@ -207,12 +268,31 @@ export default function PlanPage() {
 }
 
 // --------------------------------------------------------------------------- //
-function ObjectiveSection({
-  onEdit,
+// Agenda: dated objectives (goals the coach peaks TOWARD) + upcoming
+// activities (constraints the coach trains AROUND), merged into one
+// chronological list. Both are date-anchored and already render as markers
+// on the month grid above (fuchsia band/peak for objectives, sky ring badge
+// for activities — see CalendarGrid / DaySheet), so this is a discovery list
+// over data already on the calendar, not a second source of truth. Standing
+// (undated) objectives have no calendar anchor and live on the Status tab
+// instead (GeneralObjectivesSection) — scoped OUT here so they aren't listed
+// twice. The derived FOCUS objective is always shown in full regardless of
+// kind (even if it's a standing goal), since it drives Generate/Regenerate
+// plan — that action belongs on the Calendar tab regardless of what's focused.
+function AgendaSection({
+  entries,
+  onEditObjective,
+  onAddObjective,
   onGenerate,
+  onEditActivity,
+  onAddActivity,
 }: {
-  onEdit: (id?: number) => void
+  entries: CalendarEntry[]
+  onEditObjective: (id?: number) => void
+  onAddObjective: () => void
   onGenerate: () => void
+  onEditActivity: (e: CalendarEntry) => void
+  onAddActivity: () => void
 }) {
   const qc = useQueryClient()
   const { data: active } = useQuery({
@@ -223,14 +303,24 @@ function ObjectiveSection({
   const { data: all = [] } = useQuery({ queryKey: ['objectives'], queryFn: api.listObjectives })
   const { data: programs = [] } = useQuery({ queryKey: ['programs'], queryFn: api.listPrograms })
 
-  const objectives = active?.objectives ?? []
-  const focusId = active?.objective?.id ?? null
+  const focus = active?.objective ?? null
   const hasActivePlan = programs.some((p) => p.status === 'active')
+  const milestoneCount = (id: number) => all.filter((o) => o.parent_objective_id === id).length
 
-  const milestoneCount = (id: number) =>
-    all.filter((o) => o.parent_objective_id === id).length
+  const otherDated = (active?.objectives ?? []).filter((o) => o.kind === 'dated' && o.id !== focus?.id)
+  const upcoming = entries
+    .filter((e) => e.kind === 'session' && e.session_type === 'activity' && e.status === 'upcoming')
+    .sort((a, b) => a.date.localeCompare(b.date))
 
-  async function remove(o: Objective) {
+  type Row =
+    | { type: 'objective'; date: string; o: Objective }
+    | { type: 'activity'; date: string; e: CalendarEntry }
+  const rows: Row[] = [
+    ...otherDated.map((o): Row => ({ type: 'objective', date: o.target_date ?? '', o })),
+    ...upcoming.map((e): Row => ({ type: 'activity', date: e.date, e })),
+  ].sort((a, b) => a.date.localeCompare(b.date))
+
+  async function removeObjective(o: Objective) {
     if (
       !confirm(
         `Delete "${o.name}"? Its plans + history stay; any training milestones become standalone objectives.`,
@@ -245,95 +335,127 @@ function ObjectiveSection({
   return (
     <div className="mt-6">
       <div className="mb-2 flex items-center justify-between">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Objectives</h2>
-        <button className="text-sm text-amber-300 hover:text-amber-200" onClick={() => onEdit()}>
-          + Add
-        </button>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Agenda</h2>
+        <div className="flex gap-3">
+          <button className="text-sm text-fuchsia-300 hover:text-fuchsia-200" onClick={onAddObjective}>
+            + Objective
+          </button>
+          <button className="text-sm text-sky-300 hover:text-sky-200" onClick={onAddActivity}>
+            + Activity
+          </button>
+        </div>
       </div>
 
-      {objectives.length === 0 ? (
+      {!focus && rows.length === 0 ? (
         <button
-          onClick={() => onEdit()}
+          onClick={onAddObjective}
           className="block w-full rounded-xl border border-dashed border-slate-700 p-3 text-left text-sm text-slate-400 hover:bg-slate-800/40"
         >
-          Set a goal (e.g. “Climb Baker”) — the coach will periodize a plan toward it.
+          Set a goal (e.g. “Climb Baker”) — the coach will periodize a plan toward it. Or add a race,
+          trip, or rehab window the coach should train around.
         </button>
       ) : (
         <div className="space-y-2">
-          {objectives.map((o) => {
-            const isFocus = o.id === focusId
-            const ms = milestoneCount(o.id)
-            return (
-              <div
-                key={o.id}
-                className={`rounded-xl border p-3 ${
-                  isFocus
-                    ? 'border-amber-700/40 bg-amber-900/15'
-                    : 'border-slate-800 bg-slate-800/40'
-                }`}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <button onClick={() => onEdit(o.id)} className="block min-w-0 flex-1 text-left">
-                    <div
-                      className={`flex items-center gap-2 text-sm font-semibold ${
-                        isFocus ? 'text-amber-200' : 'text-slate-100'
-                      }`}
-                    >
-                      <span>{isFocus ? '🎯' : '📌'}</span>
-                      <span className="truncate">{o.name}</span>
-                      {isFocus && (
-                        <span className="shrink-0 rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-300">
-                          Focus
-                        </span>
-                      )}
-                    </div>
-                    <div className="mt-0.5 text-xs text-slate-400">
-                      {o.kind === 'dated' && o.target_date
-                        ? objectiveDateLabel(o.target_date, o.event_end_date)
-                        : 'open-ended'}
-                      {o.sport && ` · ${o.sport}`}
-                      {ms > 0 && ` · ${ms} milestone${ms === 1 ? '' : 's'}`}
-                    </div>
-                  </button>
-                  <button
-                    className="shrink-0 text-slate-600 hover:text-red-400"
-                    onClick={() => remove(o)}
-                    aria-label={`Delete ${o.name}`}
-                  >
-                    ✕
-                  </button>
-                </div>
-
-                {isFocus && (active?.constraints.length ?? 0) > 0 && (
-                  <div className="mt-1 text-xs text-slate-400">
-                    Training around: {active!.constraints.map((c) => c.label).join(', ')}
+          {focus && (
+            <div className="rounded-xl border border-amber-700/40 bg-amber-900/15 p-3">
+              <div className="flex items-start justify-between gap-2">
+                <button onClick={() => onEditObjective(focus.id)} className="block min-w-0 flex-1 text-left">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-amber-200">
+                    <span>🎯</span>
+                    <span className="truncate">{focus.name}</span>
+                    <span className="shrink-0 rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-300">
+                      Focus
+                    </span>
                   </div>
-                )}
-
-                {isFocus && active?.active_program?.coach_summary && (
-                  <div className="mt-2 rounded-lg border border-slate-700/60 bg-slate-800/40 p-2.5">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                      Coach&apos;s strategy
-                    </p>
-                    <p className="mt-0.5 text-xs leading-relaxed text-slate-300">
-                      {active.active_program.coach_summary}
-                    </p>
+                  <div className="mt-0.5 text-xs text-slate-400">
+                    {focus.kind === 'dated' && focus.target_date
+                      ? objectiveDateLabel(focus.target_date, focus.event_end_date)
+                      : 'open-ended'}
+                    {focus.sport && ` · ${focus.sport}`}
+                    {milestoneCount(focus.id) > 0 &&
+                      ` · ${milestoneCount(focus.id)} milestone${milestoneCount(focus.id) === 1 ? '' : 's'}`}
                   </div>
-                )}
-
-                {isFocus && (
-                  <>
-                    <Button className="mt-3 w-full" onClick={onGenerate}>
-                      {hasActivePlan ? '✨ Regenerate plan' : '✨ Generate plan'}
-                    </Button>
-                    <p className="mt-1.5 text-center text-[11px] text-slate-500">
-                      The coach builds &amp; periodizes a plan toward your focus objective.
-                    </p>
-                  </>
-                )}
+                </button>
+                <button
+                  className="shrink-0 text-slate-600 hover:text-red-400"
+                  onClick={() => removeObjective(focus)}
+                  aria-label={`Delete ${focus.name}`}
+                >
+                  ✕
+                </button>
               </div>
-            )
-          })}
+
+              {(active?.constraints.length ?? 0) > 0 && (
+                <div className="mt-1 text-xs text-slate-400">
+                  Training around: {active!.constraints.map((c) => c.label).join(', ')}
+                </div>
+              )}
+
+              {active?.active_program?.coach_summary && (
+                <div className="mt-2 rounded-lg border border-slate-700/60 bg-slate-800/40 p-2.5">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                    Coach&apos;s strategy
+                  </p>
+                  <p className="mt-0.5 text-xs leading-relaxed text-slate-300">
+                    {active.active_program.coach_summary}
+                  </p>
+                </div>
+              )}
+
+              <Button className="mt-3 w-full" onClick={onGenerate}>
+                {hasActivePlan ? '✨ Regenerate plan' : '✨ Generate plan'}
+              </Button>
+              <p className="mt-1.5 text-center text-[11px] text-slate-500">
+                The coach builds &amp; periodizes a plan toward your focus objective.
+              </p>
+            </div>
+          )}
+
+          {rows.map((r) =>
+            r.type === 'objective' ? (
+              <div
+                key={`o${r.o.id}`}
+                className="flex items-start justify-between gap-2 rounded-xl border border-fuchsia-700/40 bg-fuchsia-900/10 p-3"
+              >
+                <button
+                  onClick={() => onEditObjective(r.o.id)}
+                  className="block min-w-0 flex-1 text-left"
+                >
+                  <div className="flex items-center gap-2 text-sm font-semibold text-fuchsia-200">
+                    <span>📌</span>
+                    <span className="truncate">{r.o.name}</span>
+                  </div>
+                  <div className="mt-0.5 text-xs text-fuchsia-300/70">
+                    {r.o.target_date ? objectiveDateLabel(r.o.target_date, r.o.event_end_date) : ''}
+                    {r.o.sport && ` · ${r.o.sport}`}
+                    {milestoneCount(r.o.id) > 0 &&
+                      ` · ${milestoneCount(r.o.id)} milestone${milestoneCount(r.o.id) === 1 ? '' : 's'}`}
+                  </div>
+                </button>
+                <button
+                  className="shrink-0 text-slate-600 hover:text-red-400"
+                  onClick={() => removeObjective(r.o)}
+                  aria-label={`Delete ${r.o.name}`}
+                >
+                  ✕
+                </button>
+              </div>
+            ) : (
+              <button
+                key={`e${r.e.id}-${r.e.date}`}
+                onClick={() => onEditActivity(r.e)}
+                className="flex w-full items-center justify-between gap-2 rounded-xl border border-sky-700/40 bg-sky-900/15 p-3 text-left"
+              >
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-sky-200">
+                    <span>📍</span>
+                    <span className="truncate">{r.e.name}</span>
+                  </div>
+                  <div className="mt-0.5 text-xs text-sky-300/70">{r.e.date}</div>
+                </div>
+              </button>
+            ),
+          )}
         </div>
       )}
     </div>
@@ -350,61 +472,94 @@ function objectiveDateLabel(iso: string, eventEnd?: string | null): string {
 }
 
 // --------------------------------------------------------------------------- //
-// Upcoming activities/events: constraints the coach trains AROUND (races,
-// weekly league games, trips, rehab windows) — distinct from Objectives,
-// which are goals the coach peaks TOWARD. Same 'session' kind as a logged
-// activity — filtered to status='upcoming' — so this is a discovery list
-// over the SAME feed the month grid renders, not a separate concept. Listed
-// here as a flat list; upcoming activities also render as markers on the
-// month grid above (see CalendarGrid / DaySheet).
-function EventsSection({
-  entries,
-  onEdit,
-  onAdd,
+// Status tab: ailments + standing (non-dated) objectives — context the coach
+// factors in but that has no calendar anchor of its own (dated objectives +
+// their bands stay on the Calendar tab, where they're spatially meaningful).
+function StatusView({
+  onAddAilment,
+  onChanged,
+  onEditObjective,
 }: {
-  entries: CalendarEntry[]
-  onEdit: (e: CalendarEntry) => void
-  onAdd: () => void
+  onAddAilment: () => void
+  onChanged: () => void
+  onEditObjective: (id?: number, date?: string, kind?: 'dated' | 'open_ended') => void
 }) {
-  const upcoming = entries
-    .filter((e) => e.kind === 'session' && e.session_type === 'activity' && e.status === 'upcoming')
-    .sort((a, b) => a.date.localeCompare(b.date))
+  return (
+    <div className="space-y-6">
+      <AilmentsPanel onAdd={onAddAilment} onChanged={onChanged} />
+      <GeneralObjectivesSection onEdit={onEditObjective} />
+    </div>
+  )
+}
+
+function GeneralObjectivesSection({
+  onEdit,
+}: {
+  onEdit: (id?: number, date?: string, kind?: 'dated' | 'open_ended') => void
+}) {
+  const qc = useQueryClient()
+  const { data: all = [] } = useQuery({ queryKey: ['objectives'], queryFn: api.listObjectives })
+  const standing = all.filter((o) => o.kind === 'open_ended')
+
+  const milestoneCount = (id: number) => all.filter((o) => o.parent_objective_id === id).length
+
+  async function remove(o: Objective) {
+    if (!confirm(`Delete "${o.name}"? Its plans + history stay.`)) return
+    await api.deleteObjective(o.id)
+    qc.invalidateQueries({ queryKey: ['active-objective'] })
+    qc.invalidateQueries({ queryKey: ['objectives'] })
+  }
 
   return (
-    <div className="mt-6">
+    <div>
       <div className="mb-2 flex items-center justify-between">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
-          Upcoming activities
+          General objectives
         </h2>
-        <button className="text-sm text-amber-300 hover:text-amber-200" onClick={onAdd}>
+        <button
+          className="text-sm text-amber-300 hover:text-amber-200"
+          onClick={() => onEdit(undefined, undefined, 'open_ended')}
+        >
           + Add
         </button>
       </div>
+      <p className="mb-2 text-xs text-slate-500">
+        Standing goals with no target date — e.g. "build a bigger squat." The coach
+        falls back to one of these as its focus when nothing dated is closer.
+      </p>
 
-      {upcoming.length === 0 ? (
+      {standing.length === 0 ? (
         <button
-          onClick={onAdd}
+          onClick={() => onEdit(undefined, undefined, 'open_ended')}
           className="block w-full rounded-xl border border-dashed border-slate-700 p-3 text-left text-sm text-slate-400 hover:bg-slate-800/40"
         >
-          Add a race, league game, trip, or rehab window — the coach trains around it.
+          Add a standing goal — no date required.
         </button>
       ) : (
         <div className="space-y-2">
-          {upcoming.map((e) => (
-            <button
-              key={`${e.id}-${e.date}`}
-              onClick={() => onEdit(e)}
-              className="flex w-full items-center justify-between gap-2 rounded-xl border border-sky-700/40 bg-sky-900/15 p-3 text-left"
-            >
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 text-sm font-semibold text-sky-200">
-                  <span>📍</span>
-                  <span className="truncate">{e.name}</span>
+          {standing.map((o) => {
+            const ms = milestoneCount(o.id)
+            return (
+              <div key={o.id} className="rounded-xl border border-slate-800 bg-slate-800/40 p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <button onClick={() => onEdit(o.id)} className="block min-w-0 flex-1 text-left">
+                    <div className="truncate text-sm font-semibold text-slate-100">{o.name}</div>
+                    <div className="mt-0.5 text-xs text-slate-400">
+                      {o.sport && `${o.sport}`}
+                      {ms > 0 && ` · ${ms} milestone${ms === 1 ? '' : 's'}`}
+                    </div>
+                  </button>
+                  <button
+                    className="shrink-0 text-slate-600 hover:text-red-400"
+                    onClick={() => remove(o)}
+                    aria-label={`Delete ${o.name}`}
+                  >
+                    ✕
+                  </button>
                 </div>
-                <div className="mt-0.5 text-xs text-sky-300/70">{e.date}</div>
               </div>
-            </button>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>
@@ -415,9 +570,11 @@ function EventsSection({
 function ProgramsSection({
   onModify,
   onChanged,
+  compact = false,
 }: {
   onModify: (p: { id: number; name: string }) => void
   onChanged: () => void
+  compact?: boolean
 }) {
   const { data: programs = [] } = useQuery({ queryKey: ['programs'], queryFn: api.listPrograms })
   const active = programs.filter((p) => p.status === 'active')
@@ -455,7 +612,7 @@ function ProgramsSection({
                 </button>
               </div>
             </div>
-            {p.coach_summary && (
+            {p.coach_summary && !compact && (
               <p className="mt-2 border-t border-slate-800 pt-2 text-xs leading-relaxed text-slate-300">
                 {p.coach_summary}
               </p>
@@ -519,6 +676,7 @@ function CalendarGrid({
           const eventCount = es.filter(
             (e) => e.kind === 'session' && e.session_type === 'activity' && e.status === 'upcoming',
           ).length
+          const hasAilment = es.some((e) => e.kind === 'ailment')
           const isToday = sameDay(d, today)
           return (
             <button
@@ -536,6 +694,13 @@ function CalendarGrid({
                   className="absolute right-0.5 top-0.5 h-2 w-2 rounded-full border border-sky-400 bg-transparent"
                   aria-label="athletic event"
                   title="athletic event"
+                />
+              )}
+              {hasAilment && (
+                <span
+                  className="absolute left-0.5 top-0.5 h-2 w-2 rounded-full border border-rose-400 bg-transparent"
+                  aria-label="ailment"
+                  title="ailment"
                 />
               )}
               <span>{d.getDate()}</span>
@@ -616,6 +781,9 @@ function Legend() {
         <span className="h-2 w-2 rounded-full border border-sky-400 bg-transparent" /> upcoming
         activity
       </span>
+      <span className="flex items-center gap-1">
+        <span className="h-2 w-2 rounded-full border border-rose-400 bg-transparent" /> ailment
+      </span>
     </div>
   )
 }
@@ -631,6 +799,8 @@ function DaySheet({
   onOpenSession,
   onAddActivity,
   onAddObjective,
+  onEditObjective,
+  onAddAilment,
 }: {
   date: Date | null
   entries: CalendarEntry[]
@@ -641,14 +811,21 @@ function DaySheet({
   onOpenSession: (sessionId: number) => void
   onAddActivity: () => void
   onAddObjective: () => void
+  onEditObjective: (id: number) => void
+  onAddAilment: () => void
 }) {
+  const qc = useQueryClient()
   const { data: templates = [] } = useQuery({ queryKey: ['templates'], queryFn: api.listTemplates })
   const [busy, setBusy] = useState(false)
+  const [checkInGate, setCheckInGate] = useState<{
+    pending: PendingAilmentCheckIn[]
+    plannedId: number
+  } | null>(null)
   const title = date
     ? date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
     : ''
 
-  async function start(plannedId: number) {
+  async function doStart(plannedId: number) {
     setBusy(true)
     try {
       const ws = await api.startPlanned(plannedId)
@@ -656,6 +833,15 @@ function DaySheet({
     } finally {
       setBusy(false)
     }
+  }
+
+  async function start(plannedId: number) {
+    const pending = await api.pendingAilmentCheckIns(isoDate(new Date()))
+    if (pending.length > 0) {
+      setCheckInGate({ pending, plannedId })
+      return
+    }
+    await doStart(plannedId)
   }
 
   async function remove(plannedId: number) {
@@ -679,6 +865,21 @@ function DaySheet({
     }
   }
 
+  async function removeObjective(e: CalendarEntry) {
+    const label = e.objective_name ?? e.name ?? 'this objective'
+    if (!confirm(`Delete "${label}"? Its plans + history stay; any training milestones become standalone objectives.`))
+      return
+    setBusy(true)
+    try {
+      await api.deleteObjective(e.id)
+      qc.invalidateQueries({ queryKey: ['objectives'] })
+      qc.invalidateQueries({ queryKey: ['active-objective'] })
+      onChanged()
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const planned = entries.filter((e) => e.kind === 'planned')
   const sessions = entries.filter((e) => e.kind === 'session' && e.session_type !== 'activity')
   // Activities — logged OR upcoming/planned/recurring (formerly a separate
@@ -694,6 +895,7 @@ function DaySheet({
     if (!prev || e.kind === 'objective') objectiveById.set(e.id, e)
   }
   const objectives = [...objectiveById.values()]
+  const ailments = entries.filter((e) => e.kind === 'ailment')
 
   const objectiveLabel = (e: CalendarEntry) =>
     e.kind === 'objective'
@@ -703,7 +905,8 @@ function DaySheet({
       : '🏋 training block'
 
   return (
-    <Sheet open={!!date} onClose={onClose} title={title}>
+    <>
+      <Sheet open={!!date} onClose={onClose} title={title}>
       <div className="space-y-4">
         {entries.length === 0 && (
           <EmptyState title="Nothing scheduled" hint="Schedule a routine below or ask the Coach." />
@@ -712,12 +915,22 @@ function DaySheet({
         {objectives.map((e) => (
           <div
             key={`o${e.id}`}
-            className="rounded-xl border border-fuchsia-700/40 bg-fuchsia-900/15 p-3"
+            className="flex items-start justify-between gap-2 rounded-xl border border-fuchsia-700/40 bg-fuchsia-900/15 p-3"
           >
-            <div className="text-sm font-semibold text-fuchsia-200">
-              {e.objective_name ?? e.name}
-            </div>
-            <div className="mt-0.5 text-xs text-fuchsia-300/80">{objectiveLabel(e)}</div>
+            <button onClick={() => onEditObjective(e.id)} className="block min-w-0 flex-1 text-left">
+              <div className="truncate text-sm font-semibold text-fuchsia-200">
+                {e.objective_name ?? e.name}
+              </div>
+              <div className="mt-0.5 text-xs text-fuchsia-300/80">{objectiveLabel(e)}</div>
+            </button>
+            <button
+              className="shrink-0 text-slate-600 hover:text-red-400"
+              onClick={() => removeObjective(e)}
+              disabled={busy}
+              aria-label={`Delete ${e.objective_name ?? e.name}`}
+            >
+              ✕
+            </button>
           </div>
         ))}
 
@@ -748,6 +961,14 @@ function DaySheet({
           </button>
         ))}
 
+        {/* Ailment bands for this day — same rose styling as AilmentsPanel. */}
+        {ailments.map((e) => (
+          <div key={`a${e.id}`} className="rounded-xl border border-rose-800/40 bg-rose-900/10 p-3">
+            <div className="text-sm font-semibold text-rose-100">{e.name}</div>
+            <div className="mt-0.5 text-xs text-rose-200/70">{e.status}</div>
+          </div>
+        ))}
+
         <div className="flex gap-2">
           <button
             onClick={onAddActivity}
@@ -760,6 +981,12 @@ function DaySheet({
             className="flex-1 rounded-xl border border-dashed border-fuchsia-800/60 p-2.5 text-center text-xs text-fuchsia-300/80 hover:bg-fuchsia-900/10"
           >
             🎯 New objective
+          </button>
+          <button
+            onClick={onAddAilment}
+            className="flex-1 rounded-xl border border-dashed border-rose-800/60 p-2.5 text-center text-xs text-rose-300/80 hover:bg-rose-900/10"
+          >
+            🩹 Add ailment
           </button>
         </div>
 
@@ -821,6 +1048,25 @@ function DaySheet({
         )}
       </div>
     </Sheet>
+      <Sheet
+        open={checkInGate != null}
+        onClose={() => setCheckInGate(null)}
+        title="Ailment check-in"
+      >
+        {checkInGate && (
+          <AilmentCheckInForm
+            pending={checkInGate.pending}
+            onCancel={() => setCheckInGate(null)}
+            onDone={() => {
+              const id = checkInGate.plannedId
+              setCheckInGate(null)
+              onChanged()
+              void doStart(id)
+            }}
+          />
+        )}
+      </Sheet>
+    </>
   )
 }
 

@@ -87,6 +87,33 @@ class Settings(BaseSettings):
     # Where the built React app lives (served as static in production).
     web_dist_dir: str = "web/dist"
 
+    # Auth (vires-ops#49) — magic-link login + DB-backed sessions.
+    # Email delivery (Resend). Key SSM-hydrated like the others; absent =>
+    # magic-link requests fail loud in production, but in `env=="development"`
+    # the link is logged instead of sent (see api.services.email) so local
+    # dev never needs a live inbox.
+    resend_api_key: str | None = None
+    email_sender: str = "no-reply@nousergon.ai"
+    env: str = "production"
+    # Where the magic-link email points — the SPA's own origin.
+    frontend_url: str = "https://vires.nousergon.ai"
+    magic_link_ttl_seconds: int = 300
+    magic_link_rate_limit_per_email: int = 5
+    magic_link_rate_limit_window_seconds: int = 60
+    session_ttl_seconds: int = 60 * 60 * 24 * 7  # 7 days
+    # A session touched less recently than "now - this" gets its expiry
+    # pushed out another `session_ttl_seconds` (rolling refresh).
+    session_refresh_threshold_seconds: int = 60 * 60 * 24  # 1 day
+    # Kill-switch: require the signup email to be on the allowlist for any
+    # signup beyond the very first (bootstrap) user. Flip to False to open
+    # signup wide.
+    allowlist_required: bool = True
+    # Local-dev-only escape hatch: skip real session verification entirely
+    # and resolve the hardcoded dev identity, exactly like before auth
+    # existed. Must NEVER be true in a deployed .env — nothing in the
+    # deploy pipeline sets it, and it's not SSM-hydrated.
+    dev_auth_bypass: bool = False
+
 
 @lru_cache
 def get_settings() -> Settings:

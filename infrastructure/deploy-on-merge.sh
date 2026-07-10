@@ -80,22 +80,23 @@ else
   echo "coach: no key at ${SSM_PARAM} — AI coach unavailable (non-fatal)"
 fi
 
-# --- Coaching edge: hydrate the tuned coach prompt from SSM (private) -------- #
+# --- Coaching edge: hydrate the tuned coach prompt from S3 (private) --------- #
 # The tuned prompt is the Vires edge (Commercial-tier) — kept out of the public
-# repo, stored in SSM, written to the gitignored prompts/coach_system.txt. Missing
-# is NON-FATAL: the committed coach_system.example.txt baseline is used instead.
-PROMPT_PARAM="${VIRES_COACH_PROMPT_SSM_PARAM:-/vires/coach_system_prompt}"
+# repo, stored in a private S3 bucket, written to the gitignored
+# prompts/coach_system.txt. NOT SSM: parameter store caps out at 8192 chars
+# even at Advanced tier, which the tuned prompt exceeded in practice
+# (2026-07-08, see vires-ops/prompts/README.md) — S3 has no such ceiling.
+# Missing is NON-FATAL: the committed coach_system.example.txt baseline is
+# used instead.
+PROMPT_S3="${VIRES_COACH_PROMPT_S3:-s3://vires-secrets/coach_system_prompt.txt}"
 PROMPT_FILE="$REPO/api/services/coach/prompts/coach_system.txt"
-if PROMPT=$(aws ssm get-parameter --name "$PROMPT_PARAM" --with-decryption \
-             --query Parameter.Value --output text 2>/dev/null) \
-   && [ -n "$PROMPT" ] && [ "$PROMPT" != "None" ]; then
-  printf '%s\n' "$PROMPT" > "$PROMPT_FILE"   # content not traced (no set -x)
+if aws s3 cp "$PROMPT_S3" "$PROMPT_FILE" --only-show-errors 2>/dev/null \
+   && [ -s "$PROMPT_FILE" ]; then
   chmod 600 "$PROMPT_FILE"
-  unset PROMPT
-  echo "coach: hydrated tuned prompt from ${PROMPT_PARAM}"
+  echo "coach: hydrated tuned prompt from ${PROMPT_S3}"
 else
   rm -f "$PROMPT_FILE"  # ensure we fall back to the committed baseline
-  echo "coach: no tuned prompt at ${PROMPT_PARAM} — using public baseline (non-fatal)"
+  echo "coach: no tuned prompt at ${PROMPT_S3} — using public baseline (non-fatal)"
 fi
 
 # --- AI coach open-model provider: hydrate the OpenRouter key from SSM ------- #

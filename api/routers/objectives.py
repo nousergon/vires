@@ -186,6 +186,17 @@ def active_objective(
             )
             .order_by(Program.created_at.desc())
         )
+        if program is None:
+            # Fall back to any active program (legacy rows may omit objective_id).
+            program = db.scalar(
+                select(Program)
+                .where(
+                    Program.tenant_id == ident.tenant_id,
+                    Program.user_id == ident.user_id,
+                    Program.status == "active",
+                )
+                .order_by(Program.created_at.desc())
+            )
         if program is not None:
             strategy = ProgramStrategy(
                 program_id=program.id,

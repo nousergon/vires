@@ -15,13 +15,13 @@ class CalendarEntry(BaseModel):
     training-block band). Objective entries are per-day, clipped to the query
     window; ``id`` is the objective id and may repeat across its span."""
 
-    kind: str  # 'session' | 'planned' | 'objective' | 'objective_block'
+    kind: str  # 'session' | 'planned' | 'objective' | 'objective_block' | 'ailment'
     date: date
     id: int
     name: str | None = None
     # session: 'completed' | 'in_progress' | 'upcoming'; planned: 'planned' |
     # 'completed' | 'skipped'; objective: 'peak' | 'event' (multi-day window
-    # day); objective_block: 'block'
+    # day); objective_block: 'block'; ailment: 'active' | 'improving' | 'resolved'
     status: str
     program_id: int | None = None
     template_id: int | None = None

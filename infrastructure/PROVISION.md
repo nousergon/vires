@@ -64,14 +64,18 @@ The model is set by `VIRES_COACH_MODEL` (default `claude-haiku-4-5`; bump to
 
 ### 7a. Tuned coach prompt (optional — the private edge)
 The coach's system prompt is the Vires *edge* (Commercial-tier), so the public repo
-ships only a competent **baseline** (`api/services/coach/prompts/coach_system.example.txt`).
-To run a tuned/private prompt in prod, store it in SSM — `deploy-on-merge.sh` writes it to
-the gitignored `coach_system.txt` on each deploy (content never logged):
+ships only a competent, deliberately generic **baseline**
+(`api/services/coach/prompts/coach_system.example.txt`) — no coaching methodology, just
+the schema mechanism needed to work out of the box.
+To run a tuned/private prompt in prod, store it in a private S3 bucket — NOT SSM (Parameter
+Store caps out at 8192 chars even at Advanced tier, too small once the tuned prompt has real
+depth). `deploy-on-merge.sh` fetches it to the gitignored `coach_system.txt` on each deploy
+(content never logged):
 ```
-aws ssm put-parameter --name /vires/coach_system_prompt --type SecureString --value "<prompt>"
+aws s3 cp <prompt-file> s3://vires-secrets/coach_system_prompt.txt --sse AES256
 ```
-Grant the instance role `ssm:GetParameter` on that parameter; override the path with
-`VIRES_COACH_PROMPT_SSM_PARAM`. **Non-fatal:** with no SSM prompt the deploy succeeds and the
+Grant the instance role `s3:GetObject` on that bucket/key; override the path with
+`VIRES_COACH_PROMPT_S3`. **Non-fatal:** with no prompt object the deploy succeeds and the
 baseline is used. The canonical tuned prompt lives in the private `nousergon/vires-ops` repo.
 
 ### 7b. Speech-to-text (optional — enables the coach mic)

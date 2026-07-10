@@ -23,6 +23,7 @@ from api.db.models import (
     WorkoutSession,
     WorkoutTemplate,
 )
+from api.services.ailments import latest_check_in, load_open_ailments
 from api.services.coach.materialize import (
     ExerciseMeta,
     MaterializeContext,
@@ -31,6 +32,8 @@ from api.services.coach.materialize import (
 )
 from api.services.coach.objective_context import (
     ActivitySessionCtx,
+    AilmentCheckInCtx,
+    AilmentEpisodeCtx,
     CoachObjectiveContext,
     ConstraintCtx,
     EventOccurrenceCtx,
@@ -121,8 +124,12 @@ def build_materialize_context(db: Session, ident: Identity) -> MaterializeContex
                 for te in tpl.exercises
             ],
         )
-    unit = get_or_create_settings(db, ident).weight_unit
-    return MaterializeContext(templates=templates, weight_unit=unit)
+    settings = get_or_create_settings(db, ident)
+    return MaterializeContext(
+        templates=templates,
+        weight_unit=settings.weight_unit,
+        preferred_weekdays=settings.preferred_weekdays,
+    )
 
 
 def build_coach_objective_context(
@@ -167,6 +174,7 @@ def build_coach_objective_context(
     candidates = _build_exercise_candidates(db, ident, obj_ctx)
     events = _build_event_ctxs(db, ident, timeline, date.today())
     recent_activities = _build_recent_activities(db, ident, date.today())
+    ailments = build_ailment_ctxs(db, ident)
     return CoachObjectiveContext(
         objective=obj_ctx,
         constraints=con_ctxs,
@@ -174,7 +182,42 @@ def build_coach_objective_context(
         timeline=timeline,
         events=events,
         recent_activities=recent_activities,
+        ailments=ailments,
     )
+
+
+def build_ailment_ctxs(db: Session, ident: Identity) -> list[AilmentEpisodeCtx]:
+    """Open/improving episodes with check-ins from the last 14 days.
+
+    Shared with ``api.services.coach.replan`` — the macro re-plan loop reads
+    the same trajectory the coach itself is grounded on, so a trigger firing
+    and the coach's own reasoning are never out of sync."""
+    today = date.today()
+    window_start = today - timedelta(days=14)
+    out: list[AilmentEpisodeCtx] = []
+    for ep in load_open_ailments(db, ident):
+        latest = latest_check_in(ep)
+        recent = [
+            AilmentCheckInCtx(
+                check_in_date=c.check_in_date,
+                severity=c.severity,
+                note=c.note,
+            )
+            for c in sorted(ep.check_ins, key=lambda x: x.check_in_date)
+            if c.check_in_date >= window_start
+        ]
+        out.append(
+            AilmentEpisodeCtx(
+                label=ep.label,
+                onset_date=ep.onset_date,
+                status=ep.status,
+                notes=ep.notes,
+                latest_severity=latest.severity if latest else None,
+                latest_check_in_date=latest.check_in_date if latest else None,
+                check_ins=recent,
+            )
+        )
+    return out
 
 
 def _event_window(

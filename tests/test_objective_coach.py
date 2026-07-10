@@ -1,5 +1,6 @@
 """Objective-driven generation: the objective + constraints reach the model,
-and the public baseline prompt carries the periodization + safety rules."""
+and the public baseline prompt carries the schema mechanism + safety rules
+(never the coaching methodology — see the public/private split, vires-ops#53)."""
 
 from __future__ import annotations
 
@@ -72,6 +73,18 @@ def test_context_block_includes_objective_and_constraints():
     assert goal["constraints"][0]["label"] == "recovering L4-L5 disc"
     assert "axial" in goal["constraints"][0]["directives"].lower()
     assert goal["constraints"][0]["defer_to_professional"] is True
+
+
+def test_context_block_carries_preferred_weekdays_when_set():
+    ctx = _mat_ctx()
+    ctx.preferred_weekdays = ["monday", "thursday"]
+    block = json.loads(_context_block(ctx, date(2026, 6, 28), None))
+    assert block["preferred_weekdays"] == ["monday", "thursday"]
+
+
+def test_context_block_omits_preferred_weekdays_when_unset():
+    block = json.loads(_context_block(_mat_ctx(), date(2026, 6, 28), None))
+    assert "preferred_weekdays" not in block
 
 
 def test_objective_block_computes_weeks_until_target():
@@ -215,31 +228,19 @@ def test_no_events_key_when_none_present():
     assert "events" not in block
 
 
-def test_baseline_prompt_has_event_load_accounting_language():
+def test_baseline_prompt_mentions_events_and_recent_activities_fields():
+    """The public baseline must still READ every CONTEXT field mechanically
+    (so a self-hosted deploy behaves correctly for a user with events/recent
+    activities set) — but the load-accounting/fatigue-in HEURISTICS are the
+    private coaching edge, not asserted here. See
+    test_baseline_prompt_stays_generic_no_proprietary_methodology."""
     from api.services.coach.prompt_loader import load_system_prompt
 
     load_system_prompt.cache_clear()
     text = load_system_prompt().lower()
     try:
-        assert "events" in text  # events are grounded as load constraints
-        assert "load-accounting" in text or "load accounting" in text
-        assert "trained around" in text or "train around" in text or "around" in text
-        assert "already spent" in text  # fatigue-in accounting
-        assert "objective_id" in text  # peak/taper anchoring exception
-    finally:
-        load_system_prompt.cache_clear()
-
-
-def test_baseline_prompt_has_recent_activity_recovery_language():
-    from api.services.coach.prompt_loader import load_system_prompt
-
-    load_system_prompt.cache_clear()
-    text = load_system_prompt().lower()
-    try:
-        assert "recent_activities" in text
-        assert "already logged" in text  # past load, not a future constraint
-        assert "days_ago" in text
-        assert "recover" in text
+        assert "events" in text and "objective_id" in text
+        assert "recent_activities" in text and "days_ago" in text
     finally:
         load_system_prompt.cache_clear()
 
@@ -248,7 +249,7 @@ def test_baseline_prompt_has_recent_activity_recovery_language():
 # DB integration: a logged recurring event reaches the coach context expanded
 # --------------------------------------------------------------------------- #
 def test_recurring_event_is_expanded_into_coach_context(client, db):
-    from api.db.identity import current_identity
+    from api.db.identity import ensure_dev_identity
     from api.services.coach.context import build_coach_objective_context
 
     # A weekly leg-heavy commitment anchored on an in-window Tuesday.
@@ -265,7 +266,7 @@ def test_recurring_event_is_expanded_into_coach_context(client, db):
         },
     )
     assert r.status_code == 201, r.text
-    ctx = build_coach_objective_context(db, current_identity())
+    ctx = build_coach_objective_context(db, ensure_dev_identity(db))
     assert ctx.events, "the recurring event should expand into the coach context"
     # weekly cadence => multiple in-window occurrences, all the same series
     assert {e.name for e in ctx.events} == {"Wednesday hoops"}
@@ -322,7 +323,7 @@ def test_recent_activities_reach_the_grounding_context_even_without_an_objective
 
 
 def test_logged_activity_reaches_the_coach_context(client, db):
-    from api.db.identity import current_identity
+    from api.db.identity import ensure_dev_identity
     from api.services.coach.context import build_coach_objective_context
 
     r = client.post(
@@ -336,7 +337,7 @@ def test_logged_activity_reaches_the_coach_context(client, db):
         },
     )
     assert r.status_code == 201, r.text
-    ctx = build_coach_objective_context(db, current_identity())
+    ctx = build_coach_objective_context(db, ensure_dev_identity(db))
     assert ctx.recent_activities, "the logged activity should reach the coach context"
     a = ctx.recent_activities[0]
     assert a.name == "Indoor top-rope"
@@ -350,7 +351,7 @@ def test_logged_activity_reaches_the_coach_context(client, db):
 
 
 def test_activity_outside_the_lookback_window_does_not_reach_the_coach(client, db):
-    from api.db.identity import current_identity
+    from api.db.identity import ensure_dev_identity
     from api.services.coach.context import build_coach_objective_context
 
     r = client.post(
@@ -363,7 +364,7 @@ def test_activity_outside_the_lookback_window_does_not_reach_the_coach(client, d
         },
     )
     assert r.status_code == 201, r.text
-    ctx = build_coach_objective_context(db, current_identity())
+    ctx = build_coach_objective_context(db, ensure_dev_identity(db))
     assert ctx.recent_activities == []
 
 
@@ -490,19 +491,49 @@ def test_generate_feeds_full_dated_timeline(client, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# the public baseline prompt carries the new rules
+# the public baseline prompt carries the mechanism (never the methodology) —
+# see the public/private split note in prompt_loader.py + vires-ops#53.
 # --------------------------------------------------------------------------- #
-def test_baseline_prompt_has_periodization_and_safety_language():
+def test_baseline_prompt_has_objective_awareness_and_safety_language():
     from api.services.coach.prompt_loader import load_system_prompt
 
     load_system_prompt.cache_clear()
     text = load_system_prompt().lower()
     try:
-        assert "target_date" in text and "taper" in text  # periodize-to-date
-        assert "deload_weeks" in text  # taper mechanism
-        assert "never prescribe" in text  # injury safety
+        assert "target_date" in text  # reads the objective's date
+        assert "deload_weeks" in text  # schema mechanism
+        assert "never prescribe" in text  # injury safety (always public — never traded for IP)
         assert "pt/physician" in text or "physician" in text  # defer to professional
-        assert "demands_profile" in text  # honor the needs-analysis
+        assert "demands_profile" in text  # reads the needs-analysis field
+    finally:
+        load_system_prompt.cache_clear()
+
+
+def test_baseline_prompt_stays_generic_no_proprietary_methodology():
+    """Guards the public/private split (2026-07-08, vires-ops#53): the
+    committed baseline is a competent-but-generic example — the actual
+    coaching depth (periodization phase sequencing, event/cross-training
+    load-accounting heuristics, the season-phase algorithm's specific
+    transition rules) lives ONLY in the private tuned prompt
+    (vires-ops/prompts/coach_system.txt, hydrated via SSM), never here."""
+    from api.services.coach.prompt_loader import load_system_prompt
+
+    load_system_prompt.cache_clear()
+    text = load_system_prompt().lower()
+    try:
+        for phrase in [
+            "max strength",
+            "muscular-endurance conversion",
+            "load-accounting",
+            "load accounting",
+            "already spent",  # fatigue-in accounting
+            "freshest",  # recovery-around heuristic
+            "sport-specific",  # season-phase sequencing language
+        ]:
+            assert phrase not in text, (
+                f"proprietary coaching methodology leaked into the public "
+                f"baseline: {phrase!r}"
+            )
     finally:
         load_system_prompt.cache_clear()
 
@@ -578,16 +609,17 @@ def test_generate_accepts_and_materializes_a_phased_season(client, monkeypatch):
     assert f'"objective_id": {o1["id"]}' in user_text
 
 
-def test_baseline_prompt_has_season_phase_language():
+def test_baseline_prompt_knows_to_use_phases_for_a_multi_peak_timeline():
+    """Schema mechanism, not strategy: with 2+ dated peaks the coach must use
+    ProgramSpec's `phases` field instead of a flat `schedule`, or a self-hosted
+    multi-objective season silently collapses to nonsense. The actual block-
+    sequencing/transition RULES are the private edge — not asserted here."""
     from api.services.coach.prompt_loader import load_system_prompt
 
     load_system_prompt.cache_clear()
     text = load_system_prompt().lower()
     try:
-        assert "season" in text  # plans the whole season up front
         assert "phases" in text and "objective_id" in text  # emit phased spec
-        assert "event_end_date" in text  # chain blocks past the multi-day event
-        assert "sport-specific" in text  # each block specific to its objective
     finally:
         load_system_prompt.cache_clear()
 
@@ -599,7 +631,7 @@ def test_baseline_prompt_has_season_phase_language():
 # started_at/ended_at vs. "now" (merge_calendar_events_into_activity).
 # --------------------------------------------------------------------------- #
 def test_future_activity_is_an_event_not_a_recent_activity(client, db):
-    from api.db.identity import current_identity
+    from api.db.identity import ensure_dev_identity
     from api.services.coach.context import build_coach_objective_context
 
     client.post(
@@ -612,13 +644,13 @@ def test_future_activity_is_an_event_not_a_recent_activity(client, db):
             "started_at": (datetime.now(UTC) + timedelta(days=10)).isoformat(),
         },
     )
-    ctx = build_coach_objective_context(db, current_identity())
+    ctx = build_coach_objective_context(db, ensure_dev_identity(db))
     assert any(e.name == "Boston Marathon" for e in ctx.events)
     assert not any(a.name == "Boston Marathon" for a in ctx.recent_activities)
 
 
 def test_closed_out_past_activity_is_recent_not_an_event(client, db):
-    from api.db.identity import current_identity
+    from api.db.identity import ensure_dev_identity
     from api.services.coach.context import build_coach_objective_context
 
     client.post(
@@ -630,6 +662,6 @@ def test_closed_out_past_activity_is_recent_not_an_event(client, db):
             "intensity": "moderate",
         },
     )
-    ctx = build_coach_objective_context(db, current_identity())
+    ctx = build_coach_objective_context(db, ensure_dev_identity(db))
     assert any(a.name == "Morning run" for a in ctx.recent_activities)
     assert not any(e.name == "Morning run" for e in ctx.events)

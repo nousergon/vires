@@ -23,6 +23,7 @@ def _out(s: UserSettings) -> SettingsOut:
         timer_vibration=s.timer_vibration,
         timer_notification=s.timer_notification,
         timer_keep_awake=s.timer_keep_awake,
+        preferred_weekdays=s.preferred_weekdays,
     )
 
 

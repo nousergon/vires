@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, type Settings, type WeightUnit } from '../lib/api'
+import { api, type Settings, type Weekday, type WeightUnit } from '../lib/api'
 import { useSettings } from '../lib/useSettings'
+import { useAuth } from '../lib/useAuth'
 import { requestNotificationPermission } from '../lib/timer'
 import { ensurePushSubscription, disablePush } from '../lib/push'
 import { Button, Card, PageTitle } from '../components/ui'
@@ -70,6 +72,18 @@ export default function SettingsPage() {
         </div>
       </Card>
 
+      <Card className="mt-4 space-y-2">
+        <h2 className="text-sm font-semibold text-slate-200">Training schedule</h2>
+        <p className="text-xs text-slate-400">
+          The coach defaults to these days when you don't name specific ones in a
+          request — set once here instead of repeating it every conversation.
+        </p>
+        <WeekdayPicker
+          selected={draft.preferred_weekdays}
+          onChange={(v) => set('preferred_weekdays', v)}
+        />
+      </Card>
+
       <Card className="mt-4 space-y-1">
         <h2 className="mb-1 text-sm font-semibold text-slate-200">Timer alerts</h2>
         <p className="mb-2 text-xs text-slate-400">
@@ -114,10 +128,41 @@ export default function SettingsPage() {
 
       <CalendarFeed />
 
+      <Account />
+
       <p className="mt-6 text-center text-xs text-slate-500">
         Vires · vires acquirit eundo
       </p>
     </div>
+  )
+}
+
+function Account() {
+  const { me } = useAuth()
+  const nav = useNavigate()
+  const logout = useMutation({
+    mutationFn: api.logout,
+    onSuccess: () => nav('/login', { replace: true }),
+  })
+
+  if (!me) return null
+
+  return (
+    <Card className="mt-4 space-y-2">
+      <h2 className="text-sm font-semibold text-slate-200">Account</h2>
+      <p className="text-xs text-slate-400">
+        Logged in as <span className="text-slate-200">{me.email}</span>
+        {me.is_admin && ' · admin'}
+      </p>
+      <Button
+        variant="secondary"
+        className="w-full"
+        disabled={logout.isPending}
+        onClick={() => logout.mutate()}
+      >
+        Log out
+      </Button>
+    </Card>
   )
 }
 
@@ -175,6 +220,48 @@ function CalendarFeed() {
         </button>
       </div>
     </Card>
+  )
+}
+
+const WEEKDAYS: { day: Weekday; label: string }[] = [
+  { day: 'monday', label: 'M' },
+  { day: 'tuesday', label: 'Tu' },
+  { day: 'wednesday', label: 'W' },
+  { day: 'thursday', label: 'Th' },
+  { day: 'friday', label: 'F' },
+  { day: 'saturday', label: 'Sa' },
+  { day: 'sunday', label: 'Su' },
+]
+
+function WeekdayPicker({
+  selected,
+  onChange,
+}: {
+  selected: Weekday[]
+  onChange: (v: Weekday[]) => void
+}) {
+  const toggle = (day: Weekday) =>
+    onChange(selected.includes(day) ? selected.filter((d) => d !== day) : [...selected, day])
+
+  return (
+    <div className="flex gap-1.5">
+      {WEEKDAYS.map(({ day, label }) => (
+        <button
+          key={day}
+          type="button"
+          onClick={() => toggle(day)}
+          aria-pressed={selected.includes(day)}
+          aria-label={day}
+          className={`flex-1 rounded-lg py-2 text-xs font-semibold ${
+            selected.includes(day)
+              ? 'bg-amber-500 text-slate-950'
+              : 'bg-slate-800 text-slate-300'
+          }`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
   )
 }
 
