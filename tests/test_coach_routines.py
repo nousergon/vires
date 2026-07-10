@@ -288,11 +288,11 @@ def test_generate_works_with_objective_and_no_existing_routines(client, monkeypa
 
 
 def test_candidate_pool_populated_from_alpine_profile(client, db):
-    from api.db.identity import current_identity
+    from api.db.identity import ensure_dev_identity
     from api.services.coach.context import build_coach_objective_context
 
     _set_alpine_objective(client)
-    ctx = build_coach_objective_context(db, current_identity())
+    ctx = build_coach_objective_context(db, ensure_dev_identity(db))
     assert ctx.candidates  # the alpine search_terms surfaced catalog exercises
     names = " ".join(c.name.lower() for c in ctx.candidates)
     assert "step" in names or "deadlift" in names or "calf" in names

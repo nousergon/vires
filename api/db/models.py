@@ -58,9 +58,77 @@ class User(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
-    email: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Lowercased at write time. Nullable (the hardcoded dev user has none) but
+    # unique when present — SQL treats multiple NULLs as distinct, so this
+    # doesn't block the dev row while still enforcing one account per email
+    # for real signups.
+    email: Mapped[str | None] = mapped_column(String, nullable=True, unique=True, index=True)
     display_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    # True only for the bootstrap first user (see auth.py's empty-table check)
+    # or a user an admin later promotes by hand. Gates POST /auth/invites.
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
+
+
+# --------------------------------------------------------------------------- #
+# Auth (magic-link + session) — see api.routers.auth, api.db.identity
+# --------------------------------------------------------------------------- #
+class MagicLinkToken(Base):
+    """A one-time login link sent to an email. Single-use: ``consumed_at`` is
+    set atomically on verify (rowcount-checked update — see auth.py) so a
+    replayed/double-clicked link can't be redeemed twice."""
+
+    __tablename__ = "magic_link_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    email: Mapped[str] = mapped_column(String, index=True)
+    # SHA-256 hex digest of the raw token mailed to the user — the raw value
+    # is never persisted, mirroring how a password would be hashed at rest.
+    token_hash: Mapped[str] = mapped_column(String, unique=True, index=True)
+    # Recorded at request time but only CONSUMED at verify time (see auth.py) —
+    # a request that's never clicked through never burns the invite.
+    invite_code: Mapped[str | None] = mapped_column(
+        ForeignKey("invite_codes.code"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime())
+    consumed_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    # Coarse abuse signal for the request-rate check (count recent rows per
+    # email/IP) — not used for anything beyond that.
+    request_ip: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class UserSession(Base):
+    """A logged-in session, keyed by the SHA-256 hash of the opaque random
+    token set in the ``vires_session`` cookie — never the raw value, so a DB
+    leak doesn't hand over usable session tokens. Deliberately NOT a JWT:
+    an opaque, DB-backed token can be revoked (logout deletes the row)."""
+
+    __tablename__ = "user_sessions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime())
+    last_seen_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
+
+
+class InviteCode(Base):
+    """A single-use signup code an admin mints via ``POST /auth/invites``.
+    Consumed atomically at magic-link verify time, not request time (so an
+    abandoned/expired login attempt never burns the code)."""
+
+    __tablename__ = "invite_codes"
+
+    code: Mapped[str] = mapped_column(String, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
+    created_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+    used_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    used_by_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    note: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class UserSettings(Base):
