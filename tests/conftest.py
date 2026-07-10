@@ -50,7 +50,7 @@ _USER_TABLES = [
     "user_settings",
     "user_sessions",
     "magic_link_tokens",
-    "invite_codes",
+    "allowed_emails",
 ]
 
 

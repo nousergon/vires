@@ -16,32 +16,15 @@ describe('LoginPage', () => {
     })
     fireEvent.click(screen.getByText('Send login link'))
 
-    await waitFor(() =>
-      expect(req).toHaveBeenCalledWith({ email: 'brian@example.com', invite_code: undefined }),
-    )
+    await waitFor(() => expect(req).toHaveBeenCalledWith('brian@example.com'))
     expect(await screen.findByText(/Check your email/)).toBeInTheDocument()
     expect(screen.getByText('brian@example.com')).toBeInTheDocument()
   })
 
-  it('passes a trimmed invite code when provided', async () => {
-    const req = vi.spyOn(api, 'requestMagicLink').mockResolvedValue({ message: 'ok' })
-    renderWithProviders(<LoginPage />)
-
-    fireEvent.change(screen.getByPlaceholderText('you@example.com'), {
-      target: { value: 'friend@example.com' },
-    })
-    fireEvent.change(screen.getByPlaceholderText('only needed the first time'), {
-      target: { value: '  abc123  ' },
-    })
-    fireEvent.click(screen.getByText('Send login link'))
-
-    await waitFor(() =>
-      expect(req).toHaveBeenCalledWith({ email: 'friend@example.com', invite_code: 'abc123' }),
+  it('shows an error message when the email is not allowlisted', async () => {
+    vi.spyOn(api, 'requestMagicLink').mockRejectedValue(
+      new Error("403: That email hasn't been invited yet."),
     )
-  })
-
-  it('shows an error message when the request fails', async () => {
-    vi.spyOn(api, 'requestMagicLink').mockRejectedValue(new Error('403: bad invite'))
     renderWithProviders(<LoginPage />)
 
     fireEvent.change(screen.getByPlaceholderText('you@example.com'), {
@@ -49,7 +32,7 @@ describe('LoginPage', () => {
     })
     fireEvent.click(screen.getByText('Send login link'))
 
-    expect(await screen.findByText('bad invite')).toBeInTheDocument()
+    expect(await screen.findByText(/hasn't been invited yet/)).toBeInTheDocument()
   })
 
   it('disables the button until an email is entered', () => {

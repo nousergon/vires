@@ -1,4 +1,4 @@
-"""Auth: magic-link tokens, sessions, invite codes, users.is_admin + unique email.
+"""Auth: magic-link tokens, sessions, email allowlist, users.is_admin + unique email.
 
 Revision ID: a2b3c4d5e6f7
 Revises: e1f2a3b4c5d7
@@ -6,12 +6,17 @@ Create Date: 2026-07-10
 
 Activates real multi-tenant auth (vires-ops#49): magic-link login backed by
 a DB session (opaque token, hashed at rest — not a JWT, so it's revocable),
-invite-gated signup. See ``api/routers/auth.py`` and ``api/db/identity.py``.
+allowlist-gated signup. See ``api/routers/auth.py`` and ``api/db/identity.py``.
 
-``invite_codes`` is created before ``magic_link_tokens`` since the latter's
-``invite_code`` column FKs to it. ``users.email`` gets a unique index (NULLs
-still allowed/distinct — the existing dev user has none) rather than a NOT
-NULL constraint, since the hardcoded dev row predates real accounts.
+Signup is gated by ``allowed_emails`` (an admin pre-approves a specific
+email, keyed by the address itself — not a shared secret code a user types
+in) rather than an invite-code scheme: ``magic_link_tokens`` needs no
+reference to it at all, since verify-time just looks up
+``allowed_emails`` by the token's own ``email`` column.
+
+``users.email`` gets a unique index (NULLs still allowed/distinct — the
+existing dev user has none) rather than a NOT NULL constraint, since the
+hardcoded dev row predates real accounts.
 """
 
 from typing import Sequence, Union
@@ -33,8 +38,8 @@ def upgrade() -> None:
     op.create_index("ix_users_email", "users", ["email"], unique=True)
 
     op.create_table(
-        "invite_codes",
-        sa.Column("code", sa.String(), primary_key=True),
+        "allowed_emails",
+        sa.Column("email", sa.String(), primary_key=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("created_by_user_id", sa.String(), nullable=True),
         sa.Column("used_at", sa.DateTime(timezone=True), nullable=True),
@@ -49,12 +54,10 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
         sa.Column("email", sa.String(), nullable=False),
         sa.Column("token_hash", sa.String(), nullable=False),
-        sa.Column("invite_code", sa.String(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("consumed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("request_ip", sa.String(), nullable=True),
-        sa.ForeignKeyConstraint(["invite_code"], ["invite_codes.code"]),
     )
     op.create_index("ix_magic_link_tokens_email", "magic_link_tokens", ["email"])
     op.create_index(
@@ -85,7 +88,7 @@ def downgrade() -> None:
     op.drop_index("ix_magic_link_tokens_email", table_name="magic_link_tokens")
     op.drop_table("magic_link_tokens")
 
-    op.drop_table("invite_codes")
+    op.drop_table("allowed_emails")
 
     op.drop_index("ix_users_email", table_name="users")
     with op.batch_alter_table("users", schema=None) as batch_op:

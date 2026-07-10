@@ -64,8 +64,8 @@ class User(Base):
     # for real signups.
     email: Mapped[str | None] = mapped_column(String, nullable=True, unique=True, index=True)
     display_name: Mapped[str | None] = mapped_column(String, nullable=True)
-    # True only for the bootstrap first user (see auth.py's empty-table check)
-    # or a user an admin later promotes by hand. Gates POST /auth/invites.
+    # True only for the bootstrap first user (see auth.py's _is_bootstrap)
+    # or a user an admin later promotes by hand. Gates POST /auth/allowlist.
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
 
@@ -85,11 +85,6 @@ class MagicLinkToken(Base):
     # SHA-256 hex digest of the raw token mailed to the user — the raw value
     # is never persisted, mirroring how a password would be hashed at rest.
     token_hash: Mapped[str] = mapped_column(String, unique=True, index=True)
-    # Recorded at request time but only CONSUMED at verify time (see auth.py) —
-    # a request that's never clicked through never burns the invite.
-    invite_code: Mapped[str | None] = mapped_column(
-        ForeignKey("invite_codes.code"), nullable=True
-    )
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
     expires_at: Mapped[datetime] = mapped_column(UTCDateTime())
     consumed_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
@@ -114,14 +109,18 @@ class UserSession(Base):
     last_seen_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
 
 
-class InviteCode(Base):
-    """A single-use signup code an admin mints via ``POST /auth/invites``.
-    Consumed atomically at magic-link verify time, not request time (so an
-    abandoned/expired login attempt never burns the code)."""
+class AllowedEmail(Base):
+    """An admin-approved email — a brand-new signup is only permitted (past
+    the bootstrap first user) when their address is a row here, keyed by the
+    address itself rather than a shared secret code the user has to type in.
+    ``used_at``/``used_by_user_id`` are audit-only: unlike a shared invite
+    code, a single email can't race to create two accounts anyway (see the
+    unique index on ``users.email``), so there's no single-use enforcement
+    to get right here — just a record of when/whether it was actually used."""
 
-    __tablename__ = "invite_codes"
+    __tablename__ = "allowed_emails"
 
-    code: Mapped[str] = mapped_column(String, primary_key=True)
+    email: Mapped[str] = mapped_column(String, primary_key=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
     created_by_user_id: Mapped[str | None] = mapped_column(
         ForeignKey("users.id"), nullable=True

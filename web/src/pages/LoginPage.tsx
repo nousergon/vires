@@ -5,15 +5,10 @@ import { Button, Card, PageTitle } from '../components/ui'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
-  const [inviteCode, setInviteCode] = useState('')
   const [sent, setSent] = useState(false)
 
   const request = useMutation({
-    mutationFn: () =>
-      api.requestMagicLink({
-        email,
-        invite_code: inviteCode.trim() || undefined,
-      }),
+    mutationFn: () => api.requestMagicLink(email),
     onSuccess: () => setSent(true),
   })
 
@@ -43,18 +38,6 @@ export default function LoginPage() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="you@example.com"
-            className="w-full rounded-lg bg-slate-800 px-3 py-2.5 text-sm outline-none focus:ring-1 focus:ring-amber-500"
-          />
-        </div>
-        <div>
-          <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">
-            Invite code <span className="normal-case text-slate-500">(new accounts only)</span>
-          </label>
-          <input
-            type="text"
-            value={inviteCode}
-            onChange={(e) => setInviteCode(e.target.value)}
-            placeholder="only needed the first time"
             className="w-full rounded-lg bg-slate-800 px-3 py-2.5 text-sm outline-none focus:ring-1 focus:ring-amber-500"
           />
         </div>

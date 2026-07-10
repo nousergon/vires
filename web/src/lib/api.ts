@@ -628,32 +628,34 @@ export interface AilmentInput {
 }
 
 // ---- auth ------------------------------------------------------------------ //
-export interface MagicLinkRequestBody {
-  email: string
-  invite_code?: string
-}
-
 export interface Me {
   email: string | null
   display_name: string | null
   is_admin: boolean
 }
 
-export interface InviteCreated {
-  code: string
+export interface AllowlistEntry {
+  email: string
   created_at: string
+  used_at: string | null
 }
 
 // ---- endpoints ------------------------------------------------------------ //
 export const api = {
   // auth
-  requestMagicLink: (body: MagicLinkRequestBody) =>
-    req<{ message: string }>('/auth/magic-link', { method: 'POST', body: JSON.stringify(body) }),
+  requestMagicLink: (email: string) =>
+    req<{ message: string }>('/auth/magic-link', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    }),
   verifyMagicLink: (token: string) =>
     req<Me>('/auth/magic-link/verify', { method: 'POST', body: JSON.stringify({ token }) }),
   logout: () => req<void>('/auth/logout', { method: 'POST' }),
   getMe: () => req<Me>('/auth/me'),
-  createInvite: () => req<InviteCreated>('/auth/invites', { method: 'POST' }),
+  // Admin-only: pre-approve an email so it can sign up without any code.
+  addToAllowlist: (email: string, note?: string) =>
+    req<AllowlistEntry>('/auth/allowlist', { method: 'POST', body: JSON.stringify({ email, note }) }),
+  listAllowlist: () => req<AllowlistEntry[]>('/auth/allowlist'),
 
   // exercises
   searchExercises: (q: string, limit = 25) =>

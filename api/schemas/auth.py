@@ -1,4 +1,4 @@
-"""Auth schemas — magic-link request/verify, current identity, invites."""
+"""Auth schemas — magic-link request/verify, current identity, allowlist."""
 
 from __future__ import annotations
 
@@ -9,9 +9,6 @@ from pydantic import BaseModel, Field, field_validator
 
 class MagicLinkRequest(BaseModel):
     email: str = Field(min_length=3, max_length=254)
-    # Only checked for a brand-new email when require_invite_code is on
-    # (returning users never need one).
-    invite_code: str | None = None
 
     @field_validator("email")
     @classmethod
@@ -39,6 +36,20 @@ class MeOut(BaseModel):
     is_admin: bool
 
 
-class InviteCreateOut(BaseModel):
-    code: str
+class AllowlistAdd(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+    note: str | None = None
+
+    @field_validator("email")
+    @classmethod
+    def _lowercase_and_sanity_check(cls, v: str) -> str:
+        v = v.strip().lower()
+        if "@" not in v or v.startswith("@") or v.endswith("@"):
+            raise ValueError("not a valid email address")
+        return v
+
+
+class AllowlistEntryOut(BaseModel):
+    email: str
     created_at: datetime
+    used_at: datetime | None = None

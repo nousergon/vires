@@ -104,9 +104,10 @@ class Settings(BaseSettings):
     # A session touched less recently than "now - this" gets its expiry
     # pushed out another `session_ttl_seconds` (rolling refresh).
     session_refresh_threshold_seconds: int = 60 * 60 * 24  # 1 day
-    # Kill-switch: require a valid unused invite code for any signup beyond
-    # the very first (bootstrap) user. Flip to False to open signup wide.
-    require_invite_code: bool = True
+    # Kill-switch: require the signup email to be on the allowlist for any
+    # signup beyond the very first (bootstrap) user. Flip to False to open
+    # signup wide.
+    allowlist_required: bool = True
     # Local-dev-only escape hatch: skip real session verification entirely
     # and resolve the hardcoded dev identity, exactly like before auth
     # existed. Must NEVER be true in a deployed .env — nothing in the

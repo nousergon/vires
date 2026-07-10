@@ -1,5 +1,5 @@
 """Magic-link auth: request a link, verify it into a session, logout,
-current identity, and admin-issued invite codes.
+current identity, and the admin-managed signup allowlist.
 
 The emailed link points at the SPA's own `/auth/verify?token=...` page (a
 plain GET pageload — harmless, doesn't consume anything), which then POSTs
@@ -11,7 +11,6 @@ raw email link pointed straight at a GET API endpoint.
 
 from __future__ import annotations
 
-import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -27,10 +26,11 @@ from api.db.identity import (
     hash_token,
     new_opaque_token,
 )
-from api.db.models import InviteCode, MagicLinkToken, Tenant, User, UserSession
+from api.db.models import AllowedEmail, MagicLinkToken, Tenant, User, UserSession
 from api.db.session import get_db
 from api.schemas.auth import (
-    InviteCreateOut,
+    AllowlistAdd,
+    AllowlistEntryOut,
     MagicLinkRequest,
     MagicLinkRequestOut,
     MagicLinkVerify,
@@ -88,15 +88,9 @@ async def request_magic_link(
         raise HTTPException(429, "Too many requests — try again in a minute.")
 
     existing_user = db.scalar(select(User).where(User.email == email))
-    recorded_invite_code: str | None = None
-
-    if existing_user is None and settings.require_invite_code and not _is_bootstrap(db):
-        if not body.invite_code:
-            raise HTTPException(403, "An invite code is required to sign up.")
-        invite = db.get(InviteCode, body.invite_code)
-        if invite is None or invite.used_at is not None:
-            raise HTTPException(403, "That invite code is invalid or already used.")
-        recorded_invite_code = body.invite_code
+    if existing_user is None and settings.allowlist_required and not _is_bootstrap(db):
+        if db.get(AllowedEmail, email) is None:
+            raise HTTPException(403, "That email hasn't been invited yet.")
 
     raw_token = new_opaque_token()
     now = datetime.now(UTC)
@@ -104,7 +98,6 @@ async def request_magic_link(
         MagicLinkToken(
             email=email,
             token_hash=hash_token(raw_token),
-            invite_code=recorded_invite_code,
             created_at=now,
             expires_at=now + timedelta(seconds=settings.magic_link_ttl_seconds),
         )
@@ -160,18 +153,13 @@ def verify_magic_link(
         db.add(user)
         db.flush()
 
-        if not is_bootstrap and link_row.invite_code:
-            consumed = db.execute(
-                update(InviteCode)
-                .where(InviteCode.code == link_row.invite_code, InviteCode.used_at.is_(None))
-                .values(used_at=now, used_by_user_id=user.id)
-            )
-            if consumed.rowcount != 1:
-                # Raced with another signup on the same code between request
-                # and verify (already validated unused at request time, but
-                # not re-checked atomically until now) — don't grant access.
-                db.rollback()
-                raise HTTPException(403, "That invite code was already used.")
+        # Best-effort audit mark — NOT a single-use gate (unlike a shared
+        # invite code, an email can't race to create two accounts; the
+        # unique index on users.email already rules that out).
+        allowed = db.get(AllowedEmail, link_row.email)
+        if allowed is not None:
+            allowed.used_at = now
+            allowed.used_by_user_id = user.id
         db.commit()
 
     raw_session_token = new_opaque_token()
@@ -215,16 +203,38 @@ def me(
     return MeOut(email=user.email, display_name=user.display_name, is_admin=user.is_admin)
 
 
-@router.post("/invites", response_model=InviteCreateOut, status_code=201)
-def create_invite(
-    db: Session = Depends(get_db),
-    ident: Identity = Depends(current_identity),
-) -> InviteCreateOut:
+def _require_admin(db: Session, ident: Identity) -> User:
     user = db.get(User, ident.user_id)
     if user is None or not user.is_admin:
         raise HTTPException(403, "Admin only")
-    invite = InviteCode(code=secrets.token_hex(4), created_by_user_id=user.id)
-    db.add(invite)
-    db.commit()
-    db.refresh(invite)
-    return InviteCreateOut(code=invite.code, created_at=invite.created_at)
+    return user
+
+
+@router.post("/allowlist", response_model=AllowlistEntryOut, status_code=201)
+def add_to_allowlist(
+    body: AllowlistAdd,
+    db: Session = Depends(get_db),
+    ident: Identity = Depends(current_identity),
+) -> AllowlistEntryOut:
+    admin = _require_admin(db, ident)
+    entry = db.get(AllowedEmail, body.email)
+    if entry is None:
+        entry = AllowedEmail(
+            email=body.email, created_by_user_id=admin.id, note=body.note
+        )
+        db.add(entry)
+        db.commit()
+        db.refresh(entry)
+    return AllowlistEntryOut(email=entry.email, created_at=entry.created_at, used_at=entry.used_at)
+
+
+@router.get("/allowlist", response_model=list[AllowlistEntryOut])
+def list_allowlist(
+    db: Session = Depends(get_db),
+    ident: Identity = Depends(current_identity),
+) -> list[AllowlistEntryOut]:
+    _require_admin(db, ident)
+    rows = db.scalars(select(AllowedEmail).order_by(AllowedEmail.created_at.desc())).all()
+    return [
+        AllowlistEntryOut(email=r.email, created_at=r.created_at, used_at=r.used_at) for r in rows
+    ]

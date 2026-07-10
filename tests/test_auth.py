@@ -1,4 +1,4 @@
-"""Magic-link auth: request/verify, sessions, invites, tenant isolation.
+"""Magic-link auth: request/verify, sessions, allowlist, tenant isolation.
 
 Uses `raw_client` (no current_identity override — see conftest.py) so the
 real cookie-based flow is exercised end to end, unlike every other test file
@@ -31,14 +31,11 @@ def _token_from_link(link: str) -> str:
     return m.group(1)
 
 
-def _signup(raw_client, monkeypatch, email: str, invite_code: str | None = None) -> str:
-    """Request + verify a magic link for a brand-new email; returns the raw
-    token (in case a test wants to replay/inspect it)."""
+def _signup(raw_client, monkeypatch, email: str) -> str:
+    """Request + verify a magic link for a brand-new (already-allowed)
+    email; returns the raw token (in case a test wants to replay/inspect it)."""
     sent = _capture_sent_links(monkeypatch)
-    body = {"email": email}
-    if invite_code:
-        body["invite_code"] = invite_code
-    r = raw_client.post("/api/auth/magic-link", json=body)
+    r = raw_client.post("/api/auth/magic-link", json={"email": email})
     assert r.status_code == 200, r.text
     token = _token_from_link(sent[-1][1])
     v = raw_client.post("/api/auth/magic-link/verify", json={"token": token})
@@ -46,14 +43,14 @@ def _signup(raw_client, monkeypatch, email: str, invite_code: str | None = None)
     return token
 
 
-def test_bootstrap_first_user_needs_no_invite_and_becomes_admin(raw_client, monkeypatch):
+def test_bootstrap_first_user_needs_no_allowlisting_and_becomes_admin(raw_client, monkeypatch):
     _signup(raw_client, monkeypatch, "brian@example.com")
     me = raw_client.get("/api/auth/me")
     assert me.status_code == 200
     assert me.json() == {"email": "brian@example.com", "display_name": None, "is_admin": True}
 
 
-def test_new_email_without_invite_is_rejected_after_bootstrap(raw_client, monkeypatch):
+def test_new_email_not_on_allowlist_is_rejected_after_bootstrap(raw_client, monkeypatch):
     _signup(raw_client, monkeypatch, "brian@example.com")  # bootstrap user
     sent = _capture_sent_links(monkeypatch)
     r = raw_client.post("/api/auth/magic-link", json={"email": "friend@example.com"})
@@ -61,38 +58,44 @@ def test_new_email_without_invite_is_rejected_after_bootstrap(raw_client, monkey
     assert sent == []  # never even sent
 
 
-def test_invalid_invite_code_is_rejected(raw_client, monkeypatch):
-    _signup(raw_client, monkeypatch, "brian@example.com")
-    r = raw_client.post(
-        "/api/auth/magic-link",
-        json={"email": "friend@example.com", "invite_code": "not-a-real-code"},
-    )
-    assert r.status_code == 403
-
-
-def test_valid_invite_code_allows_signup_and_is_consumed(raw_client, monkeypatch):
+def test_allowlisted_email_can_sign_up_with_no_extra_field(raw_client, monkeypatch):
     _signup(raw_client, monkeypatch, "brian@example.com")  # bootstrap -> admin
-    invite = raw_client.post("/api/auth/invites")
-    assert invite.status_code == 201, invite.text
-    code = invite.json()["code"]
+    added = raw_client.post("/api/auth/allowlist", json={"email": "friend@example.com"})
+    assert added.status_code == 201, added.text
+    assert added.json()["email"] == "friend@example.com"
+    assert added.json()["used_at"] is None
 
-    # A second client (fresh cookie jar) signs up as the invited friend.
     from api.main import app
 
     friend = TestClient(app, base_url="https://testserver")
-    _signup(friend, monkeypatch, "friend@example.com", invite_code=code)
+    # No invite code / extra field of any kind — just the email.
+    _signup(friend, monkeypatch, "friend@example.com")
     me = friend.get("/api/auth/me")
     assert me.json()["email"] == "friend@example.com"
     assert me.json()["is_admin"] is False
 
-    # The code is now burned — a third signup with the same code fails.
-    another = TestClient(app, base_url="https://testserver")
-    sent = _capture_sent_links(monkeypatch)
-    r = another.post(
-        "/api/auth/magic-link", json={"email": "third@example.com", "invite_code": code}
-    )
-    assert r.status_code == 403
-    assert sent == []
+
+def test_allowlist_entry_marked_used_after_signup(raw_client, monkeypatch):
+    _signup(raw_client, monkeypatch, "brian@example.com")  # bootstrap -> admin
+    raw_client.post("/api/auth/allowlist", json={"email": "friend@example.com"})
+
+    from api.main import app
+
+    friend = TestClient(app, base_url="https://testserver")
+    _signup(friend, monkeypatch, "friend@example.com")
+
+    listing = raw_client.get("/api/auth/allowlist").json()
+    entry = next(e for e in listing if e["email"] == "friend@example.com")
+    assert entry["used_at"] is not None
+
+
+def test_adding_the_same_email_twice_is_idempotent(raw_client, monkeypatch):
+    _signup(raw_client, monkeypatch, "brian@example.com")  # bootstrap -> admin
+    first = raw_client.post("/api/auth/allowlist", json={"email": "friend@example.com"})
+    second = raw_client.post("/api/auth/allowlist", json={"email": "friend@example.com"})
+    assert first.status_code == 201 and second.status_code == 201
+    listing = raw_client.get("/api/auth/allowlist").json()
+    assert len([e for e in listing if e["email"] == "friend@example.com"]) == 1
 
 
 def test_magic_link_is_single_use(raw_client, monkeypatch):
@@ -153,17 +156,16 @@ def test_logout_invalidates_the_session(raw_client, monkeypatch):
     assert raw_client.get("/api/auth/me").status_code == 401
 
 
-def test_non_admin_cannot_create_invites(raw_client, monkeypatch):
+def test_non_admin_cannot_manage_the_allowlist(raw_client, monkeypatch):
     _signup(raw_client, monkeypatch, "brian@example.com")  # bootstrap admin
-    invite = raw_client.post("/api/auth/invites")
-    code = invite.json()["code"]
+    raw_client.post("/api/auth/allowlist", json={"email": "friend@example.com"})
 
     from api.main import app
 
     friend = TestClient(app, base_url="https://testserver")
-    _signup(friend, monkeypatch, "friend@example.com", invite_code=code)  # not admin
-    r = friend.post("/api/auth/invites")
-    assert r.status_code == 403
+    _signup(friend, monkeypatch, "friend@example.com")  # not admin
+    assert friend.post("/api/auth/allowlist", json={"email": "x@example.com"}).status_code == 403
+    assert friend.get("/api/auth/allowlist").status_code == 403
 
 
 def test_magic_link_rate_limited_after_five_requests_per_minute(raw_client, monkeypatch):
@@ -182,8 +184,8 @@ def test_two_signed_up_users_cannot_see_each_others_workouts(raw_client, monkeyp
     a = raw_client
     b = TestClient(app, base_url="https://testserver")
     _signup(a, monkeypatch, "a@example.com")  # bootstrap -> admin
-    code = a.post("/api/auth/invites").json()["code"]
-    _signup(b, monkeypatch, "b@example.com", invite_code=code)
+    a.post("/api/auth/allowlist", json={"email": "b@example.com"})
+    _signup(b, monkeypatch, "b@example.com")
 
     ws = a.post("/api/workouts", json={"name": "A's workout"}).json()
     assert b.get(f"/api/workouts/{ws['id']}").status_code == 404
@@ -191,8 +193,8 @@ def test_two_signed_up_users_cannot_see_each_others_workouts(raw_client, monkeyp
 
 
 @pytest.fixture()
-def _no_invite_required(monkeypatch):
-    monkeypatch.setenv("VIRES_REQUIRE_INVITE_CODE", "false")
+def _allowlist_not_required(monkeypatch):
+    monkeypatch.setenv("VIRES_ALLOWLIST_REQUIRED", "false")
     from api.config import get_settings
 
     get_settings.cache_clear()
@@ -200,7 +202,7 @@ def _no_invite_required(monkeypatch):
     get_settings.cache_clear()
 
 
-def test_open_signup_when_require_invite_code_is_off(raw_client, monkeypatch, _no_invite_required):
+def test_open_signup_when_allowlist_not_required(raw_client, monkeypatch, _allowlist_not_required):
     _signup(raw_client, monkeypatch, "brian@example.com")  # bootstrap
     from api.main import app
 
