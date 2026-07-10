@@ -417,7 +417,7 @@ describe('PlanPage', () => {
     expect(await screen.findAllByText('Lower + Carry')).toHaveLength(1)
     fireEvent.click(screen.getByText(/Completed ✓/))
     // the shared session-detail sheet opens with the tagging editor
-    expect(await screen.findByText('Pre-workout food / drink / supps')).toBeInTheDocument()
+    expect(await screen.findByPlaceholderText('+ add tag')).toBeInTheDocument()
     expect(screen.getByText('Energy level')).toBeInTheDocument()
     expect(screen.getByText('Workout intensity')).toBeInTheDocument()
     expect(getW).toHaveBeenCalledWith(77)
@@ -477,7 +477,7 @@ describe('PlanPage', () => {
     renderWithProviders(<PlanPage />)
     fireEvent.click(await screen.findByLabelText(iso))
     fireEvent.click(await screen.findByText(/view \/ tag/))
-    expect(await screen.findByText('Pre-workout food / drink / supps')).toBeInTheDocument()
+    expect(await screen.findByPlaceholderText('+ add tag')).toBeInTheDocument()
     expect(getW).toHaveBeenCalledWith(42)
   })
 })

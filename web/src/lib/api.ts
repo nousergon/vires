@@ -59,6 +59,7 @@ export interface PerformedSet {
   reps: number | null
   weight: number | null
   rpe: number | null
+  duration_seconds: number | null
   is_warmup: boolean
 }
 
@@ -185,7 +186,6 @@ export interface WorkoutSessionUpdate {
   // Session-tracking fields — valid on any session type. `tags` replaces the
   // whole list; the 1–10 ratings can be revised after finishing.
   tags?: string[]
-  pre_workout_fuel?: string | null
   energy_level?: number | null
   workout_intensity?: number | null
   template_key?: string
@@ -233,10 +233,9 @@ export interface WorkoutSession {
   started_at: string
   ended_at: string | null
   notes: string | null
-  // Free-text labels (reusable tags + one-off custom inputs).
+  // Free-text labels (reusable tags + one-off custom inputs, including what
+  // was eaten/drunk/supplemented pre-workout).
   tags: string[]
-  // Pre-workout food/drink/supplements, free text.
-  pre_workout_fuel: string | null
   // End-of-workout 1–10 self-report (null until finished with a rating).
   energy_level: number | null
   workout_intensity: number | null
@@ -642,7 +641,6 @@ export const api = {
     template_id?: number | null
     name?: string | null
     tags?: string[]
-    pre_workout_fuel?: string | null
   }) => req<WorkoutSession>('/workouts', { method: 'POST', body: JSON.stringify(body) }),
   listActivityTemplates: () => req<ActivityTemplate[]>('/workouts/activity-templates'),
   logActivity: (body: ActivityLogInput) =>
@@ -657,6 +655,9 @@ export const api = {
   importGpx: (gpxText: string) =>
     req<RouteStats>('/routes/import-gpx', { method: 'POST', body: gpxText }),
   listWorkouts: () => req<WorkoutSummary[]>('/workouts'),
+  // Every tag the user has ever applied to a session, most-used first —
+  // powers the tag quick-complete chips in TagsEditor.
+  listWorkoutTags: () => req<string[]>('/workouts/tags'),
   getWorkout: (id: number) => req<WorkoutSession>(`/workouts/${id}`),
   updateWorkout: (id: number, body: WorkoutSessionUpdate) =>
     req<WorkoutSession>(`/workouts/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
@@ -697,6 +698,14 @@ export const api = {
     req<SessionExercise>(`/workouts/${sessionId}/exercises/${seId}`, {
       method: 'PATCH',
       body: JSON.stringify(body),
+    }),
+  // Drag-and-drop reorder: `exercise_ids` is the FULL list of this session's
+  // exercise ids in their new order; order_index is reassigned 0..n-1 in one
+  // transaction (vs. N-1 pairwise swaps for an arbitrary drag distance).
+  reorderWorkoutExercises: (sessionId: number, exerciseIds: number[]) =>
+    req<SessionExercise[]>(`/workouts/${sessionId}/exercises/reorder`, {
+      method: 'PATCH',
+      body: JSON.stringify({ exercise_ids: exerciseIds }),
     }),
   removeWorkoutExercise: (sessionId: number, seId: number) =>
     req<void>(`/workouts/${sessionId}/exercises/${seId}`, { method: 'DELETE' }),

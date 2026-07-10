@@ -4,12 +4,13 @@ import {
   renderWithProviders,
   SETTINGS,
   makeBrief,
+  makeHit,
   makeSession,
   makeSessionExercise,
   makeSet,
   makeTemplateSummary,
 } from '../test/utils'
-import WorkoutPage, { ACTIVE_KEY } from './WorkoutPage'
+import WorkoutPage, { ACTIVE_KEY, reorderedIds } from './WorkoutPage'
 import { api } from '../lib/api'
 
 beforeEach(() => {
@@ -144,18 +145,25 @@ describe('WorkoutPage — ActiveWorkout', () => {
     localStorage.removeItem('vires.restOn.100')
   })
 
-  it('reorders exercises by swapping order_index with a neighbour', async () => {
+  it('renders a drag handle for each exercise', async () => {
     const a = makeSessionExercise({ id: 100, order_index: 0, exercise: makeBrief({ name: 'Bench Press' }) })
     const b = makeSessionExercise({ id: 101, order_index: 1, exercise: makeBrief({ id: 2, name: 'Squat' }) })
     vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession({ exercises: [a, b] }))
-    const upd = vi.spyOn(api, 'updateWorkoutExercise').mockResolvedValue(a)
     renderWithProviders(<WorkoutPage />)
     await screen.findByText('Squat')
-    // the first exercise can move down; the second can move up
-    fireEvent.click(screen.getAllByTitle('Move down')[0])
-    await waitFor(() => expect(upd).toHaveBeenCalledTimes(2))
-    expect(upd).toHaveBeenCalledWith(10, 100, { order_index: 1 })
-    expect(upd).toHaveBeenCalledWith(10, 101, { order_index: 0 })
+    expect(screen.getByLabelText('Drag to reorder Bench Press')).toBeInTheDocument()
+    expect(screen.getByLabelText('Drag to reorder Squat')).toBeInTheDocument()
+  })
+
+  // dnd-kit's pointer sensor needs real pointer-drag geometry that jsdom
+  // doesn't provide meaningfully — the actual drag gesture is verified by
+  // hand in-browser. This covers the pure id-reorder logic the drop handler
+  // (WorkoutPage's DndContext onDragEnd) calls into.
+  it('reorderedIds moves the dragged id to the drop target position', () => {
+    expect(reorderedIds([100, 101, 102], 100, 102)).toEqual([101, 102, 100])
+    expect(reorderedIds([100, 101, 102], 102, 100)).toEqual([102, 100, 101])
+    expect(reorderedIds([100, 101], 100, 100)).toBeNull() // dropped on itself
+    expect(reorderedIds([100, 101], 999, 101)).toBeNull() // unknown id
   })
 
   it('edits the rest duration ad hoc', async () => {
@@ -268,21 +276,15 @@ describe('WorkoutPage — ActiveWorkout', () => {
     )
   })
 
-  it('edits session tags and pre-workout fuel', async () => {
+  it('edits session tags (also how pre-workout fuel like coffee/creatine is logged now)', async () => {
     vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession())
     const upd = vi.spyOn(api, 'updateWorkout').mockResolvedValue(makeSession())
     renderWithProviders(<WorkoutPage />)
+    expect(screen.queryByText('Pre-workout food / drink / supps')).not.toBeInTheDocument()
     const tagInput = await screen.findByPlaceholderText('+ add tag')
-    fireEvent.change(tagInput, { target: { value: 'fasted' } })
+    fireEvent.change(tagInput, { target: { value: 'coffee' } })
     fireEvent.keyDown(tagInput, { key: 'Enter' })
-    await waitFor(() => expect(upd).toHaveBeenCalledWith(10, { tags: ['fasted'] }))
-
-    const fuel = screen.getByPlaceholderText(/creatine/)
-    fireEvent.change(fuel, { target: { value: 'coffee' } })
-    fireEvent.blur(fuel)
-    await waitFor(() =>
-      expect(upd).toHaveBeenCalledWith(10, { pre_workout_fuel: 'coffee' }),
-    )
+    await waitFor(() => expect(upd).toHaveBeenCalledWith(10, { tags: ['coffee'] }))
   })
 
   it('discards the workout after confirm', async () => {
@@ -301,18 +303,54 @@ describe('WorkoutPage — ActiveWorkout', () => {
     expect(await screen.findByText('Add exercise')).toBeInTheDocument() // picker sheet title
   })
 
+  it('adds an ad-hoc exercise seeded with the default sets/reps', async () => {
+    vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession())
+    vi.spyOn(api, 'searchExercises').mockResolvedValue([makeHit({ id: 9, name: 'Lat Pulldown' })])
+    const add = vi.spyOn(api, 'addWorkoutExercise').mockResolvedValue(makeSessionExercise())
+    renderWithProviders(<WorkoutPage />)
+    fireEvent.click(await screen.findByText('+ Add exercise'))
+    fireEvent.change(await screen.findByPlaceholderText(/Search/), { target: { value: 'lat' } })
+    fireEvent.click(await screen.findByText('Lat Pulldown'))
+    await waitFor(() =>
+      expect(add).toHaveBeenCalledWith(10, {
+        exercise_id: 9,
+        target_sets: SETTINGS.default_sets,
+        target_reps: SETTINGS.default_reps,
+      }),
+    )
+  })
+
   it('renders a previous-performance hint', async () => {
     const se = makeSessionExercise({
       previous_performance: {
         session_id: 5,
         session_name: 'Prev',
         date: '2026-06-21',
-        sets: [{ set_number: 1, reps: 8, weight: 130, rpe: null, is_warmup: false }],
+        sets: [
+          { set_number: 1, reps: 8, weight: 130, rpe: null, duration_seconds: null, is_warmup: false },
+        ],
       },
     })
     vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession({ exercises: [se] }))
     renderWithProviders(<WorkoutPage />)
     expect(await screen.findByText(/Last time/)).toHaveTextContent('130lb×8')
+  })
+
+  it('renders a previous-performance hint as a duration for a timed exercise', async () => {
+    const se = makeSessionExercise({
+      exercise: makeBrief({ id: 2, name: 'Plank', is_timed: true, equipment: 'bodyweight' }),
+      previous_performance: {
+        session_id: 5,
+        session_name: 'Prev',
+        date: '2026-06-21',
+        sets: [
+          { set_number: 1, reps: null, weight: 0, rpe: null, duration_seconds: 45, is_warmup: false },
+        ],
+      },
+    })
+    vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession({ exercises: [se] }))
+    renderWithProviders(<WorkoutPage />)
+    expect(await screen.findByText(/Last time/)).toHaveTextContent('0:45')
   })
 
   it('handles a timed (hold) exercise: start hold + mark done', async () => {
