@@ -7,6 +7,19 @@ def _ex_id(client, q: str) -> int:
     return client.get("/api/exercises/search", params={"q": q}).json()[0]["exercise"]["id"]
 
 
+def _lower_body_template(client, name: str = "Legs") -> dict:
+    e = _ex_id(client, "squat")
+    return client.post(
+        "/api/templates",
+        json={
+            "name": name,
+            "exercises": [
+                {"exercise_id": e, "target_sets": 3, "target_reps": 5, "target_weight": 100}
+            ],
+        },
+    ).json()
+
+
 def test_empty_workout_log_and_finish(client):
     ex = _ex_id(client, "barbell deadlift")
     ws = client.post("/api/workouts", json={"name": "Quick"}).json()
@@ -67,6 +80,62 @@ def test_start_from_template_clones_exercises(client):
     assert [se["exercise"]["id"] for se in ws["exercises"]] == [e1, e2]
     assert ws["exercises"][0]["target_sets"] == 3
     assert ws["exercises"][0]["rest_seconds"] == 120
+
+
+# --------------------------------------------------------------------------- #
+# Same-day ailment gate (vires-ops#58) — the Train tab's ad-hoc/template start
+# used to skip this gate entirely (only /api/plan/planned/{id}/start had it,
+# see test_plan.py). Mirrors those cases for POST /api/workouts.
+# --------------------------------------------------------------------------- #
+def test_starting_ad_hoc_workout_with_knee_severity_seven_surfaces_warning(client):
+    tpl = _lower_body_template(client)
+    client.post(
+        "/api/ailments",
+        json={"label": "Right knee", "onset_date": "2020-01-01", "initial_severity": 7},
+    )
+
+    r = client.post("/api/workouts", json={"template_id": tpl["id"]})
+    assert r.status_code == 201, r.text
+    se = r.json()["exercises"][0]
+    assert se["notes"] is not None
+    assert "knee" in se["notes"].lower()
+    assert "7/10" in se["notes"]
+
+
+def test_starting_ad_hoc_workout_with_knee_severity_eight_is_blocked(client):
+    tpl = _lower_body_template(client)
+    client.post(
+        "/api/ailments",
+        json={"label": "Right knee", "onset_date": "2020-01-01", "initial_severity": 8},
+    )
+
+    r = client.post("/api/workouts", json={"template_id": tpl["id"]})
+    assert r.status_code == 409
+    assert "knee" in r.json()["detail"].lower()
+
+
+def test_starting_empty_workout_with_knee_severity_eight_is_blocked(client):
+    # No template/exercises at all — the block is session-level, not tied to
+    # any particular prescribed exercise.
+    client.post(
+        "/api/ailments",
+        json={"label": "Right knee", "onset_date": "2020-01-01", "initial_severity": 8},
+    )
+
+    r = client.post("/api/workouts", json={})
+    assert r.status_code == 409
+
+
+def test_mild_knee_ailment_does_not_warn_or_block_ad_hoc_start(client):
+    tpl = _lower_body_template(client)
+    client.post(
+        "/api/ailments",
+        json={"label": "Right knee", "onset_date": "2020-01-01", "initial_severity": 3},
+    )
+
+    r = client.post("/api/workouts", json={"template_id": tpl["id"]})
+    assert r.status_code == 201
+    assert r.json()["exercises"][0]["notes"] is None
 
 
 def test_start_from_template_seeds_planned_sets(client):

@@ -43,6 +43,8 @@ from api.schemas.workout import (
 )
 from api.serializers import dumbbell_seed_weight, to_exercise_brief
 from api.services.activity_templates import ACTIVITY_TEMPLATES
+from api.services.ailments import exercise_notes_with_gate, open_ailment_flags
+from api.services.coach.ailment_gate import blocking_flags, relevant_ailment_flags
 from api.services.coach.autoregulate import autoregulate_after_session
 from api.services.load.pandolf import ruck_metabolic_cost_kj
 
@@ -230,6 +232,24 @@ def start_workout(
     db: Session = Depends(get_db),
     ident: Identity = Depends(current_identity),
 ) -> WorkoutSessionOut:
+    """Start an ad-hoc session — empty, or seeded from a template.
+
+    Same-day ailment gate (deterministic, no LLM — vires-ops#58, extending
+    the planned-start gate in api.routers.plan to this path too): a lower-
+    body/knee episode at severity >=8 blocks the start outright (409); at
+    severity >=5 the affected template exercises get a ``notes`` warning but
+    the session still starts. See api.services.coach.ailment_gate.
+    """
+    all_flags = relevant_ailment_flags(open_ailment_flags(db, ident))
+    blocking = blocking_flags(all_flags)
+    if blocking:
+        names = ", ".join(f"{f.label} ({f.severity}/10)" for f in blocking)
+        raise HTTPException(
+            409,
+            f"Training is paused for this lower-body/knee ailment: {names}. "
+            "Log an improved check-in or resolve the ailment before starting.",
+        )
+
     name = body.name
     exercises: list[SessionExercise] = []
     if body.template_id is not None:
@@ -246,7 +266,7 @@ def start_workout(
                 target_weight=dumbbell_seed_weight(te.target_weight, te.exercise.equipment),
                 target_duration_seconds=te.target_duration_seconds,
                 rest_seconds=te.rest_seconds,
-                notes=te.notes,
+                notes=exercise_notes_with_gate(te.exercise_id, te.exercise, te.notes, all_flags),
             )
             for te in tpl.exercises
         ]

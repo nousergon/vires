@@ -17,6 +17,7 @@ beforeEach(() => {
   vi.restoreAllMocks()
   localStorage.removeItem(ACTIVE_KEY)
   vi.spyOn(api, 'getSettings').mockResolvedValue(SETTINGS)
+  vi.spyOn(api, 'pendingAilmentCheckIns').mockResolvedValue([])
 })
 
 describe('WorkoutPage — StartView (no active workout)', () => {
@@ -57,6 +58,53 @@ describe('WorkoutPage — StartView (no active workout)', () => {
     fireEvent.click(await screen.findByText('🏃 Log an activity'))
     expect(await screen.findByText('Add activity')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('e.g. Ultimate frisbee')).toBeInTheDocument()
+  })
+
+  // vires-ops#58: the Train tab's ad-hoc/template start used to skip the
+  // same-day ailment check-in gate entirely (only PlanPage's planned-start
+  // path had it).
+  it('gates an empty-workout start on a pending ailment check-in', async () => {
+    const pendingAilment = {
+      ailment: {
+        id: 3,
+        label: 'Left knee',
+        onset_date: '2026-07-08',
+        notes: null,
+        status: 'active' as const,
+        resolved_at: null,
+        created_at: '2026-07-08T00:00:00Z',
+        updated_at: '2026-07-08T00:00:00Z',
+        latest_severity: 4,
+        latest_check_in_date: '2026-07-08',
+        check_ins: [],
+      },
+      last_severity: 4,
+      last_check_in_date: '2026-07-08',
+    }
+    vi.spyOn(api, 'pendingAilmentCheckIns').mockResolvedValue([pendingAilment])
+    vi.spyOn(api, 'listTemplates').mockResolvedValue([])
+    const addCheckIn = vi.spyOn(api, 'addAilmentCheckIn').mockResolvedValue({
+      id: 1,
+      ailment_id: 3,
+      check_in_date: '2026-07-10',
+      severity: 4,
+      note: null,
+      created_at: '2026-07-10T00:00:00Z',
+    })
+    const start = vi.spyOn(api, 'startWorkout').mockResolvedValue(makeSession({ id: 42 }))
+    vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession({ id: 42 }))
+
+    renderWithProviders(<WorkoutPage />)
+    fireEvent.click(await screen.findByText('Start empty workout'))
+
+    // The check-in modal blocks the start until submitted.
+    expect(await screen.findByText('Ailment check-in')).toBeInTheDocument()
+    expect(screen.getByText('Left knee')).toBeInTheDocument()
+    expect(start).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByText('Continue to workout'))
+    await waitFor(() => expect(addCheckIn).toHaveBeenCalledWith(3, { severity: 4 }))
+    await waitFor(() => expect(start).toHaveBeenCalledWith({ template_id: null }))
   })
 })
 

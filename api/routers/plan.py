@@ -41,14 +41,8 @@ from api.schemas.plan import (
 )
 from api.schemas.workout import WorkoutSessionOut
 from api.serializers import dumbbell_seed_weight, program_coach_summary, to_planned_workout_out
-from api.services.ailments import load_open_ailments
-from api.services.coach.ailment_gate import (
-    AilmentFlag,
-    ExerciseGateInput,
-    blocking_flags,
-    gate_exercise,
-    relevant_ailment_flags,
-)
+from api.services.ailments import exercise_notes_with_gate, open_ailment_flags
+from api.services.coach.ailment_gate import blocking_flags, relevant_ailment_flags
 from api.services.ics import IcsEvent, build_calendar
 from api.services.recurrence import expand_occurrences
 from api.services.reschedule import reschedule_missed
@@ -455,32 +449,6 @@ def delete_planned(
     return Response(status_code=204)
 
 
-def _open_ailment_flags(db: Session, ident: Identity) -> list[AilmentFlag]:
-    """The latest severity of every open ailment episode, for the same-day
-    prescription gate (deterministic — see api.services.coach.ailment_gate).
-    Episodes with no check-in yet (severity unknown) are excluded — the gate
-    only reacts to a reported severity."""
-    return [
-        AilmentFlag(label=ep.label, severity=latest.severity)
-        for ep in load_open_ailments(db, ident)
-        if (latest := max(ep.check_ins, key=lambda c: (c.check_in_date, c.id), default=None))
-        is not None
-    ]
-
-
-def _exercise_notes_with_gate(
-    pe: PlannedExercise, flags: list[AilmentFlag]
-) -> str | None:
-    """``pe.notes`` with a lower-body/knee ailment warning prepended when the
-    gate flags this exercise (see api.services.coach.ailment_gate)."""
-    ex = pe.exercise
-    muscles = frozenset((ex.primary_muscles or []) + (ex.secondary_muscles or []))
-    warning = gate_exercise(ExerciseGateInput(exercise_id=pe.exercise_id, muscles=muscles), flags)
-    if warning is None:
-        return pe.notes
-    return f"{warning}\n{pe.notes}" if pe.notes else warning
-
-
 @router.post("/planned/{planned_id}/start", response_model=WorkoutSessionOut, status_code=201)
 def start_planned(
     planned_id: int,
@@ -502,7 +470,7 @@ def start_planned(
         if existing is not None:
             return _session_out(db, ident, existing)
 
-    all_flags = relevant_ailment_flags(_open_ailment_flags(db, ident))
+    all_flags = relevant_ailment_flags(open_ailment_flags(db, ident))
     blocking = blocking_flags(all_flags)
     if blocking:
         names = ", ".join(f"{f.label} ({f.severity}/10)" for f in blocking)
@@ -528,7 +496,7 @@ def start_planned(
                 target_weight=dumbbell_seed_weight(pe.target_weight, pe.exercise.equipment),
                 target_duration_seconds=pe.target_duration_seconds,
                 rest_seconds=pe.rest_seconds,
-                notes=_exercise_notes_with_gate(pe, all_flags),
+                notes=exercise_notes_with_gate(pe.exercise_id, pe.exercise, pe.notes, all_flags),
             )
             for pe in pw.exercises
         ],
