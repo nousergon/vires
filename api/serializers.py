@@ -11,6 +11,19 @@ from api.schemas.plan import (
 )
 
 
+def dumbbell_seed_weight(total_weight: float | None, equipment: str | None) -> float | None:
+    """A programmed/target weight is authored as the bilateral TOTAL (e.g. "90
+    lbs" for a pair of 45s); the live per-set weight a user actually logs is
+    per-hand. Halve at the one boundary where a total-denominated target
+    (``TemplateExercise``/``PlannedExercise.target_weight``) becomes a live
+    ``SessionExercise``/``SetEntry`` value — every downstream consumer
+    (records, autoregulation, "last time" hints) then reads a self-consistent
+    per-hand number with no further conversion needed."""
+    if total_weight is None or equipment != "dumbbell":
+        return total_weight
+    return total_weight / 2
+
+
 def to_exercise_out(ex: Exercise) -> ExerciseOut:
     return ExerciseOut(
         id=ex.id,

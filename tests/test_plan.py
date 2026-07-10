@@ -321,6 +321,27 @@ def test_start_planned_seeds_session_from_prescription_and_links(client):
     assert got["session_id"] == ses["id"]
 
 
+def test_start_planned_seeds_dumbbell_weight_per_hand(client):
+    ex = _ex_id(client, "dumbbell bench press")
+    tpl = client.post(
+        "/api/templates",
+        json={
+            "name": "Push",
+            "exercises": [{"exercise_id": ex, "target_sets": 2, "target_weight": 90}],
+        },
+    ).json()
+    pw = client.post(
+        "/api/plan/planned",
+        json={"scheduled_date": "2026-07-01", "template_id": tpl["id"]},
+    ).json()
+    assert pw["exercises"][0]["target_weight"] == 90  # prescription stays total
+
+    ses = client.post(f"/api/plan/planned/{pw['id']}/start").json()
+    se = ses["exercises"][0]
+    assert se["target_weight"] == 45
+    assert all(s["weight"] == 45 for s in se["sets"])
+
+
 def _lower_body_routine(client, name: str = "Legs") -> dict:
     e = _ex_id(client, "squat")
     return client.post(
