@@ -83,7 +83,14 @@ describe('WorkoutPage — StartView (no active workout)', () => {
     }
     vi.spyOn(api, 'pendingAilmentCheckIns').mockResolvedValue([pendingAilment])
     vi.spyOn(api, 'listTemplates').mockResolvedValue([])
-    const addCheckIn = vi.spyOn(api, 'addAilmentCheckIn').mockResolvedValue(pendingAilment.ailment)
+    const addCheckIn = vi.spyOn(api, 'addAilmentCheckIn').mockResolvedValue({
+      id: 1,
+      ailment_id: 3,
+      check_in_date: '2026-07-10',
+      severity: 4,
+      note: null,
+      created_at: '2026-07-10T00:00:00Z',
+    })
     const start = vi.spyOn(api, 'startWorkout').mockResolvedValue(makeSession({ id: 42 }))
     vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession({ id: 42 }))
 
