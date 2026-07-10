@@ -154,6 +154,27 @@ else
   echo "push: no VAPID keypair in SSM — locked-screen push unavailable (non-fatal)"
 fi
 
+# --- Magic-link email: hydrate the Resend key from SSM into .env ------------ #
+# Auth (vires-ops#49) requires this to actually send login links — unlike the
+# other optional secrets above, a missing key here breaks the ONLY way in
+# (dev_auth_bypass must never be true in a deployed .env). Deploy itself stays
+# non-fatal on a missing key (matches every other secret's convention here),
+# but every /auth/magic-link request will 502 until it's provisioned — see
+# infrastructure/PROVISION.md §7d.
+RESEND_PARAM="${VIRES_RESEND_SSM_PARAM:-/vires/resend_api_key}"
+if RESENDKEY=$(aws ssm get-parameter --name "$RESEND_PARAM" --with-decryption \
+                 --query Parameter.Value --output text 2>/dev/null) \
+   && [ -n "$RESENDKEY" ] && [ "$RESENDKEY" != "None" ]; then
+  grep -v '^VIRES_RESEND_API_KEY=' "$ENV_FILE" > "$ENV_FILE.tmp" || true
+  mv "$ENV_FILE.tmp" "$ENV_FILE"
+  printf 'VIRES_RESEND_API_KEY=%s\n' "$RESENDKEY" >> "$ENV_FILE"   # value not traced (no set -x)
+  chmod 600 "$ENV_FILE"
+  unset RESENDKEY
+  echo "auth: hydrated Resend key from ${RESEND_PARAM}"
+else
+  echo "auth: NO KEY at ${RESEND_PARAM} — magic-link login will 502 until provisioned"
+fi
+
 # --- restart + health check ------------------------------------------------- #
 sudo systemctl restart vires
 sleep 4
