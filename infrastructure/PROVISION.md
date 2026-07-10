@@ -103,8 +103,24 @@ keypair `/push/*` returns 503 and the app falls back to the foreground beep + wa
 notification permission granted. The scheduler is in-process (single uvicorn proc) — a pending
 alert is lost if the box restarts mid-rest; rare and short-lived.
 
+### 7d. Magic-link email (required — the only login path)
+Auth (vires-ops#49) sends login links via [Resend](https://resend.com). Unlike the other
+secrets in this section, this one is **not cosmetic** — with no key, every
+`POST /auth/magic-link` 502s and nobody can log in (`dev_auth_bypass` must never be
+true in a deployed `.env`). `deploy-on-merge.sh` hydrates the key from SSM (quietly):
+```
+aws ssm put-parameter --name /vires/resend_api_key --type SecureString --value re_...
+```
+Grant the instance role `ssm:GetParameter` on it; override the path with
+`VIRES_RESEND_SSM_PARAM`. `VIRES_EMAIL_SENDER` must be a verified sending address/domain
+in the same Resend account (default `no-reply@nousergon.ai`). **Deploy itself is
+non-fatal** with no key (matches every other secret here), but login is broken until
+it's provisioned — check `journalctl -u vires` for `EmailError` if magic links 502.
+In `VIRES_ENV=development` only, a missing key logs the link instead of sending it, so
+local dev never needs a live inbox.
+
 ## Notes
-- App secrets (all optional, SSM-hydrated into the box, never committed): the AI-coach
-  Anthropic key (§7) and the tuned coach prompt (§7a). The MVP otherwise runs as one
-  hardcoded dev user with no secrets.
+- App secrets (all optional except §7d, SSM-hydrated into the box, never committed):
+  the AI-coach Anthropic key (§7), the tuned coach prompt (§7a), and the Resend
+  magic-link key (§7d, **required** for login to work at all).
 - The SQLite DB lives at `/home/ec2-user/vires/vires.db` (not in git) — back it up.
