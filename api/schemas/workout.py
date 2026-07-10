@@ -31,10 +31,9 @@ class WorkoutStart(BaseModel):
     template_id: int | None = None  # None => empty/ad-hoc workout
     name: str | None = None
     # Optional session context, settable at the moment of starting (also
-    # editable later via PATCH): free-text tags/custom labels and a note of
+    # editable later via PATCH): free-text tags/custom labels, including
     # what was eaten/drunk/supplemented pre-workout.
     tags: list[str] | None = None
-    pre_workout_fuel: str | None = None
 
 
 class WorkoutFinish(BaseModel):
@@ -99,10 +98,11 @@ class SessionExerciseIn(BaseModel):
 
 
 class SessionExerciseUpdate(BaseModel):
-    """Patch a session exercise in place: tweak its rest/targets or reorder it.
-
-    All fields optional; only those present (``exclude_unset``) are applied.
-    ``order_index`` drives drag-free reordering (the app swaps adjacent rows).
+    """Patch a session exercise in place: tweak its rest/targets, or set an
+    explicit ``order_index`` directly (a single manual reposition). All
+    fields optional; only those present (``exclude_unset``) are applied.
+    A drag-and-drop reorder of the whole list goes through
+    ``SessionExerciseReorder`` instead (one call, not N pairwise PATCHes).
     """
 
     target_sets: int | None = None
@@ -112,6 +112,14 @@ class SessionExerciseUpdate(BaseModel):
     rest_seconds: int | None = None
     notes: str | None = None
     order_index: int | None = None
+
+
+class SessionExerciseReorder(BaseModel):
+    """The session's exercises in their new order (drag-and-drop). Must be
+    exactly the set of exercise ids currently on the session — ``order_index``
+    is reassigned 0..n-1 from this list's position in one transaction."""
+
+    exercise_ids: list[int] = Field(min_length=1)
 
 
 class SessionExerciseOut(BaseModel):
@@ -261,7 +269,6 @@ class WorkoutSessionOut(BaseModel):
     ended_at: datetime | None = None
     notes: str | None = None
     tags: list[str] = Field(default_factory=list)
-    pre_workout_fuel: str | None = None
     energy_level: int | None = None
     workout_intensity: int | None = None
     template_id: int | None = None
@@ -295,7 +302,6 @@ class WorkoutSessionUpdate(BaseModel):
     # activity), unlike the activity-only block below. ``tags`` replaces the
     # whole list when supplied; the 1–10 ratings can be revised after the fact.
     tags: list[str] | None = None
-    pre_workout_fuel: str | None = None
     energy_level: int | None = Field(default=None, ge=1, le=10)
     workout_intensity: int | None = Field(default=None, ge=1, le=10)
 

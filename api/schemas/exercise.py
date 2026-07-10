@@ -70,6 +70,7 @@ class PerformedSet(BaseModel):
     reps: int | None = None
     weight: float | None = None
     rpe: float | None = None
+    duration_seconds: int | None = None
     is_warmup: bool = False
 
 

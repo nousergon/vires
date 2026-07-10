@@ -30,6 +30,7 @@ from api.schemas.workout import (
     MaterializeOccurrenceIn,
     SessionExerciseIn,
     SessionExerciseOut,
+    SessionExerciseReorder,
     SessionExerciseUpdate,
     SetIn,
     SetOut,
@@ -40,7 +41,7 @@ from api.schemas.workout import (
     WorkoutStart,
     WorkoutSummary,
 )
-from api.serializers import to_exercise_brief
+from api.serializers import dumbbell_seed_weight, to_exercise_brief
 from api.services.activity_templates import ACTIVITY_TEMPLATES
 from api.services.coach.autoregulate import autoregulate_after_session
 from api.services.load.pandolf import ruck_metabolic_cost_kj
@@ -105,6 +106,7 @@ def _last_performance(
                         reps=s.reps,
                         weight=s.weight,
                         rpe=s.rpe,
+                        duration_seconds=s.duration_seconds,
                         is_warmup=s.is_warmup,
                     )
                     for s in se.sets
@@ -160,7 +162,6 @@ def _session_out(db: Session, ident: Identity, ws: WorkoutSession) -> WorkoutSes
         ended_at=ws.ended_at,
         notes=ws.notes,
         tags=ws.tags or [],
-        pre_workout_fuel=ws.pre_workout_fuel,
         energy_level=ws.energy_level,
         workout_intensity=ws.workout_intensity,
         template_id=ws.template_id,
@@ -242,7 +243,7 @@ def start_workout(
                 order_index=te.order_index,
                 target_sets=te.target_sets,
                 target_reps=te.target_reps,
-                target_weight=te.target_weight,
+                target_weight=dumbbell_seed_weight(te.target_weight, te.exercise.equipment),
                 target_duration_seconds=te.target_duration_seconds,
                 rest_seconds=te.rest_seconds,
                 notes=te.notes,
@@ -255,7 +256,6 @@ def start_workout(
         name=name,
         started_at=_now(),
         tags=body.tags or [],
-        pre_workout_fuel=body.pre_workout_fuel,
         template_id=body.template_id,
         exercises=exercises,
     )
@@ -441,6 +441,27 @@ def list_workouts(
     return out
 
 
+@router.get("/tags", response_model=list[str])
+def list_workout_tags(
+    db: Session = Depends(get_db),
+    ident: Identity = Depends(current_identity),
+) -> list[str]:
+    """Every tag the user has ever applied to a session, most-used first —
+    powers the tag quick-complete chips in ``TagsEditor``. Declared ahead of
+    ``/{session_id}`` so it isn't shadowed by that path param."""
+    rows = db.scalars(
+        select(WorkoutSession.tags).where(
+            WorkoutSession.tenant_id == ident.tenant_id,
+            WorkoutSession.user_id == ident.user_id,
+        )
+    ).all()
+    counts: dict[str, int] = {}
+    for tags in rows:
+        for tag in tags or []:
+            counts[tag] = counts.get(tag, 0) + 1
+    return sorted(counts, key=lambda t: (-counts[t], t.lower()))
+
+
 @router.get("/{session_id}", response_model=WorkoutSessionOut)
 def get_workout(
     session_id: int,
@@ -487,8 +508,6 @@ def update_workout(
     # Session-tracking fields — valid on any session type.
     if "tags" in data and data["tags"] is not None:
         ws.tags = data["tags"]
-    if "pre_workout_fuel" in data:
-        ws.pre_workout_fuel = data["pre_workout_fuel"]
     if "energy_level" in data:
         ws.energy_level = data["energy_level"]
     if "workout_intensity" in data:
@@ -729,7 +748,38 @@ def add_session_exercise(
     db.add(se)
     db.commit()
     db.refresh(se)
+    # Pre-create planned set rows the same way a from-template exercise gets
+    # them (Strong-style: ready-to-fill rows, not a blank list) — a no-op
+    # unless the caller supplied target_sets (see WorkoutPage's addExercise,
+    # which seeds it from the user's default_sets/default_reps setting).
+    _seed_planned_sets(db, ident, se)
+    db.commit()
+    db.refresh(se)
     return _se_out(db, ident, se)
+
+
+@router.patch("/{session_id}/exercises/reorder", response_model=list[SessionExerciseOut])
+def reorder_session_exercises(
+    session_id: int,
+    body: SessionExerciseReorder,
+    db: Session = Depends(get_db),
+    ident: Identity = Depends(current_identity),
+) -> list[SessionExerciseOut]:
+    """Drag-and-drop reorder: reassign ``order_index`` 0..n-1 from
+    ``exercise_ids``' order, in one transaction. Declared ahead of
+    ``/{se_id}`` so "reorder" isn't parsed as an exercise id."""
+    ws = _get_session(db, session_id, ident)
+    by_id = {se.id: se for se in ws.exercises}
+    if set(body.exercise_ids) != set(by_id):
+        raise HTTPException(400, "exercise_ids must match the session's current exercises exactly")
+    for index, se_id in enumerate(body.exercise_ids):
+        by_id[se_id].order_index = index
+    db.commit()
+    # `ws.exercises` is order_by="order_index", but a loaded collection isn't
+    # re-sorted just because a child's ordering column changed in place —
+    # expire it so the next access re-queries in the new order.
+    db.expire(ws, ["exercises"])
+    return [_se_out(db, ident, se) for se in ws.exercises]
 
 
 @router.patch("/{session_id}/exercises/{se_id}", response_model=SessionExerciseOut)

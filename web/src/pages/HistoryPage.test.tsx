@@ -107,7 +107,6 @@ describe('HistoryPage', () => {
       ended_at: '2026-06-28T15:00:00Z',
       notes: null,
       tags: [],
-      pre_workout_fuel: null,
       energy_level: null,
       workout_intensity: null,
       template_id: null,
@@ -125,7 +124,7 @@ describe('HistoryPage', () => {
     expect(screen.getByText('Distance')).toBeInTheDocument()
   })
 
-  it('shows tags, pre-workout fuel and energy/intensity in the detail sheet', async () => {
+  it('shows tags (including pre-workout fuel logged as a tag) and energy/intensity in the detail sheet', async () => {
     mockSettings()
     vi.spyOn(api, 'listWorkouts').mockResolvedValue([
       { id: 7, session_type: 'strength', name: 'Push Day', started_at: '2026-06-28T18:00:00Z', ended_at: '2026-06-28T19:00:00Z', exercise_count: 0, set_count: 0, total_volume: 0, tags: ['push'], energy_level: 7, workout_intensity: 9, activity: null },
@@ -136,8 +135,7 @@ describe('HistoryPage', () => {
         id: 7,
         name: 'Push Day',
         exercises: [],
-        tags: ['push', 'fasted'],
-        pre_workout_fuel: 'black coffee + creatine',
+        tags: ['push', 'fasted', 'black coffee', 'creatine'],
         energy_level: 7,
         workout_intensity: 9,
       }),
@@ -145,7 +143,8 @@ describe('HistoryPage', () => {
     renderWithProviders(<HistoryPage />)
     fireEvent.click(await screen.findByText('Push Day'))
     expect(await screen.findByText('fasted')).toBeInTheDocument()
-    expect(screen.getByText('black coffee + creatine')).toBeInTheDocument()
+    expect(screen.getByText('black coffee')).toBeInTheDocument()
+    expect(screen.getByText('creatine')).toBeInTheDocument()
     expect(screen.getByText('7 / 10')).toBeInTheDocument()
     expect(screen.getByText('9 / 10')).toBeInTheDocument()
   })
@@ -200,7 +199,7 @@ describe('HistoryPage', () => {
     vi.spyOn(api, 'records').mockResolvedValue([])
     vi.spyOn(api, 'getWorkout').mockResolvedValue({
       id: 9, session_type: 'strength', name: 'Test C', started_at: '2026-06-28T18:00:00Z', ended_at: '2026-06-28T19:00:00Z',
-      notes: null, tags: [], pre_workout_fuel: null, energy_level: null, workout_intensity: null,
+      notes: null, tags: [], energy_level: null, workout_intensity: null,
       template_id: null, exercises: [], activity: null, recurrence_source_id: null,
     })
     const del = vi.spyOn(api, 'deleteWorkout').mockResolvedValue(undefined)

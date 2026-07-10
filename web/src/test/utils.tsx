@@ -125,7 +125,6 @@ export function makeSession(over: Partial<WorkoutSession> = {}): WorkoutSession 
     ended_at: null,
     notes: null,
     tags: [],
-    pre_workout_fuel: null,
     energy_level: null,
     workout_intensity: null,
     template_id: null,

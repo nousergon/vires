@@ -201,7 +201,10 @@ class TemplateExercise(Base):
     order_index: Mapped[int] = mapped_column(Integer, default=0)
     target_sets: Mapped[int | None] = mapped_column(Integer, nullable=True)
     target_reps: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # Placeholder starting weight (user-set; the AI coach will propose it later).
+    # Placeholder starting weight (user-set; the AI coach will propose it
+    # later). For a dumbbell-equipment exercise this is the bilateral TOTAL
+    # (e.g. 90 for a pair of 45s) — halved into a per-hand value when it seeds
+    # a live SessionExercise/SetEntry (see api.serializers.dumbbell_seed_weight).
     target_weight: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Target hold duration (seconds) for timed exercises (e.g. plank).
     target_duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -237,13 +240,13 @@ class WorkoutSession(Base):
     ended_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Free-text labels for the session — a mix of reusable tags ("push day",
-    # "fasted") and one-off custom inputs. Stored as a JSON list of strings so a
-    # user can coin a new tag inline without a lookup table. Empty list => none.
+    # "fasted") and one-off custom inputs, including what was eaten/drunk/
+    # supplemented before training (e.g. "black coffee", "creatine"). Stored as
+    # a JSON list of strings so a user can coin a new tag inline without a
+    # lookup table. Empty list => none. Formerly split across this field and a
+    # separate ``pre_workout_fuel`` free-text field (dropped — see
+    # e1f2a3b4c5d7_drop_pre_workout_fuel_into_tags).
     tags: Mapped[list] = mapped_column(JSON, default=list)
-    # What was eaten/drunk/supplemented before training (food, drink, caffeine,
-    # creatine, ...). Free text — kept as one field rather than a structured
-    # intake log, which is out of scope for this tracker.
-    pre_workout_fuel: Mapped[str | None] = mapped_column(Text, nullable=True)
     # End-of-workout self-report on a 1–10 scale, prompted when the session is
     # finished. ``energy_level`` = how the body felt (readiness);
     # ``workout_intensity`` = how hard the session was (RPE-like, whole-session).
@@ -573,6 +576,7 @@ class PlannedExercise(Base):
     order_index: Mapped[int] = mapped_column(Integer, default=0)
     target_sets: Mapped[int | None] = mapped_column(Integer, nullable=True)
     target_reps: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Bilateral TOTAL for a dumbbell exercise (see TemplateExercise.target_weight).
     target_weight: Mapped[float | None] = mapped_column(Float, nullable=True)
     target_duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     rest_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)

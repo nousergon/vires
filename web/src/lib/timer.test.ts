@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fireTimerAlert, fmtClock } from './timer'
+import { fireTimerAlert, fmtClock, unlockAudioForTimers } from './timer'
 
 describe('fmtClock', () => {
   it('formats m:ss with zero-padded seconds', () => {
@@ -27,5 +27,30 @@ describe('fireTimerAlert', () => {
     expect(vibe).not.toHaveBeenCalled()
 
     vi.unstubAllGlobals()
+  })
+})
+
+describe('unlockAudioForTimers', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('resumes a suspended shared AudioContext once, not again once running', () => {
+    // Models iOS Safari's real autoplay policy: a fresh context starts
+    // suspended; resume() (mocked here to flip state, like the real API
+    // does asynchronously) brings it to 'running'. The shared context is a
+    // module-level singleton, so both calls here exercise the SAME instance.
+    const resume = vi.fn(function (this: { state: string }) {
+      this.state = 'running'
+    })
+    class FakeAudioContext {
+      state = 'suspended'
+      resume = resume
+    }
+    vi.stubGlobal('AudioContext', FakeAudioContext)
+
+    unlockAudioForTimers()
+    expect(resume).toHaveBeenCalledTimes(1)
+
+    unlockAudioForTimers()
+    expect(resume).toHaveBeenCalledTimes(1) // already running — not resumed again
   })
 })

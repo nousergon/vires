@@ -9,6 +9,7 @@ import {
   type WorkoutSession,
 } from '../lib/api'
 import { useSettings } from '../lib/useSettings'
+import { useTagSuggestions } from '../lib/useTagSuggestions'
 import { fmtClock } from '../lib/timer'
 import { fmtDistance, fmtElevation, fmtLoad, fmtPack } from '../lib/units'
 import { Button, Sheet, Spinner } from './ui'
@@ -76,83 +77,85 @@ export function RatingScale({
   )
 }
 
-// Freeform reusable/one-off tag pills with inline add. Persist via `onSave`.
+// Freeform reusable/one-off tag pills with inline add, plus quick-complete
+// chips for tags the user has used before (e.g. pre-workout fuel like
+// "coffee"/"creatine") but hasn't applied to THIS session yet — tap one to
+// add it with no typing. Persist via `onSave`.
 export function TagsEditor({
   tags,
   onSave,
+  suggestions = [],
 }: {
   tags: string[]
   onSave: (tags: string[]) => void
+  // Previously-used tags, most-used first (see `useTagSuggestions`).
+  suggestions?: string[]
 }) {
   const [draft, setDraft] = useState('')
 
-  function addTag() {
-    const t = draft.trim()
+  function addTag(t = draft) {
+    t = t.trim()
     setDraft('')
     if (!t || tags.includes(t)) return
     onSave([...tags, t])
   }
 
+  const quickAdd = suggestions.filter((s) => !tags.includes(s)).slice(0, 12)
+
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      {tags.map((t) => (
-        <span
-          key={t}
-          className="inline-flex items-center gap-1 rounded-full border border-amber-600/50 bg-amber-900/30 px-2.5 py-0.5 text-xs text-amber-200"
-        >
-          {t}
-          <button
-            type="button"
-            aria-label={`Remove tag ${t}`}
-            className="text-amber-300/70 hover:text-amber-100"
-            onClick={() => onSave(tags.filter((x) => x !== t))}
+    <div>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {tags.map((t) => (
+          <span
+            key={t}
+            className="inline-flex items-center gap-1 rounded-full border border-amber-600/50 bg-amber-900/30 px-2.5 py-0.5 text-xs text-amber-200"
           >
-            ✕
-          </button>
-        </span>
-      ))}
-      <input
-        type="text"
-        value={draft}
-        placeholder="+ add tag"
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={addTag}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault()
-            addTag()
-          }
-        }}
-        className="min-w-[6rem] flex-1 rounded-lg bg-slate-800 px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-amber-500"
-      />
+            {t}
+            <button
+              type="button"
+              aria-label={`Remove tag ${t}`}
+              className="text-amber-300/70 hover:text-amber-100"
+              onClick={() => onSave(tags.filter((x) => x !== t))}
+            >
+              ✕
+            </button>
+          </span>
+        ))}
+        <input
+          type="text"
+          value={draft}
+          placeholder="+ add tag"
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => addTag()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              addTag()
+            }
+          }}
+          className="min-w-[6rem] flex-1 rounded-lg bg-slate-800 px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-amber-500"
+        />
+      </div>
+      {quickAdd.length > 0 && (
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {quickAdd.map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => addTag(s)}
+              className="rounded-full border border-slate-700 px-2.5 py-0.5 text-xs text-slate-400 hover:border-amber-600/50 hover:text-amber-200"
+            >
+              + {s}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
 
-// What was eaten/drunk/supplemented before training — persists on blur.
-export function FuelField({
-  value,
-  onSave,
-}: {
-  value: string | null
-  onSave: (fuel: string | null) => void
-}) {
-  const [fuel, setFuel] = useState(value ?? '')
-  return (
-    <textarea
-      value={fuel}
-      rows={2}
-      placeholder="e.g. black coffee, 5g creatine, banana"
-      onChange={(e) => setFuel(e.target.value)}
-      onBlur={() => {
-        if ((fuel.trim() || null) !== (value ?? null)) onSave(fuel.trim() || null)
-      }}
-      className="mt-1 w-full resize-none rounded-lg bg-slate-800 px-2.5 py-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
-    />
-  )
-}
-
-// Editable session-tracking block: tags, pre-workout fuel, and the 1–10
+// Editable session-tracking block: tags (including what was eaten/drunk/
+// supplemented pre-workout, logged as its own tag), and the 1–10
 // energy/intensity self-report — every field revisable AFTER the workout,
 // not only at the finish prompt. Each change persists immediately via
 // PATCH /workouts/{id}.
@@ -163,8 +166,13 @@ function SessionTrackingEditor({
   session: WorkoutSession
   onChanged: () => void
 }) {
+  const qc = useQueryClient()
+  const tagSuggestions = useTagSuggestions()
   const save = async (body: Parameters<typeof api.updateWorkout>[1]) => {
     await api.updateWorkout(session.id, body)
+    // A new tag should show up as a quick-complete suggestion on the NEXT
+    // session immediately, not after the query's staleTime lapses.
+    if ('tags' in body) qc.invalidateQueries({ queryKey: ['workout-tags'] })
     onChanged()
   }
 
@@ -174,15 +182,10 @@ function SessionTrackingEditor({
         <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
           Tags
         </div>
-        <TagsEditor tags={session.tags} onSave={(tags) => save({ tags })} />
-      </div>
-      <div>
-        <label className="block text-xs font-semibold uppercase tracking-wide text-slate-400">
-          Pre-workout food / drink / supps
-        </label>
-        <FuelField
-          value={session.pre_workout_fuel}
-          onSave={(pre_workout_fuel) => save({ pre_workout_fuel })}
+        <TagsEditor
+          tags={session.tags}
+          onSave={(tags) => save({ tags })}
+          suggestions={tagSuggestions}
         />
       </div>
       <RatingScale

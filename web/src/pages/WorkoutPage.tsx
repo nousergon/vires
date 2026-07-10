@@ -1,19 +1,41 @@
 import { type FocusEvent, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { api, type SessionExercise, type SetEntry, type WorkoutSession } from '../lib/api'
-import { useCountdown, fmtClock, fireTimerAlert, firePing } from '../lib/timer'
+import { useCountdown, fmtClock, fireTimerAlert, firePing, unlockAudioForTimers } from '../lib/timer'
 import { useWakeLock } from '../lib/wakeLock'
 import { schedulePush, cancelPush } from '../lib/push'
 import { logSetOfflineFirst } from '../lib/setSync'
 import { useSettings } from '../lib/useSettings'
+import { useTagSuggestions } from '../lib/useTagSuggestions'
 import { Button, Card, EmptyState, PageTitle, Sheet, Spinner } from '../components/ui'
 import ExercisePicker from '../components/ExercisePicker'
 import PlateCalculatorSheet from '../components/PlateCalculatorSheet'
 import ActivityForm from '../components/ActivityForm'
-import { FuelField, RatingScale, TagsEditor } from '../components/SessionDetailSheet'
+import { RatingScale, TagsEditor } from '../components/SessionDetailSheet'
 
 export const ACTIVE_KEY = 'vires.activeWorkout'
+
+// Pure reorder logic factored out of the DndContext handler so it's testable
+// without simulating real pointer-drag gestures. Returns null when the drop
+// is a no-op (dropped on itself, or either id isn't in the list).
+export function reorderedIds(ids: number[], activeId: number, overId: number): number[] | null {
+  if (activeId === overId) return null
+  const from = ids.indexOf(activeId)
+  const to = ids.indexOf(overId)
+  if (from === -1 || to === -1) return null
+  return arrayMove(ids, from, to)
+}
 
 // A boolean preference remembered per session exercise in localStorage (so a
 // choice on one move doesn't affect the others). `null` storage falls back to
@@ -140,6 +162,10 @@ function ActiveWorkout({ id, onClear }: { id: number; onClear: () => void }) {
   const settings = useSettings()
   const timer = useCountdown((label) => fireTimerAlert(settings, label))
   const [timerCtx, setTimerCtx] = useState<TimerCtx | null>(null)
+  // A small activation distance so a drag only starts once the pointer has
+  // actually moved — a plain tap on the ⠿ handle (or the row beneath it)
+  // doesn't get intercepted as an accidental drag.
+  const dndSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
   const [pickerOpen, setPickerOpen] = useState(false)
   const [finishOpen, setFinishOpen] = useState(false)
 
@@ -215,22 +241,30 @@ function ActiveWorkout({ id, onClear }: { id: number; onClear: () => void }) {
   }
 
   const addExercise = useMutation({
-    mutationFn: (exerciseId: number) => api.addWorkoutExercise(id, { exercise_id: exerciseId }),
+    // Seed target_sets/target_reps from the user's defaults so an ad-hoc add
+    // gets ready-to-fill set rows immediately, same as adding from a template
+    // (the server pre-creates the sets whenever target_sets is present).
+    mutationFn: (exerciseId: number) =>
+      api.addWorkoutExercise(id, {
+        exercise_id: exerciseId,
+        target_sets: settings.default_sets,
+        target_reps: settings.default_reps,
+      }),
     onSuccess: invalidate,
   })
-  // Reorder: swap an exercise's order_index with its neighbour, then refetch.
-  const move = useMutation({
-    mutationFn: async ({ idx, dir }: { idx: number; dir: -1 | 1 }) => {
-      const list = ws!.exercises
-      const a = list[idx]
-      const b = list[idx + dir]
-      if (!a || !b) return
-      await Promise.all([
-        api.updateWorkoutExercise(id, a.id, { order_index: b.order_index }),
-        api.updateWorkoutExercise(id, b.id, { order_index: a.order_index }),
-      ])
+  // Drag-and-drop reorder: one batch PATCH with the full new id order.
+  // Optimistically reorders the cached exercise list first so the drag lands
+  // in place with no flash while the request is in flight.
+  const reorder = useMutation({
+    mutationFn: (exerciseIds: number[]) => api.reorderWorkoutExercises(id, exerciseIds),
+    onMutate: (exerciseIds: number[]) => {
+      qc.setQueryData<WorkoutSession>(['workout', id], (prev) => {
+        if (!prev) return prev
+        const byId = new Map(prev.exercises.map((se) => [se.id, se]))
+        return { ...prev, exercises: exerciseIds.map((seId) => byId.get(seId)!) }
+      })
     },
-    onSuccess: invalidate,
+    onSettled: invalidate,
   })
   const finish = useMutation({
     mutationFn: (ratings?: { energy_level?: number; workout_intensity?: number }) =>
@@ -282,24 +316,33 @@ function ActiveWorkout({ id, onClear }: { id: number; onClear: () => void }) {
 
       <SessionDetails session={ws} onChanged={invalidate} />
 
-      <div className="mt-4 space-y-4">
-        {ws.exercises.map((se, i) => (
-          <ExerciseBlock
-            key={se.id}
-            session={ws}
-            se={se}
-            timer={timer}
-            timerCtx={timerCtx}
-            runTimer={runTimer}
-            stopTimer={stopTimer}
-            onChanged={invalidate}
-            canMoveUp={i > 0}
-            canMoveDown={i < ws.exercises.length - 1}
-            onMoveUp={() => move.mutate({ idx: i, dir: -1 })}
-            onMoveDown={() => move.mutate({ idx: i, dir: 1 })}
-          />
-        ))}
-      </div>
+      <DndContext
+        sensors={dndSensors}
+        collisionDetection={closestCenter}
+        onDragEnd={(e: DragEndEvent) => {
+          const { active, over } = e
+          if (!over) return
+          const next = reorderedIds(ws.exercises.map((se) => se.id), active.id as number, over.id as number)
+          if (next) reorder.mutate(next)
+        }}
+      >
+        <SortableContext items={ws.exercises.map((se) => se.id)} strategy={verticalListSortingStrategy}>
+          <div className="mt-4 space-y-4">
+            {ws.exercises.map((se) => (
+              <ExerciseBlock
+                key={se.id}
+                session={ws}
+                se={se}
+                timer={timer}
+                timerCtx={timerCtx}
+                runTimer={runTimer}
+                stopTimer={stopTimer}
+                onChanged={invalidate}
+              />
+            ))}
+          </div>
+        </SortableContext>
+      </DndContext>
 
       <Button variant="secondary" className="mt-4 w-full" onClick={() => setPickerOpen(true)}>
         + Add exercise
@@ -331,9 +374,9 @@ function ActiveWorkout({ id, onClear }: { id: number; onClear: () => void }) {
 }
 
 // Session-level tracking editor shown at the top of an active workout: freeform
-// tags (reusable + one-off custom inputs), what was eaten/drunk/supplemented
-// pre-workout, and an editable start time. Each change persists immediately via
-// PATCH /workouts/{id}.
+// tags (reusable + one-off custom inputs, including what was eaten/drunk/
+// supplemented pre-workout), and an editable start time. Each change persists
+// immediately via PATCH /workouts/{id}.
 function SessionDetails({
   session,
   onChanged,
@@ -341,22 +384,23 @@ function SessionDetails({
   session: WorkoutSession
   onChanged: () => void
 }) {
+  const qc = useQueryClient()
+  const tagSuggestions = useTagSuggestions()
   const save = async (body: Parameters<typeof api.updateWorkout>[1]) => {
     await api.updateWorkout(session.id, body)
+    // A new tag should show up as a quick-complete suggestion on the NEXT
+    // session immediately, not after the query's staleTime lapses.
+    if ('tags' in body) qc.invalidateQueries({ queryKey: ['workout-tags'] })
     onChanged()
   }
 
   return (
     <Card className="mt-4">
       <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Tags</div>
-      <TagsEditor tags={session.tags} onSave={(tags) => save({ tags })} />
-
-      <label className="mt-3 block text-xs font-semibold uppercase tracking-wide text-slate-400">
-        Pre-workout food / drink / supps
-      </label>
-      <FuelField
-        value={session.pre_workout_fuel}
-        onSave={(pre_workout_fuel) => save({ pre_workout_fuel })}
+      <TagsEditor
+        tags={session.tags}
+        onSave={(tags) => save({ tags })}
+        suggestions={tagSuggestions}
       />
 
       <label className="mt-3 block text-xs font-semibold uppercase tracking-wide text-slate-400">
@@ -533,10 +577,6 @@ function ExerciseBlock({
   runTimer,
   stopTimer,
   onChanged,
-  canMoveUp,
-  canMoveDown,
-  onMoveUp,
-  onMoveDown,
 }: {
   session: WorkoutSession
   se: SessionExercise
@@ -545,11 +585,11 @@ function ExerciseBlock({
   runTimer: RunTimer
   stopTimer: () => void
   onChanged: () => void
-  canMoveUp: boolean
-  canMoveDown: boolean
-  onMoveUp: () => void
-  onMoveDown: () => void
 }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: se.id,
+  })
+  const dragStyle = { transform: CSS.Transform.toString(transform), transition }
   const settings = useSettings()
   const prev = se.previous_performance
   const timed = se.exercise.is_timed
@@ -620,36 +660,30 @@ function ExerciseBlock({
   const ping = () => firePing(settings)
 
   return (
+    <div ref={setNodeRef} style={dragStyle} className={isDragging ? 'opacity-50' : undefined}>
     <Card>
       <div className="mb-1 flex items-center justify-between">
-        <h3 className="font-semibold text-slate-100">{se.exercise.name}</h3>
         <div className="flex items-center gap-2">
           <button
-            className="px-1 text-slate-500 disabled:opacity-25"
-            disabled={!canMoveUp}
-            onClick={onMoveUp}
-            title="Move up"
+            className="cursor-grab touch-none px-1 text-slate-500 active:cursor-grabbing"
+            title="Drag to reorder"
+            aria-label={`Drag to reorder ${se.exercise.name}`}
+            {...attributes}
+            {...listeners}
           >
-            ↑
+            ⠿
           </button>
-          <button
-            className="px-1 text-slate-500 disabled:opacity-25"
-            disabled={!canMoveDown}
-            onClick={onMoveDown}
-            title="Move down"
-          >
-            ↓
-          </button>
-          <button
-            className="text-xs text-slate-500"
-            onClick={async () => {
-              await api.removeWorkoutExercise(session.id, se.id)
-              onChanged()
-            }}
-          >
-            remove
-          </button>
+          <h3 className="font-semibold text-slate-100">{se.exercise.name}</h3>
         </div>
+        <button
+          className="text-xs text-slate-500"
+          onClick={async () => {
+            await api.removeWorkoutExercise(session.id, se.id)
+            onChanged()
+          }}
+        >
+          remove
+        </button>
       </div>
 
       <PrevHint prev={prev} unit={settings.weight_unit} />
@@ -753,6 +787,7 @@ function ExerciseBlock({
         + Add set
       </button>
     </Card>
+    </div>
   )
 }
 
@@ -766,7 +801,9 @@ function PrevHint({
   if (!prev || prev.sets.length === 0) return null
   const summary = prev.sets
     .filter((s) => !s.is_warmup)
-    .map((s) => `${s.weight ?? '—'}${unit}×${s.reps ?? '—'}`)
+    .map((s) =>
+      s.duration_seconds != null ? fmtClock(s.duration_seconds) : `${s.weight ?? '—'}${unit}×${s.reps ?? '—'}`,
+    )
     .join(', ')
   return (
     <p className="text-xs text-slate-400">
@@ -890,6 +927,10 @@ function SetRow({
   // ping when the completion was itself triggered by a hold timer finishing
   // (which already fired its own alert).
   async function markDone(nowDone: boolean, silent = false) {
+    // Resume the shared audio context HERE — synchronously, before the
+    // `await` below — so the rest timer's later, gesture-less completion
+    // beep isn't silently suspended (iOS Safari/PWA autoplay policy).
+    if (nowDone) unlockAudioForTimers()
     const patch: {
       done: boolean
       weight?: number
@@ -909,6 +950,7 @@ function SetRow({
 
   // ▶ : count the hold down, then log it done and roll into rest.
   function startHold() {
+    unlockAudioForTimers() // same gesture-unlock, for the hold's own completion beep
     runTimer('hold', seId, set.id, seconds(), () => {
       markDone(true, true) // hold timer already pinged at zero
     })

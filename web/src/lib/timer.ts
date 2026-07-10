@@ -1,11 +1,41 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-function beep() {
+// A single shared, reused AudioContext. iOS Safari (and other mobile
+// browsers under autoplay/power policies) silently suspends a *freshly
+// created* AudioContext unless it's created/resumed synchronously inside a
+// user gesture — the timer-completion beep fires later from a setInterval
+// callback, well outside any gesture, so a fresh-context-per-beep (the prior
+// approach) plays no audible sound at all on those browsers, with no error.
+// `unlockAudioForTimers` resumes this shared context from an actual tap
+// (starting a rest/hold timer) so the later, gesture-less beep reuses an
+// already-running context instead of creating a doomed-to-be-suspended one.
+let sharedAudioCtx: AudioContext | null = null
+
+function getAudioContext(): AudioContext | null {
   try {
     const Ctx =
       window.AudioContext ||
       (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-    const ctx = new Ctx()
+    if (!sharedAudioCtx) sharedAudioCtx = new Ctx()
+    return sharedAudioCtx
+  } catch {
+    return null
+  }
+}
+
+/** Call from a real user-gesture handler that starts a timer (e.g. "mark set
+ * done" / "start hold") so the alert that fires later, unattended, can
+ * actually be heard. Safe to call repeatedly. */
+export function unlockAudioForTimers() {
+  const ctx = getAudioContext()
+  if (ctx?.state === 'suspended') void ctx.resume()
+}
+
+function beep() {
+  try {
+    const ctx = getAudioContext()
+    if (!ctx) return
+    if (ctx.state === 'suspended') void ctx.resume()
     const osc = ctx.createOscillator()
     const gain = ctx.createGain()
     osc.connect(gain)
@@ -16,7 +46,6 @@ function beep() {
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4)
     osc.start()
     osc.stop(ctx.currentTime + 0.42)
-    osc.onended = () => ctx.close()
   } catch {
     /* audio not available */
   }

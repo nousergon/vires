@@ -40,7 +40,7 @@ from api.schemas.plan import (
     ProgramSummary,
 )
 from api.schemas.workout import WorkoutSessionOut
-from api.serializers import program_coach_summary, to_planned_workout_out
+from api.serializers import dumbbell_seed_weight, program_coach_summary, to_planned_workout_out
 from api.services.ailments import load_open_ailments
 from api.services.coach.ailment_gate import (
     AilmentFlag,
@@ -525,7 +525,7 @@ def start_planned(
                 order_index=pe.order_index,
                 target_sets=pe.target_sets,
                 target_reps=pe.target_reps,
-                target_weight=pe.target_weight,
+                target_weight=dumbbell_seed_weight(pe.target_weight, pe.exercise.equipment),
                 target_duration_seconds=pe.target_duration_seconds,
                 rest_seconds=pe.rest_seconds,
                 notes=_exercise_notes_with_gate(pe, all_flags),

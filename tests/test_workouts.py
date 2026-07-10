@@ -29,6 +29,26 @@ def test_empty_workout_log_and_finish(client):
     assert len(fin["exercises"][0]["sets"]) == 2
 
 
+def test_ad_hoc_exercise_with_target_sets_seeds_ready_to_fill_rows(client):
+    # WorkoutPage's addExercise sends target_sets/target_reps from the user's
+    # defaults — the server should pre-create matching set rows exactly like
+    # a from-template exercise does, not leave the list empty.
+    ex = _ex_id(client, "barbell deadlift")
+    ws = client.post("/api/workouts", json={}).json()
+    se = client.post(
+        f"/api/workouts/{ws['id']}/exercises",
+        json={"exercise_id": ex, "target_sets": 3, "target_reps": 8},
+    ).json()
+    assert len(se["sets"]) == 3
+    assert all(s["reps"] == 8 for s in se["sets"])
+
+    # Omitting target_sets stays a no-op (blank list, unchanged behavior).
+    bare = client.post(
+        f"/api/workouts/{ws['id']}/exercises", json={"exercise_id": ex}
+    ).json()
+    assert bare["sets"] == []
+
+
 def test_start_from_template_clones_exercises(client):
     e1, e2 = _ex_id(client, "bench press"), _ex_id(client, "squat")
     tpl = client.post(
@@ -103,6 +123,37 @@ def test_target_weight_used_despite_blank_prior_history(client):
     assert ws["exercises"][0]["sets"][0]["weight"] == 135
 
 
+def test_dumbbell_template_target_weight_seeds_per_hand(client):
+    # "Dumbbell Bench Press" programmed at 90 (the bilateral total, e.g. a
+    # pair of 45s) should seed the live session/set weight at 45 (per hand).
+    ex = _ex_id(client, "dumbbell bench press")
+    tpl = client.post(
+        "/api/templates",
+        json={
+            "name": "Push",
+            "exercises": [{"exercise_id": ex, "target_sets": 1, "target_weight": 90}],
+        },
+    ).json()
+    assert tpl["exercises"][0]["target_weight"] == 90  # template stays total
+
+    ws = client.post("/api/workouts", json={"template_id": tpl["id"]}).json()
+    se = ws["exercises"][0]
+    assert se["target_weight"] == 45
+    assert se["sets"][0]["weight"] == 45
+
+    # A non-dumbbell exercise is unaffected.
+    barbell = _ex_id(client, "barbell bench press")
+    tpl2 = client.post(
+        "/api/templates",
+        json={
+            "name": "Push 2",
+            "exercises": [{"exercise_id": barbell, "target_sets": 1, "target_weight": 90}],
+        },
+    ).json()
+    ws2 = client.post("/api/workouts", json={"template_id": tpl2["id"]}).json()
+    assert ws2["exercises"][0]["target_weight"] == 90
+
+
 def test_timed_exercise_seeds_duration_and_flags(client):
     hits = client.get("/api/exercises/search", params={"q": "plank"}).json()
     plank = next(h["exercise"] for h in hits if h["exercise"]["name"].lower() == "plank")
@@ -172,6 +223,28 @@ def test_previous_performance_hint(client):
     assert prev["session_id"] == w1["id"]
     assert len(prev["sets"]) == 3
     assert prev["sets"][0]["weight"] == 50
+
+
+def test_previous_performance_hint_carries_duration_for_timed_exercise(client):
+    hits = client.get("/api/exercises/search", params={"q": "plank"}).json()
+    plank = next(h["exercise"] for h in hits if h["exercise"]["name"].lower() == "plank")
+
+    w1 = client.post("/api/workouts", json={"name": "Day 1"}).json()
+    se1 = client.post(
+        f"/api/workouts/{w1['id']}/exercises", json={"exercise_id": plank["id"]}
+    ).json()
+    client.post(
+        f"/api/workouts/{w1['id']}/exercises/{se1['id']}/sets",
+        json={"duration_seconds": 45},
+    )
+    client.post(f"/api/workouts/{w1['id']}/finish")
+
+    w2 = client.post("/api/workouts", json={"name": "Day 2"}).json()
+    se2 = client.post(
+        f"/api/workouts/{w2['id']}/exercises", json={"exercise_id": plank["id"]}
+    ).json()
+    prev = se2["previous_performance"]
+    assert prev["sets"][0]["duration_seconds"] == 45
 
 
 def test_history_list_and_volume(client):
@@ -246,29 +319,70 @@ def test_reorder_session_exercises_by_swapping_order_index(client):
     assert [se["exercise"]["id"] for se in got["exercises"]] == [e2, e1]
 
 
+def test_reorder_session_exercises_batch(client):
+    e1, e2, e3 = (
+        _ex_id(client, "bench press"),
+        _ex_id(client, "squat"),
+        _ex_id(client, "deadlift"),
+    )
+    ws = client.post("/api/workouts", json={}).json()
+    se1 = client.post(f"/api/workouts/{ws['id']}/exercises", json={"exercise_id": e1}).json()
+    se2 = client.post(f"/api/workouts/{ws['id']}/exercises", json={"exercise_id": e2}).json()
+    se3 = client.post(f"/api/workouts/{ws['id']}/exercises", json={"exercise_id": e3}).json()
+
+    reordered = client.patch(
+        f"/api/workouts/{ws['id']}/exercises/reorder",
+        json={"exercise_ids": [se3["id"], se1["id"], se2["id"]]},
+    ).json()
+    assert [se["exercise"]["id"] for se in reordered] == [e3, e1, e2]
+    assert [se["order_index"] for se in reordered] == [0, 1, 2]
+
+    got = client.get(f"/api/workouts/{ws['id']}").json()
+    assert [se["exercise"]["id"] for se in got["exercises"]] == [e3, e1, e2]
+
+
+def test_reorder_session_exercises_rejects_mismatched_ids(client):
+    e1 = _ex_id(client, "bench press")
+    ws = client.post("/api/workouts", json={}).json()
+    se1 = client.post(f"/api/workouts/{ws['id']}/exercises", json={"exercise_id": e1}).json()
+    resp = client.patch(
+        f"/api/workouts/{ws['id']}/exercises/reorder",
+        json={"exercise_ids": [se1["id"], 999999]},
+    )
+    assert resp.status_code == 400
+
+
 def test_workout_404(client):
     assert client.get("/api/workouts/99999999").status_code == 404
 
 
 # --------------------------------------------------------------------------- #
-# Per-workout tracking: tags (+ custom inputs), pre-workout fuel, and the
-# end-of-session 1–10 energy/intensity self-report.
+# Per-workout tracking: tags (+ custom inputs, including what was eaten/drunk/
+# supplemented pre-workout), and the end-of-session 1–10 energy/intensity
+# self-report.
 # --------------------------------------------------------------------------- #
-def test_start_workout_with_tags_and_fuel(client):
+def test_start_workout_with_tags(client):
     ws = client.post(
         "/api/workouts",
         json={
             "name": "Push day",
-            "tags": ["push", "fasted", "6am garage"],
-            "pre_workout_fuel": "black coffee + 5g creatine",
+            "tags": ["push", "fasted", "6am garage", "black coffee", "creatine"],
         },
     ).json()
-    assert ws["tags"] == ["push", "fasted", "6am garage"]
-    assert ws["pre_workout_fuel"] == "black coffee + 5g creatine"
+    assert ws["tags"] == ["push", "fasted", "6am garage", "black coffee", "creatine"]
     assert ws["energy_level"] is None and ws["workout_intensity"] is None
     # Defaults when omitted.
     bare = client.post("/api/workouts", json={"name": "Bare"}).json()
-    assert bare["tags"] == [] and bare["pre_workout_fuel"] is None
+    assert bare["tags"] == []
+
+
+def test_workout_tags_endpoint_ranks_by_frequency_then_alpha(client):
+    client.post("/api/workouts", json={"name": "A", "tags": ["push", "coffee"]})
+    client.post("/api/workouts", json={"name": "B", "tags": ["push", "banana"]})
+    client.post("/api/workouts", json={"name": "C", "tags": ["push"]})
+    tags = client.get("/api/workouts/tags").json()
+    # "push" used 3x outranks "banana"/"coffee" (1x each, alpha tiebreak).
+    assert tags == ["push", "banana", "coffee"]
 
 
 def test_finish_records_energy_and_intensity(client):
@@ -319,14 +433,12 @@ def test_patch_session_tracking_fields(client):
     patched = client.patch(
         f"/api/workouts/{ws['id']}",
         json={
-            "tags": ["deload"],
-            "pre_workout_fuel": "banana",
+            "tags": ["deload", "banana"],
             "energy_level": 8,
             "workout_intensity": 4,
         },
     ).json()
-    assert patched["tags"] == ["deload"]
-    assert patched["pre_workout_fuel"] == "banana"
+    assert patched["tags"] == ["deload", "banana"]
     assert patched["energy_level"] == 8 and patched["workout_intensity"] == 4
 
 
