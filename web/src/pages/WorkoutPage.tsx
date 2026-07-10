@@ -11,7 +11,14 @@ import {
 } from '@dnd-kit/core'
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { api, type SessionExercise, type SetEntry, type WorkoutSession } from '../lib/api'
+import {
+  api,
+  type PendingAilmentCheckIn,
+  type SessionExercise,
+  type SetEntry,
+  type WorkoutSession,
+} from '../lib/api'
+import { isoDate } from '../lib/calendar'
 import { useCountdown, fmtClock, fireTimerAlert, firePing, unlockAudioForTimers } from '../lib/timer'
 import { useWakeLock } from '../lib/wakeLock'
 import { schedulePush, cancelPush } from '../lib/push'
@@ -22,6 +29,7 @@ import { Button, Card, EmptyState, PageTitle, Sheet, Spinner } from '../componen
 import ExercisePicker from '../components/ExercisePicker'
 import PlateCalculatorSheet from '../components/PlateCalculatorSheet'
 import ActivityForm from '../components/ActivityForm'
+import { AilmentCheckInForm } from '../components/AilmentsPanel'
 import { RatingScale, TagsEditor } from '../components/SessionDetailSheet'
 
 export const ACTIVE_KEY = 'vires.activeWorkout'
@@ -111,11 +119,26 @@ function StartView({ onStarted }: { onStarted: (id: number) => void }) {
     onSuccess: (ws) => onStarted(ws.id),
   })
   const [activityOpen, setActivityOpen] = useState(false)
+  // Same-day ailment check-in gate (vires-ops#58) — mirrors PlanPage's planned-
+  // start gate so ad-hoc/template starts from the default Train tab ask too.
+  const [checkInGate, setCheckInGate] = useState<{
+    pending: PendingAilmentCheckIn[]
+    templateId: number | null
+  } | null>(null)
+
+  async function requestStart(templateId: number | null) {
+    const pending = await api.pendingAilmentCheckIns(isoDate(new Date()))
+    if (pending.length > 0) {
+      setCheckInGate({ pending, templateId })
+      return
+    }
+    start.mutate(templateId)
+  }
 
   return (
     <div>
       <PageTitle>Train</PageTitle>
-      <Button className="w-full" onClick={() => start.mutate(null)} disabled={start.isPending}>
+      <Button className="w-full" onClick={() => requestStart(null)} disabled={start.isPending}>
         Start empty workout
       </Button>
       <Button variant="secondary" className="mt-2 w-full" onClick={() => setActivityOpen(true)}>
@@ -138,13 +161,35 @@ function StartView({ onStarted }: { onStarted: (id: number) => void }) {
                 <div className="font-semibold text-slate-100">{t.name}</div>
                 <div className="text-xs text-slate-400">{t.exercise_count} exercises</div>
               </div>
-              <Button variant="secondary" onClick={() => start.mutate(t.id)} disabled={start.isPending}>
+              <Button
+                variant="secondary"
+                onClick={() => requestStart(t.id)}
+                disabled={start.isPending}
+              >
                 Start
               </Button>
             </Card>
           ))}
         </div>
       )}
+
+      <Sheet
+        open={checkInGate != null}
+        onClose={() => setCheckInGate(null)}
+        title="Ailment check-in"
+      >
+        {checkInGate && (
+          <AilmentCheckInForm
+            pending={checkInGate.pending}
+            onCancel={() => setCheckInGate(null)}
+            onDone={() => {
+              const templateId = checkInGate.templateId
+              setCheckInGate(null)
+              start.mutate(templateId)
+            }}
+          />
+        )}
+      </Sheet>
     </div>
   )
 }

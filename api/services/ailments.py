@@ -1,4 +1,7 @@
-"""Ailment episode helpers — pending check-ins, latest severity, coach context."""
+"""Ailment episode helpers — pending check-ins, latest severity, coach context,
+same-day prescription gate (shared by every workout-start path — vires-ops#58:
+this used to live only in api.routers.plan, so ad-hoc/template starts via
+api.routers.workouts never got gated)."""
 
 from __future__ import annotations
 
@@ -8,7 +11,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from api.db.identity import Identity
-from api.db.models import AilmentCheckIn, AilmentEpisode
+from api.db.models import AilmentCheckIn, AilmentEpisode, Exercise
+from api.services.coach.ailment_gate import AilmentFlag, ExerciseGateInput, gate_exercise
 
 _OPEN_STATUSES = ("active", "improving")
 
@@ -47,3 +51,28 @@ def pending_check_ins(
         prior = latest_check_in(ep)
         out.append((ep, prior))
     return out
+
+
+def open_ailment_flags(db: Session, ident: Identity) -> list[AilmentFlag]:
+    """Latest severity of every open ailment episode, for the same-day
+    prescription gate (see api.services.coach.ailment_gate). Episodes with no
+    check-in yet (severity unknown) are excluded — the gate only reacts to a
+    reported severity."""
+    flags: list[AilmentFlag] = []
+    for ep in load_open_ailments(db, ident):
+        latest = latest_check_in(ep)
+        if latest is not None:
+            flags.append(AilmentFlag(label=ep.label, severity=latest.severity))
+    return flags
+
+
+def exercise_notes_with_gate(
+    exercise_id: int, exercise: Exercise, notes: str | None, flags: list[AilmentFlag]
+) -> str | None:
+    """``notes`` with a lower-body/knee ailment warning prepended when the gate
+    flags this exercise (see api.services.coach.ailment_gate)."""
+    muscles = frozenset((exercise.primary_muscles or []) + (exercise.secondary_muscles or []))
+    warning = gate_exercise(ExerciseGateInput(exercise_id=exercise_id, muscles=muscles), flags)
+    if warning is None:
+        return notes
+    return f"{warning}\n{notes}" if notes else warning
