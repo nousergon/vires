@@ -14,7 +14,10 @@ from api.schemas.exercise import ExerciseBrief, ExercisePerformance
 Terrain = Literal["treadmill", "road", "trail", "offtrail", "snow"]
 
 # How the route stats were entered — the flexible-input modes all land here.
-RouteSource = Literal["manual", "route_search", "route_draw", "gpx"]
+# `health` = automatic capture from the phone's health store (HealthKit /
+# Health Connect) via the Capacitor native shell (vires-ops#37); the load path
+# (SI conversion + metabolic cost) is identical regardless of source.
+RouteSource = Literal["manual", "route_search", "route_draw", "gpx", "health"]
 
 # Coarse structured load vocabulary shared by every activity (retired from
 # the former api.schemas.calendar_event — merge_calendar_events_into_activity).

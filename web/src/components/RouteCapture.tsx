@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { api, type RoutePoint, type RouteStats, type Terrain, type WeightUnit } from '../lib/api'
 import { distanceUnit, elevationUnit, metersToDistance, metersToElevation } from '../lib/units'
 import { ROUTE_MODES, type RouteMode } from '../lib/routeMode'
+import { getHealthSource, workoutToRouteStats, type HealthWorkout } from '../lib/health'
 import { Button } from './ui'
 import RouteDrawMap from './RouteDrawMap'
 
@@ -19,6 +20,19 @@ const inputCls =
 function round(n: number, dp: number): number {
   const f = 10 ** dp
   return Math.round(n * f) / f
+}
+
+function fmtDuration(s: number): string {
+  const h = Math.floor(s / 3600)
+  const m = Math.round((s % 3600) / 60)
+  return h > 0 ? `${h}h ${m}m` : `${m}m`
+}
+
+function fmtWorkoutDate(iso: string): string {
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime())
+    ? ''
+    : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -91,14 +105,40 @@ export default function RouteCapture({
     if (f) gpx.mutate(await f.text())
   }
 
+  // Automatic capture from the phone's health store (vires-ops#37). Native
+  // (Capacitor) only — on the web PWA the source is never available, so the
+  // Health tab is filtered out and this stays inert.
+  const [healthAvailable, setHealthAvailable] = useState(false)
+  useEffect(() => {
+    let live = true
+    getHealthSource()
+      .isAvailable()
+      .then((ok) => {
+        if (live) setHealthAvailable(ok)
+      })
+    return () => {
+      live = false
+    }
+  }, [])
+
+  const health = useMutation({
+    mutationFn: async () => {
+      const source = getHealthSource()
+      const granted = await source.requestPermission()
+      if (!granted) throw new Error('permission denied')
+      return source.recentWorkouts()
+    },
+  })
+
   const candidates = search.data?.candidates ?? []
+  const modes = ROUTE_MODES.filter((m) => m.key !== 'health' || healthAvailable)
 
   return (
     <>
       {/* How to fill distance/elevation: type it, find a trail, or import a GPX. */}
       <Field label="Route">
         <div className="mb-2 flex rounded-xl bg-slate-800 p-1 text-sm">
-          {ROUTE_MODES.map((m) => (
+          {modes.map((m) => (
             <button
               key={m.key}
               type="button"
@@ -205,6 +245,51 @@ export default function RouteCapture({
             {gpx.isError && (
               <p className="text-xs text-red-400">Couldn't read that GPX — enter values manually.</p>
             )}
+          </div>
+        )}
+
+        {mode === 'health' && (
+          <div className="space-y-2">
+            <p className="text-xs text-slate-500">
+              Import a completed hike or walk from your phone's Health app — distance, elevation, and
+              duration prefill below. Add pack weight + terrain, then log.
+            </p>
+            <Button
+              variant="secondary"
+              className="w-full"
+              onClick={() => health.mutate()}
+              disabled={health.isPending}
+            >
+              {health.isPending ? 'Reading Health…' : 'Load recent workouts'}
+            </Button>
+            {health.isError && (
+              <p className="text-xs text-red-400">
+                Couldn't read Health — grant workout access in Settings, or enter values manually.
+              </p>
+            )}
+            {health.isSuccess && health.data.length === 0 && (
+              <p className="text-xs text-slate-500">No recent hikes or walks found in Health.</p>
+            )}
+            {(health.data ?? []).map((w: HealthWorkout) => (
+              <button
+                key={w.id}
+                type="button"
+                onClick={() => {
+                  applyStats(workoutToRouteStats(w))
+                  onTerrain('trail')
+                }}
+                className="block w-full rounded-lg bg-slate-800 px-3 py-2 text-left text-sm hover:bg-slate-700"
+              >
+                <span className="font-medium text-slate-100 capitalize">{w.type}</span>
+                {w.startedAt && (
+                  <span className="ml-2 text-slate-400">{fmtWorkoutDate(w.startedAt)}</span>
+                )}
+                <span className="ml-2 text-slate-400">
+                  {round(metersToDistance(w.distanceM, weightUnit), 1)} {distanceUnit(weightUnit)} ·{' '}
+                  {fmtDuration(w.durationS)}
+                </span>
+              </button>
+            ))}
           </div>
         )}
 

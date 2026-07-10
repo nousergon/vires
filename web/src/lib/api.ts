@@ -114,7 +114,7 @@ export type SessionType = 'strength' | 'activity'
 
 export type Terrain = 'treadmill' | 'road' | 'trail' | 'offtrail' | 'snow'
 
-export type RouteSource = 'manual' | 'route_search' | 'route_draw' | 'gpx'
+export type RouteSource = 'manual' | 'route_search' | 'route_draw' | 'gpx' | 'health'
 
 export type LoadRegions = 'legs' | 'upper' | 'full' | 'core' | 'none'
 export type LoadIntensity = 'light' | 'moderate' | 'hard'

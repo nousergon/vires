@@ -276,6 +276,29 @@ def test_activity_rejects_unknown_route_source(client):
     assert r.status_code == 422  # not in the RouteSource literal
 
 
+def test_activity_accepts_health_route_source(client):
+    # Automatic capture from the phone's health store (vires-ops#37) tags
+    # source='health' and rides the identical load path.
+    r = client.post(
+        "/api/workouts/activity",
+        json={
+            "name": "Hike",
+            "template_key": "hike",
+            "pack_weight": 40,
+            "bodyweight": 180,
+            "distance": 5,
+            "elevation_gain": 500,
+            "duration_s": 4500,
+            "source": "health",
+        },
+    )
+    assert r.status_code == 201
+    activity = r.json()["activity"]
+    assert activity["source"] == "health"
+    # Load accounting is unaffected by source — the pack still costs energy.
+    assert activity["metabolic_cost_kj"] > 0
+
+
 def test_heavier_pack_logs_higher_load(client):
     common = {
         "name": "Hike",
