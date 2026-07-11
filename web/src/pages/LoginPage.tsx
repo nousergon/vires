@@ -19,7 +19,7 @@ export default function LoginPage() {
     mutationFn: async () => {
       const { error } = await authClient.signIn.magicLink({
         email,
-        callbackURL: `${window.location.origin}/`,
+        callbackURL: `${window.location.origin}/app/`,
         metadata: { product: 'vires' },
       })
       if (error) throw new Error(error.message ?? "Couldn't send the sign-in link.")

@@ -27,9 +27,9 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   if (
     res.status === 401 &&
     path !== AUTH_PROBE_PATH &&
-    !location.pathname.startsWith('/login')
+    !location.pathname.startsWith('/app/login')
   ) {
-    window.location.href = '/login'
+    window.location.href = '/app/login'
   }
   if (!res.ok) {
     let detail = res.statusText

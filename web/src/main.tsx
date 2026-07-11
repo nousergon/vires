@@ -12,7 +12,10 @@ const queryClient = new QueryClient({
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
+      {/* The app is canonically served under /app (vires-ops#61). basename on
+          the router — NOT Vite `base` — so the PWA service worker keeps its
+          existing `/` scope (already-installed PWAs don't migrate scopes). */}
+      <BrowserRouter basename="/app">
         <App />
       </BrowserRouter>
     </QueryClientProvider>
