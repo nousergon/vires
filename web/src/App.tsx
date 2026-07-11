@@ -3,6 +3,7 @@ import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
 import { useRegisterSW } from 'virtual:pwa-register/react'
 import { installOnlineReplay } from './lib/setSync'
 import RequireAuth from './components/RequireAuth'
+import UpdateBanner from './components/UpdateBanner'
 import WorkoutPage from './pages/WorkoutPage'
 import TemplatesPage from './pages/TemplatesPage'
 import PlanPage from './pages/PlanPage'
@@ -74,17 +75,23 @@ export default function App() {
   }, [])
 
   return (
-    <Routes>
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/auth/verify" element={<VerifyPage />} />
-      <Route
-        path="/*"
-        element={
-          <RequireAuth>
-            <AuthedApp />
-          </RequireAuth>
-        }
-      />
-    </Routes>
+    <>
+      {/* SW-independent "update available" banner — shows on every page, incl.
+          the login/verify routes, so a stale tab surfaces it regardless of
+          where it's parked (vires-ops#59). */}
+      <UpdateBanner />
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/auth/verify" element={<VerifyPage />} />
+        <Route
+          path="/*"
+          element={
+            <RequireAuth>
+              <AuthedApp />
+            </RequireAuth>
+          }
+        />
+      </Routes>
+    </>
   )
 }

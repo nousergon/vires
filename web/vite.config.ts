@@ -1,13 +1,59 @@
-import { defineConfig } from 'vite'
+import { execSync } from 'node:child_process'
+import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
+// Build-id for the SW-independent staleness check (vires-ops#59). CI passes the
+// deploy SHA as VITE_BUILD_ID; otherwise fall back to the current git short SHA
+// (in CI the checkout is already at the deploy commit, so this alone is correct
+// without touching the workflow), then to 'dev' when git is unavailable. Baked
+// into the bundle as `__BUILD_ID__` AND written to dist/version.json, so the
+// backend's /version endpoint reports the exact id the deployed bundle believes
+// it is.
+function resolveBuildId(): string {
+  if (process.env.VITE_BUILD_ID) return process.env.VITE_BUILD_ID
+  try {
+    return execSync('git rev-parse --short HEAD', {
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+      .toString()
+      .trim()
+  } catch {
+    return 'dev'
+  }
+}
+
+const BUILD_ID = resolveBuildId()
+
+// Emit dist/version.json at build time so the FastAPI backend has a file to
+// read the deployed build-id from. Kept out of the SW precache (it's .json, not
+// in Workbox's default glob) — but the client never fetches this file directly
+// anyway; it fetches the backend's /version route.
+function emitVersionJson(buildId: string): Plugin {
+  return {
+    name: 'vires-emit-version-json',
+    apply: 'build',
+    generateBundle() {
+      this.emitFile({
+        type: 'asset',
+        fileName: 'version.json',
+        source: `${JSON.stringify({ buildId })}\n`,
+      })
+    },
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig({
+  define: {
+    // Bundle's own build-id, compared against /version at runtime (vires-ops#59).
+    __BUILD_ID__: JSON.stringify(BUILD_ID),
+  },
   plugins: [
     react(),
     tailwindcss(),
+    emitVersionJson(BUILD_ID),
     VitePWA({
       registerType: 'autoUpdate',
       // We register the SW ourselves (App.tsx, via `virtual:pwa-register/react`)
@@ -71,6 +117,7 @@ export default defineConfig({
     proxy: {
       '/api': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/health': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      '/version': { target: 'http://127.0.0.1:8000', changeOrigin: true },
     },
   },
 })

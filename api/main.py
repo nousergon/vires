@@ -29,6 +29,7 @@ from api.routers import (
     records,
     routes,
     templates,
+    version,
     workouts,
 )
 from api.routers import settings as settings_router
@@ -48,6 +49,9 @@ app.add_middleware(
 # Health stays at root (deploy/nginx healthcheck); feature APIs live under /api
 # so they never collide with the SPA's client-side routes served at root.
 app.include_router(health.router)
+# /version also stays at root and MUST be registered before _mount_spa()'s
+# catch-all so it isn't swallowed by the SPA fallback (vires-ops#59).
+app.include_router(version.router)
 app.include_router(auth.router, prefix="/api")
 app.include_router(exercises.router, prefix="/api")
 app.include_router(templates.router, prefix="/api")
