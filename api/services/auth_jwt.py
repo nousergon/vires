@@ -46,6 +46,12 @@ def _jwk_client() -> PyJWKClient:
         f"{s.auth_base_url}/api/auth/jwks",
         cache_keys=True,
         lifespan=s.auth_jwks_cache_seconds,
+        # Identify ourselves: PyJWKClient's default urllib User-Agent
+        # ("Python-urllib/3.x") is rejected with a 403 by Cloudflare's Browser
+        # Integrity Check in front of auth.nousergon.ai (found live 2026-07-11).
+        # A service-identifying UA is correct HTTP hygiene AND passes the edge
+        # without weakening it.
+        headers={"User-Agent": "vires-api/1.0 (+https://vires.nousergon.ai)"},
     )
 
 
