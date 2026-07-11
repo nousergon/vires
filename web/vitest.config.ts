@@ -5,6 +5,11 @@ import react from '@vitejs/plugin-react'
 // for component tests; pure-logic tests run fine here too.
 export default defineConfig({
   plugins: [react()],
+  // `__BUILD_ID__` is injected by vite.config's `define` in real builds; vitest
+  // uses this config, so provide a concrete id here for the staleness tests.
+  define: {
+    __BUILD_ID__: JSON.stringify('test-build'),
+  },
   test: {
     environment: 'jsdom',
     globals: true,
