@@ -63,6 +63,12 @@ class User(Base):
     # doesn't block the dev row while still enforcing one account per email
     # for real signups.
     email: Mapped[str | None] = mapped_column(String, nullable=True, unique=True, index=True)
+    # The shared nousergon-auth service's stable user.id (vires-ops#60) —
+    # the JWT `sub` claim resolves through this column. Nullable: rows predate
+    # the shared service until linked (by email, once) or JIT-provisioned.
+    identity_user_id: Mapped[str | None] = mapped_column(
+        String, nullable=True, unique=True, index=True
+    )
     display_name: Mapped[str | None] = mapped_column(String, nullable=True)
     # True only for the bootstrap first user (see auth.py's _is_bootstrap)
     # or a user an admin later promotes by hand. Gates POST /auth/allowlist.

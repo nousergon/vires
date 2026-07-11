@@ -21,6 +21,9 @@ dependencies = [
     # param or VIRES_COACH_LLM env; both SDK transports installed.
     "krepis[anthropic,openai]>=0.9.1",
     "pywebpush>=1.14",
+    # Verifies nousergon-auth's EdDSA/Ed25519 JWTs against its JWKS
+    # (vires-ops#60) — [crypto] pulls in `cryptography` for the Ed25519 path.
+    "pyjwt[crypto]>=2.8",
 ]
 
 [dependency-groups]
