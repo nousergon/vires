@@ -11,7 +11,6 @@ import HistoryPage from './pages/HistoryPage'
 import ExercisesPage from './pages/ExercisesPage'
 import SettingsPage from './pages/SettingsPage'
 import LoginPage from './pages/LoginPage'
-import VerifyPage from './pages/VerifyPage'
 
 const tabs = [
   { to: '/train', label: 'Train', icon: '🏋️' },
@@ -77,12 +76,11 @@ export default function App() {
   return (
     <>
       {/* SW-independent "update available" banner — shows on every page, incl.
-          the login/verify routes, so a stale tab surfaces it regardless of
-          where it's parked (vires-ops#59). */}
+          the login route, so a stale tab surfaces it regardless of where
+          it's parked (vires-ops#59). */}
       <UpdateBanner />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
-        <Route path="/auth/verify" element={<VerifyPage />} />
         <Route
           path="/*"
           element={

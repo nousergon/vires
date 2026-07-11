@@ -108,6 +108,13 @@ class Settings(BaseSettings):
     # signup beyond the very first (bootstrap) user. Flip to False to open
     # signup wide.
     allowlist_required: bool = True
+    # Shared identity service (vires-ops#60) — nousergon-auth. Bearer JWTs it
+    # mints are verified locally against its JWKS (see api.services.auth_jwt).
+    # `iss` and `aud` both default to the service's base URL; auth_jwt_audience
+    # is an override in case the deployed service ever pins a custom audience.
+    auth_base_url: str = "https://auth.nousergon.ai"
+    auth_jwt_audience: str | None = None
+    auth_jwks_cache_seconds: int = 300
     # Local-dev-only escape hatch: skip real session verification entirely
     # and resolve the hardcoded dev identity, exactly like before auth
     # existed. Must NEVER be true in a deployed .env — nothing in the

@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type Settings, type Weekday, type WeightUnit } from '../lib/api'
+import { authClient } from '../lib/authClient'
+import { clearIdentityToken } from '../lib/identityToken'
 import { useSettings } from '../lib/useSettings'
 import { useAuth } from '../lib/useAuth'
 import { requestNotificationPermission } from '../lib/timer'
@@ -141,7 +143,16 @@ function Account() {
   const { me } = useAuth()
   const nav = useNavigate()
   const logout = useMutation({
-    mutationFn: api.logout,
+    mutationFn: async () => {
+      // Two sessions can coexist during the shared-identity transition
+      // (vires-ops#60): the nousergon-auth cross-subdomain session and the
+      // legacy vires_session cookie. Log out of both; signOut on an absent
+      // shared session is an expected no-op (the legacy logout and token
+      // purge below still run).
+      await authClient.signOut().catch(() => {})
+      await api.logout()
+      clearIdentityToken()
+    },
     onSuccess: () => nav('/login', { replace: true }),
   })
 

@@ -1,5 +1,14 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { api } from './api'
+import { getIdentityToken } from './identityToken'
+
+// No shared-identity token by default — requests ride the legacy cookie path
+// with bare JSON headers. Individual tests flip the mock to assert the
+// Authorization header attaches (vires-ops#60).
+vi.mock('./identityToken', () => ({
+  getIdentityToken: vi.fn().mockResolvedValue(null),
+  clearIdentityToken: vi.fn(),
+}))
 
 function mockFetch(opts: { ok?: boolean; status?: number; statusText?: string; json?: unknown } = {}) {
   const f = vi.fn().mockResolvedValue({
@@ -61,6 +70,18 @@ describe('req helper', () => {
     expect(url).toBe('/api/workouts')
     expect(init.method).toBe('POST')
     expect(JSON.parse(init.body as string)).toEqual({ template_id: 7 })
+  })
+
+  it('attaches the shared-identity bearer when a token is available', async () => {
+    vi.mocked(getIdentityToken).mockResolvedValueOnce('jwt-123')
+    const f = mockFetch({ json: [] })
+    await api.listTemplates()
+    expect(f).toHaveBeenCalledWith(
+      '/api/templates',
+      expect.objectContaining({
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer jwt-123' },
+      }),
+    )
   })
 })
 
