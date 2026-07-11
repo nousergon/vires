@@ -35,30 +35,9 @@ describe('LoginPage', () => {
     expect(screen.getByText('brian@example.com')).toBeInTheDocument()
   })
 
-  it('sends a trimmed invite code along for new signups', async () => {
-    magicLink.mockResolvedValue({ error: null } as never)
-    renderWithProviders(<LoginPage />)
-
-    fireEvent.change(screen.getByPlaceholderText('you@example.com'), {
-      target: { value: 'new@example.com' },
-    })
-    fireEvent.change(screen.getByPlaceholderText('VIRES-XXXX'), {
-      target: { value: '  VIRES-BETA-1  ' },
-    })
-    fireEvent.click(screen.getByText('Send login link'))
-
-    await waitFor(() =>
-      expect(magicLink).toHaveBeenCalledWith(
-        expect.objectContaining({
-          metadata: { product: 'vires', inviteCode: 'VIRES-BETA-1' },
-        }),
-      ),
-    )
-  })
-
-  it('surfaces the invite-gate error message', async () => {
+  it('surfaces the allowlist-gate error message', async () => {
     magicLink.mockResolvedValue({
-      error: { message: 'An invite code is required to sign up — this product is in private beta.' },
+      error: { message: "That email hasn't been invited yet — this product is in private beta." },
     } as never)
     renderWithProviders(<LoginPage />)
 
@@ -67,7 +46,7 @@ describe('LoginPage', () => {
     })
     fireEvent.click(screen.getByText('Send login link'))
 
-    expect(await screen.findByText(/invite code is required/)).toBeInTheDocument()
+    expect(await screen.findByText(/hasn't been invited yet/)).toBeInTheDocument()
   })
 
   it('disables the button until an email is entered', () => {
