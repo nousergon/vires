@@ -35,9 +35,12 @@ describe('LoginPage', () => {
     expect(screen.getByText('brian@example.com')).toBeInTheDocument()
   })
 
-  it('surfaces the allowlist-gate error message', async () => {
+  it('surfaces a server error (e.g. rate limit) from the shared service', async () => {
+    // The allowlist gate answers uniformly (unapproved looks like success —
+    // nousergon-auth#4), so the realistic error a user can still see here is a
+    // rate-limit rejection.
     magicLink.mockResolvedValue({
-      error: { message: "That email hasn't been invited yet — this product is in private beta." },
+      error: { message: 'Too many requests. Please try again later.' },
     } as never)
     renderWithProviders(<LoginPage />)
 
@@ -46,7 +49,7 @@ describe('LoginPage', () => {
     })
     fireEvent.click(screen.getByText('Send login link'))
 
-    expect(await screen.findByText(/hasn't been invited yet/)).toBeInTheDocument()
+    expect(await screen.findByText(/Too many requests/)).toBeInTheDocument()
   })
 
   it('disables the button until an email is entered', () => {
