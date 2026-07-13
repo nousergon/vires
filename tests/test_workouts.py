@@ -454,14 +454,16 @@ def test_workout_tags_endpoint_ranks_by_frequency_then_alpha(client):
     assert tags == ["push", "banana", "coffee"]
 
 
-def test_finish_records_energy_and_intensity(client):
+def test_finish_records_energy_intensity_and_challenge(client):
     ws = client.post("/api/workouts", json={"name": "Legs"}).json()
     fin = client.post(
         f"/api/workouts/{ws['id']}/finish",
-        json={"energy_level": 7, "workout_intensity": 9},
+        json={"energy_level": 7, "workout_intensity": 9, "challenge_level": 3},
     ).json()
     assert fin["ended_at"] is not None
-    assert fin["energy_level"] == 7 and fin["workout_intensity"] == 9
+    assert fin["energy_level"] == 7
+    assert fin["workout_intensity"] == 9
+    assert fin["challenge_level"] == 3
 
 
 def test_finish_ratings_out_of_range_rejected(client):
@@ -478,13 +480,21 @@ def test_finish_ratings_out_of_range_rejected(client):
         ).status_code
         == 422
     )
+    assert (
+        client.post(
+            f"/api/workouts/{ws['id']}/finish", json={"challenge_level": 0}
+        ).status_code
+        == 422
+    )
 
 
 def test_finish_without_body_still_closes_session(client):
     ws = client.post("/api/workouts", json={"name": "NoRating"}).json()
     fin = client.post(f"/api/workouts/{ws['id']}/finish").json()
     assert fin["ended_at"] is not None
-    assert fin["energy_level"] is None and fin["workout_intensity"] is None
+    assert fin["energy_level"] is None
+    assert fin["workout_intensity"] is None
+    assert fin["challenge_level"] is None
 
 
 def test_ratings_can_be_filled_in_after_finishing(client):
@@ -492,9 +502,11 @@ def test_ratings_can_be_filled_in_after_finishing(client):
     client.post(f"/api/workouts/{ws['id']}/finish")  # closed, no ratings
     fin = client.post(
         f"/api/workouts/{ws['id']}/finish",
-        json={"energy_level": 5, "workout_intensity": 6},
+        json={"energy_level": 5, "workout_intensity": 6, "challenge_level": 8},
     ).json()
-    assert fin["energy_level"] == 5 and fin["workout_intensity"] == 6
+    assert fin["energy_level"] == 5
+    assert fin["workout_intensity"] == 6
+    assert fin["challenge_level"] == 8
 
 
 def test_patch_session_tracking_fields(client):
@@ -505,10 +517,13 @@ def test_patch_session_tracking_fields(client):
             "tags": ["deload", "banana"],
             "energy_level": 8,
             "workout_intensity": 4,
+            "challenge_level": 2,
         },
     ).json()
     assert patched["tags"] == ["deload", "banana"]
-    assert patched["energy_level"] == 8 and patched["workout_intensity"] == 4
+    assert patched["energy_level"] == 8
+    assert patched["workout_intensity"] == 4
+    assert patched["challenge_level"] == 2
 
 
 def test_tracking_fields_surface_in_history_list(client):
@@ -517,11 +532,13 @@ def test_tracking_fields_surface_in_history_list(client):
     ).json()
     client.post(
         f"/api/workouts/{ws['id']}/finish",
-        json={"energy_level": 6, "workout_intensity": 7},
+        json={"energy_level": 6, "workout_intensity": 7, "challenge_level": 9},
     )
     row = next(w for w in client.get("/api/workouts").json() if w["id"] == ws["id"])
     assert row["tags"] == ["morning"]
-    assert row["energy_level"] == 6 and row["workout_intensity"] == 7
+    assert row["energy_level"] == 6
+    assert row["workout_intensity"] == 7
+    assert row["challenge_level"] == 9
 
 
 # --- offline-first set logging: client_uuid idempotency (vires-ops#48) -------- #
