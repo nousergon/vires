@@ -51,6 +51,38 @@ function beep() {
   }
 }
 
+// Timer-completion alert: a harsher, more attention-grabbing sound than the
+// single-tone `beep()` used for in-app confirmations — three short square-wave
+// pulses (buzzer timbre, lower pitch, louder) so it reads as a distinct "rest
+// is over" signal rather than a soft chime, and is more likely to be noticed
+// from across a gym floor or with the phone in a pocket.
+function buzz() {
+  try {
+    const ctx = getAudioContext()
+    if (!ctx) return
+    if (ctx.state === 'suspended') void ctx.resume()
+    const pulseCount = 3
+    const pulseDuration = 0.14
+    const gapDuration = 0.09
+    for (let i = 0; i < pulseCount; i++) {
+      const t0 = ctx.currentTime + i * (pulseDuration + gapDuration)
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.type = 'square'
+      osc.frequency.value = 440
+      gain.gain.setValueAtTime(0.001, t0)
+      gain.gain.exponentialRampToValueAtTime(0.5, t0 + 0.015)
+      gain.gain.exponentialRampToValueAtTime(0.001, t0 + pulseDuration)
+      osc.start(t0)
+      osc.stop(t0 + pulseDuration + 0.02)
+    }
+  } catch {
+    /* audio not available */
+  }
+}
+
 function vibrate() {
   try {
     navigator.vibrate?.([120, 60, 120])
@@ -82,7 +114,7 @@ export interface TimerAlertPrefs {
 
 /** Fire the configured end-of-timer alerts. `label` titles the notification. */
 export function fireTimerAlert(prefs: TimerAlertPrefs, label = 'Timer done') {
-  if (prefs.timer_sound) beep()
+  if (prefs.timer_sound) buzz()
   if (prefs.timer_vibration) vibrate()
   if (prefs.timer_notification) showNotification(label)
 }
@@ -141,7 +173,7 @@ export function useCountdown(onAlert?: (label?: string) => void): Countdown {
         firedRef.current = true
         if (onAlertRef.current) onAlertRef.current(labelRef.current)
         else {
-          beep()
+          buzz()
           vibrate()
         }
         setRunning(false)
