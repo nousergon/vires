@@ -135,3 +135,45 @@ def test_alias_makes_exercise_findable(client):
 
 def test_get_exercise_404(client):
     assert client.get("/api/exercises/99999999").status_code == 404
+
+
+def _ex_id(client, q: str) -> int:
+    return client.get("/api/exercises/search", params={"q": q}).json()[0]["exercise"]["id"]
+
+
+def _log_finished_session(client, ex_id: int, name: str, sets: list[dict]) -> dict:
+    ws = client.post("/api/workouts", json={"name": name}).json()
+    se = client.post(f"/api/workouts/{ws['id']}/exercises", json={"exercise_id": ex_id}).json()
+    for s in sets:
+        client.post(f"/api/workouts/{ws['id']}/exercises/{se['id']}/sets", json=s)
+    return client.post(f"/api/workouts/{ws['id']}/finish").json()
+
+
+def test_history_returns_sessions_newest_first_with_full_set_detail(client):
+    ex_id = _ex_id(client, "barbell deadlift")
+    _log_finished_session(client, ex_id, "Day 1", [{"reps": 5, "weight": 225, "is_warmup": False}])
+    _log_finished_session(client, ex_id, "Day 2", [{"reps": 5, "weight": 235, "is_warmup": False}])
+
+    history = client.get(f"/api/exercises/{ex_id}/history").json()
+    assert [s["session_name"] for s in history] == ["Day 2", "Day 1"]
+    assert history[0]["sets"][0]["weight"] == 235
+    assert history[0]["sets"][0]["is_warmup"] is False
+
+
+def test_history_respects_limit(client):
+    ex_id = _ex_id(client, "barbell deadlift")
+    for i in range(3):
+        _log_finished_session(client, ex_id, f"Day {i}", [{"reps": 5, "weight": 100 + i}])
+
+    history = client.get(f"/api/exercises/{ex_id}/history", params={"limit": 2}).json()
+    assert len(history) == 2
+
+
+def test_history_surfaces_duration_seconds_for_a_timed_set(client):
+    ex_id = _ex_id(client, "plank")
+    _log_finished_session(
+        client, ex_id, "Core", [{"duration_seconds": 45, "is_warmup": False}]
+    )
+
+    history = client.get(f"/api/exercises/{ex_id}/history").json()
+    assert history[0]["sets"][0]["duration_seconds"] == 45

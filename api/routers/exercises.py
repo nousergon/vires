@@ -172,6 +172,7 @@ def exercise_history(
                         reps=s.reps,
                         weight=s.weight,
                         rpe=s.rpe,
+                        duration_seconds=s.duration_seconds,
                         is_warmup=s.is_warmup,
                     )
                     for s in se.sets

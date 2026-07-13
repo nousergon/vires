@@ -176,6 +176,16 @@ describe('HistoryPage', () => {
     expect(screen.getByText('Quarter')).toBeInTheDocument()
   })
 
+  it('switches to Trends and lets you pick an exercise to chart', async () => {
+    mockSettings()
+    vi.spyOn(api, 'listWorkouts').mockResolvedValue([])
+    vi.spyOn(api, 'records').mockResolvedValue([])
+    vi.spyOn(api, 'searchExercises').mockResolvedValue([])
+    renderWithProviders(<HistoryPage />)
+    fireEvent.click(await screen.findByText('📈 Trends'))
+    expect(await screen.findByText('Choose an exercise')).toBeInTheDocument()
+  })
+
   it('selects workouts and bulk-deletes them', async () => {
     mockSettings()
     vi.spyOn(api, 'listWorkouts').mockResolvedValue([
