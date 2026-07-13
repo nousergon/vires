@@ -460,3 +460,35 @@ def test_weekday_rejects_unknown():
 
     with pytest.raises(ValidationError):
         ScheduleEntry(template_id=1, weekday="funday")
+
+
+# --------------------------------------------------------------------------- #
+# _resolve_spec: OpenRouter reasoning-exclude default (config#1999, krepis#16)
+# --------------------------------------------------------------------------- #
+def test_resolve_spec_defaults_reasoning_exclude_for_openrouter(monkeypatch):
+    from api.services.coach.agent import _resolve_spec
+
+    monkeypatch.setenv("VIRES_COACH_LLM", "openrouter:moonshotai/kimi-k2.6")
+    spec = _resolve_spec()
+    assert spec.provider == "openrouter"
+    assert spec.reasoning == {"exclude": True}
+
+
+def test_resolve_spec_keeps_explicit_reasoning_override(monkeypatch):
+    from api.services.coach.agent import _resolve_spec
+
+    monkeypatch.setenv(
+        "VIRES_COACH_LLM",
+        '{"provider": "openrouter", "model": "moonshotai/kimi-k2.6", '
+        '"reasoning": {"effort": "low"}}',
+    )
+    spec = _resolve_spec()
+    assert spec.reasoning == {"effort": "low"}
+
+
+def test_resolve_spec_anthropic_has_no_reasoning_override():
+    from api.services.coach.agent import _resolve_spec
+
+    spec = _resolve_spec()  # _hermetic_coach_spec autouse fixture pins anthropic
+    assert spec.provider == "anthropic"
+    assert spec.reasoning is None

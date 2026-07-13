@@ -339,11 +339,24 @@ def _resolve_spec():
 
     The code default is the pre-adapter behavior (Anthropic + coach_model),
     so a deploy with no SSM param seeded is behavior-identical.
+
+    OpenRouter models get a ``reasoning`` override applied here (rather than
+    requiring the flip value itself to carry one): a reasoning-capable model
+    (e.g. Kimi K2.6) can spend its entire output budget on invisible
+    chain-of-thought and return empty content with a clean ``finish_reason
+    ="stop"`` (config#1999, root-caused + fixed in krepis#16). Defaulting to
+    ``{"exclude": True}`` (cheapest, longest-content option per krepis#16's
+    live comparison) means the operational flip surface can stay the plain
+    ``"openrouter:<model>"`` string without depending on remembering an
+    inline reasoning directive. An explicit ``reasoning`` supplied via the
+    SSM/env JSON form still wins.
     """
+    from dataclasses import replace
+
     from krepis.llm_config import ModelSpec, resolve_model_spec
 
     settings = get_settings()
-    return resolve_model_spec(
+    spec = resolve_model_spec(
         settings.coach_llm_ssm_param,
         env_var="VIRES_COACH_LLM",
         default=ModelSpec(
@@ -351,6 +364,9 @@ def _resolve_spec():
         ),
         max_tokens=settings.coach_max_tokens,
     )
+    if spec.provider == "openrouter" and spec.reasoning is None:
+        spec = replace(spec, reasoning={"exclude": True})
+    return spec
 
 
 def _api_key_for(spec) -> str | None:  # noqa: ANN001
