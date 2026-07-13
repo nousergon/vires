@@ -670,7 +670,8 @@ export const api = {
     equipment?: string | null
     force?: boolean
   }) => req<CreateResult>('/exercises', { method: 'POST', body: JSON.stringify(body) }),
-  exerciseHistory: (id: number) => req<ExercisePerformance[]>(`/exercises/${id}/history`),
+  exerciseHistory: (id: number, limit = 10) =>
+    req<ExercisePerformance[]>(`/exercises/${id}/history?limit=${limit}`),
 
   // templates
   listTemplates: () => req<TemplateSummary[]>('/templates'),
