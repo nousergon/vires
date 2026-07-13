@@ -40,12 +40,14 @@ class WorkoutStart(BaseModel):
 
 
 class WorkoutFinish(BaseModel):
-    """End-of-workout self-report, prompted when finishing. Both optional so a
+    """End-of-workout self-report, prompted when finishing. All optional so a
     user can just tap Finish and skip the rating; when given, each is a 1–10
-    score (energy/readiness vs. how hard the session was)."""
+    score: energy/readiness, how hard the session was (effort), and how
+    appropriately challenging it was for the user's current level."""
 
     energy_level: int | None = Field(default=None, ge=1, le=10)
     workout_intensity: int | None = Field(default=None, ge=1, le=10)
+    challenge_level: int | None = Field(default=None, ge=1, le=10)
 
 
 class SetIn(BaseModel):
@@ -274,6 +276,7 @@ class WorkoutSessionOut(BaseModel):
     tags: list[str] = Field(default_factory=list)
     energy_level: int | None = None
     workout_intensity: int | None = None
+    challenge_level: int | None = None
     template_id: int | None = None
     exercises: list[SessionExerciseOut]
     # Present only for session_type == 'activity'.
@@ -307,6 +310,7 @@ class WorkoutSessionUpdate(BaseModel):
     tags: list[str] | None = None
     energy_level: int | None = Field(default=None, ge=1, le=10)
     workout_intensity: int | None = Field(default=None, ge=1, le=10)
+    challenge_level: int | None = Field(default=None, ge=1, le=10)
 
     # Activity-detail fields — rejected (400) if the session isn't
     # session_type == 'activity'.
@@ -363,5 +367,6 @@ class WorkoutSummary(BaseModel):
     tags: list[str] = Field(default_factory=list)
     energy_level: int | None = None
     workout_intensity: int | None = None
+    challenge_level: int | None = None
     # Compact activity facts for the history row (None otherwise).
     activity: ActivityDetailOut | None = None

@@ -309,18 +309,23 @@ describe('WorkoutPage — ActiveWorkout', () => {
     await waitFor(() => expect(localStorage.getItem(ACTIVE_KEY)).toBeNull())
   })
 
-  it('records the end-of-workout energy + intensity ratings on finish', async () => {
+  it('records the end-of-workout energy + intensity + challenge ratings on finish', async () => {
     vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession())
     const fin = vi.spyOn(api, 'finishWorkout').mockResolvedValue(makeSession({ ended_at: 'x' }))
     renderWithProviders(<WorkoutPage />)
     fireEvent.click(await screen.findByText('Finish')) // open sheet
     fireEvent.click(await screen.findByLabelText('Energy level 8'))
     fireEvent.click(await screen.findByLabelText('Workout intensity 6'))
+    fireEvent.click(await screen.findByLabelText('Workout challenge 3'))
     // Two "Finish" buttons now exist (header + sheet) — the sheet's is last.
     const finishButtons = screen.getAllByText('Finish')
     fireEvent.click(finishButtons[finishButtons.length - 1])
     await waitFor(() =>
-      expect(fin).toHaveBeenCalledWith(10, { energy_level: 8, workout_intensity: 6 }),
+      expect(fin).toHaveBeenCalledWith(10, {
+        energy_level: 8,
+        workout_intensity: 6,
+        challenge_level: 3,
+      }),
     )
   })
 

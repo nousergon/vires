@@ -322,13 +322,19 @@ class WorkoutSession(Base):
     tags: Mapped[list] = mapped_column(JSON, default=list)
     # End-of-workout self-report on a 1–10 scale, prompted when the session is
     # finished. ``energy_level`` = how the body felt (readiness);
-    # ``workout_intensity`` = how hard the session was (RPE-like, whole-session).
+    # ``workout_intensity`` = how hard the session was (RPE-like, whole-session
+    # physical effort); ``challenge_level`` = how appropriately challenging it
+    # was for the user's current ability/program level (too easy vs. too hard)
+    # — a distinct signal from raw effort, e.g. a session can be maximally
+    # intense (high workout_intensity) yet still feel under-challenging if the
+    # program hasn't progressed weight/reps in a while.
     # Named ``workout_intensity`` (not ``intensity``) to stay distinct from the
     # activity load's coarse ``intensity`` (light/moderate/hard) on the 1:1
-    # ``ActivityDetail`` row. Both nullable — a session finished before the
-    # prompt existed, or dismissed, simply has none.
+    # ``ActivityDetail`` row. All three nullable — a session finished before
+    # the prompt existed, or dismissed, simply has none.
     energy_level: Mapped[int | None] = mapped_column(Integer, nullable=True)
     workout_intensity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    challenge_level: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Which routine this session was started from (nullable => empty/ad-hoc workout).
     template_id: Mapped[int | None] = mapped_column(
         ForeignKey("workout_templates.id"), nullable=True
