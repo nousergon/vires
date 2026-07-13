@@ -1123,7 +1123,7 @@ wheels = [
 
 [[package]]
 name = "krepis"
-version = "0.9.1"
+version = "0.12.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "boto3" },
@@ -1131,9 +1131,9 @@ dependencies = [
     { name = "pyyaml" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9e/c9/67e1484f07b12d5fff59a51eb6ddfc78652c269eb1cca10ea36ae0c4a90b/krepis-0.9.1.tar.gz", hash = "sha256:03cbc35032ffd85b93d88da032f0fd8962cda31ed872a547608c1e7696f0825e", size = 175495, upload-time = "2026-07-03T17:08:06.798Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d8/10/c4e608a549b3bd31a5330faf139541f14c465b0600b2d377379de9a52084/krepis-0.12.0.tar.gz", hash = "sha256:42d062c5c4edca9a67180119cb933d1b0907ffad8731388fac0204ce92d77eca", size = 188165, upload-time = "2026-07-12T13:40:59.288Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1c/80/5435839602f5fdbe8b71da327f615fb3dde2f9c229380c5386c59ea5deb5/krepis-0.9.1-py3-none-any.whl", hash = "sha256:4c1d47fa295f0f3215087245774090000461e72e2ad533e204ba6d35b802e05a", size = 119401, upload-time = "2026-07-03T17:08:05.311Z" },
+    { url = "https://files.pythonhosted.org/packages/28/a1/5424cae58ba81354c4494a688fa74daa1e3da7e09d039c27aa6cba0a15d2/krepis-0.12.0-py3-none-any.whl", hash = "sha256:7d56b32f7b57b3493f0b0726ed44f845dd2bef257180a76d27ede91476c0fbdb", size = 127618, upload-time = "2026-07-12T13:40:58.059Z" },
 ]
 
 [package.optional-dependencies]
@@ -2650,7 +2650,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "fastembed", specifier = ">=0.4" },
     { name = "httpx", specifier = ">=0.27" },
-    { name = "krepis", extras = ["anthropic", "openai"], specifier = ">=0.9.1" },
+    { name = "krepis", extras = ["anthropic", "openai"], specifier = ">=0.11.0" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "pydantic-settings", specifier = ">=2.3" },
