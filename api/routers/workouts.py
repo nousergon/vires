@@ -166,6 +166,7 @@ def _session_out(db: Session, ident: Identity, ws: WorkoutSession) -> WorkoutSes
         tags=ws.tags or [],
         energy_level=ws.energy_level,
         workout_intensity=ws.workout_intensity,
+        challenge_level=ws.challenge_level,
         template_id=ws.template_id,
         exercises=[_se_out(db, ident, se) for se in ws.exercises],
         activity=_activity_out(ws.activity_detail),
@@ -455,6 +456,7 @@ def list_workouts(
                 tags=ws.tags or [],
                 energy_level=ws.energy_level,
                 workout_intensity=ws.workout_intensity,
+                challenge_level=ws.challenge_level,
                 activity=_activity_out(ws.activity_detail),
             )
         )
@@ -532,6 +534,8 @@ def update_workout(
         ws.energy_level = data["energy_level"]
     if "workout_intensity" in data:
         ws.workout_intensity = data["workout_intensity"]
+    if "challenge_level" in data:
+        ws.challenge_level = data["challenge_level"]
 
     ad = ws.activity_detail
     if ad is not None:
@@ -665,15 +669,17 @@ def finish_workout(
     ident: Identity = Depends(current_identity),
 ) -> WorkoutSessionOut:
     """Close out a session, optionally recording the end-of-workout 1–10
-    energy/intensity self-report. The ratings are applied whenever supplied
-    (even on a re-finish of an already-closed session, so a skipped prompt can
-    be filled in later), but ``ended_at`` is only stamped once."""
+    energy/intensity/challenge self-report. The ratings are applied whenever
+    supplied (even on a re-finish of an already-closed session, so a skipped
+    prompt can be filled in later), but ``ended_at`` is only stamped once."""
     ws = _get_session(db, session_id, ident)
     if body is not None:
         if body.energy_level is not None:
             ws.energy_level = body.energy_level
         if body.workout_intensity is not None:
             ws.workout_intensity = body.workout_intensity
+        if body.challenge_level is not None:
+            ws.challenge_level = body.challenge_level
     if ws.ended_at is None:
         ws.ended_at = _now()
         db.commit()  # the workout log is the primary deliverable — land it first

@@ -127,6 +127,7 @@ export function makeSession(over: Partial<WorkoutSession> = {}): WorkoutSession 
     tags: [],
     energy_level: null,
     workout_intensity: null,
+    challenge_level: null,
     template_id: null,
     exercises: [makeSessionExercise()],
     activity: null,

@@ -10,8 +10,15 @@ import { useSettings } from '../lib/useSettings'
 import { fmtClock } from '../lib/timer'
 import { Button, Card, EmptyState, PageTitle, Spinner } from '../components/ui'
 import SessionDetailSheet, { activityLine } from '../components/SessionDetailSheet'
+import ExerciseTrend from '../components/ExerciseTrend'
 
-type Tab = 'sessions' | 'records'
+type Tab = 'sessions' | 'records' | 'trends'
+
+const TAB_LABEL: Record<Tab, string> = {
+  sessions: 'Sessions',
+  records: '🏆 Records',
+  trends: '📈 Trends',
+}
 
 export default function HistoryPage() {
   const [tab, setTab] = useState<Tab>('sessions')
@@ -19,7 +26,7 @@ export default function HistoryPage() {
     <div>
       <PageTitle>History</PageTitle>
       <div className="mb-4 flex rounded-xl bg-slate-800 p-1 text-sm font-medium">
-        {(['sessions', 'records'] as Tab[]).map((t) => (
+        {(['sessions', 'records', 'trends'] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -27,11 +34,11 @@ export default function HistoryPage() {
               tab === t ? 'bg-slate-700 text-amber-400' : 'text-slate-400'
             }`}
           >
-            {t === 'records' ? '🏆 Records' : 'Sessions'}
+            {TAB_LABEL[t]}
           </button>
         ))}
       </div>
-      {tab === 'sessions' ? <SessionsView /> : <RecordsView />}
+      {tab === 'sessions' ? <SessionsView /> : tab === 'records' ? <RecordsView /> : <ExerciseTrend />}
     </div>
   )
 }

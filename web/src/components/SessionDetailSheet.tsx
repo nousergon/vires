@@ -200,6 +200,12 @@ function SessionTrackingEditor({
         value={session.workout_intensity}
         onChange={(v) => save({ workout_intensity: v })}
       />
+      <RatingScale
+        label="Workout challenge"
+        hint="Was this appropriately challenging for your level?"
+        value={session.challenge_level}
+        onChange={(v) => save({ challenge_level: v })}
+      />
     </div>
   )
 }

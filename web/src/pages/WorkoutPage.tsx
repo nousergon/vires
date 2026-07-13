@@ -312,8 +312,9 @@ function ActiveWorkout({ id, onClear }: { id: number; onClear: () => void }) {
     onSettled: invalidate,
   })
   const finish = useMutation({
-    mutationFn: (ratings?: { energy_level?: number; workout_intensity?: number }) =>
-      api.finishWorkout(id, ratings),
+    mutationFn: (
+      ratings?: { energy_level?: number; workout_intensity?: number; challenge_level?: number },
+    ) => api.finishWorkout(id, ratings),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['workouts'] })
       onClear()
@@ -464,8 +465,8 @@ function SessionDetails({
   )
 }
 
-// End-of-workout self-report prompt. Both ratings are optional — "Skip" finishes
-// without them; picking a number on either scale and tapping Finish records it.
+// End-of-workout self-report prompt. All ratings are optional — "Skip" finishes
+// without them; picking a number on any scale and tapping Finish records it.
 function FinishSheet({
   open,
   pending,
@@ -475,15 +476,21 @@ function FinishSheet({
   open: boolean
   pending: boolean
   onClose: () => void
-  onFinish: (ratings?: { energy_level?: number; workout_intensity?: number }) => void
+  onFinish: (ratings?: {
+    energy_level?: number
+    workout_intensity?: number
+    challenge_level?: number
+  }) => void
 }) {
   const [energy, setEnergy] = useState<number | null>(null)
   const [intensity, setIntensity] = useState<number | null>(null)
+  const [challenge, setChallenge] = useState<number | null>(null)
 
   const finish = () => {
-    const ratings: { energy_level?: number; workout_intensity?: number } = {}
+    const ratings: { energy_level?: number; workout_intensity?: number; challenge_level?: number } = {}
     if (energy != null) ratings.energy_level = energy
     if (intensity != null) ratings.workout_intensity = intensity
+    if (challenge != null) ratings.challenge_level = challenge
     onFinish(Object.keys(ratings).length ? ratings : undefined)
   }
 
@@ -496,6 +503,12 @@ function FinishSheet({
           hint="How hard was this session?"
           value={intensity}
           onChange={setIntensity}
+        />
+        <RatingScale
+          label="Workout challenge"
+          hint="Was this appropriately challenging for your level?"
+          value={challenge}
+          onChange={setChallenge}
         />
         <div className="flex gap-2 pt-1">
           <Button className="flex-1" onClick={finish} disabled={pending}>

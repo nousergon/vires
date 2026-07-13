@@ -211,6 +211,7 @@ export interface WorkoutSessionUpdate {
   tags?: string[]
   energy_level?: number | null
   workout_intensity?: number | null
+  challenge_level?: number | null
   template_key?: string
   duration_s?: number | null
   regions?: LoadRegions
@@ -262,6 +263,7 @@ export interface WorkoutSession {
   // End-of-workout 1–10 self-report (null until finished with a rating).
   energy_level: number | null
   workout_intensity: number | null
+  challenge_level: number | null
   template_id: number | null
   exercises: SessionExercise[]
   activity: ActivityDetail | null
@@ -282,6 +284,7 @@ export interface WorkoutSummary {
   tags: string[]
   energy_level: number | null
   workout_intensity: number | null
+  challenge_level: number | null
   activity: ActivityDetail | null
 }
 
@@ -670,7 +673,8 @@ export const api = {
     equipment?: string | null
     force?: boolean
   }) => req<CreateResult>('/exercises', { method: 'POST', body: JSON.stringify(body) }),
-  exerciseHistory: (id: number) => req<ExercisePerformance[]>(`/exercises/${id}/history`),
+  exerciseHistory: (id: number, limit = 10) =>
+    req<ExercisePerformance[]>(`/exercises/${id}/history?limit=${limit}`),
 
   // templates
   listTemplates: () => req<TemplateSummary[]>('/templates'),
@@ -716,9 +720,12 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ occurrence_date: occurrenceDate }),
     }),
-  // Optionally records the end-of-workout 1–10 energy/intensity self-report;
-  // omit the body to just close the session out.
-  finishWorkout: (id: number, body?: { energy_level?: number; workout_intensity?: number }) =>
+  // Optionally records the end-of-workout 1–10 energy/intensity/challenge
+  // self-report; omit the body to just close the session out.
+  finishWorkout: (
+    id: number,
+    body?: { energy_level?: number; workout_intensity?: number; challenge_level?: number },
+  ) =>
     req<WorkoutSession>(`/workouts/${id}/finish`, {
       method: 'POST',
       body: body ? JSON.stringify(body) : undefined,
