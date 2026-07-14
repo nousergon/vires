@@ -11,8 +11,8 @@ const BASE = '/api'
 const AUTH_PROBE_PATH = '/auth/me'
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  // Shared-identity bearer (vires-ops#60); null when there's no shared
-  // session — the legacy vires_session cookie still authenticates then.
+  // Shared-identity bearer (vires-ops#60) — the sole auth path since the
+  // phase-2 cutover retired the legacy vires_session cookie.
   const token = await getIdentityToken()
   const res = await fetch(BASE + path, {
     ...init,
@@ -645,24 +645,13 @@ export interface Me {
   is_admin: boolean
 }
 
-export interface AllowlistEntry {
-  email: string
-  created_at: string
-  used_at: string | null
-}
-
 // ---- endpoints ------------------------------------------------------------ //
 export const api = {
-  // auth — sign-in now lives on the shared nousergon-auth service (see
-  // lib/authClient.ts); only the legacy-session logout and the identity
-  // probe remain Vires endpoints. Legacy magic-link request/verify retire
-  // with the phase-2 destructive migration (vires-ops#60).
-  logout: () => req<void>('/auth/logout', { method: 'POST' }),
+  // auth — sign-in and sign-out both live on the shared nousergon-auth
+  // service now (see lib/authClient.ts); the only Vires-owned auth endpoint
+  // left is the identity probe. The legacy magic-link/session/allowlist
+  // endpoints retired with the phase-2 destructive migration (vires-ops#60).
   getMe: () => req<Me>('/auth/me'),
-  // Admin-only: pre-approve an email so it can sign up without any code.
-  addToAllowlist: (email: string, note?: string) =>
-    req<AllowlistEntry>('/auth/allowlist', { method: 'POST', body: JSON.stringify({ email, note }) }),
-  listAllowlist: () => req<AllowlistEntry[]>('/auth/allowlist'),
 
   // exercises
   searchExercises: (q: string, limit = 25) =>

@@ -15,9 +15,6 @@ _TMP = tempfile.mkdtemp(prefix="vires-test-")
 os.environ["VIRES_DATABASE_URL"] = f"sqlite:///{_TMP}/test.db"
 os.environ["VIRES_VECTOR_STORE_PATH"] = f"{_TMP}/test.npz"
 os.environ["VIRES_NAME_VECTOR_STORE_PATH"] = f"{_TMP}/test_names.npz"
-# No RESEND_API_KEY in tests -> magic-link requests use the dev-mode
-# log-only fallback (see api.services.email) instead of a real network call.
-os.environ["VIRES_ENV"] = "development"
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -48,9 +45,6 @@ _USER_TABLES = [
     "ailment_episodes",
     "push_subscriptions",
     "user_settings",
-    "user_sessions",
-    "magic_link_tokens",
-    "allowed_emails",
 ]
 
 
@@ -132,14 +126,11 @@ def client(db):
 @pytest.fixture()
 def raw_client(db):
     """Like `client`, but WITHOUT the current_identity override — exercises
-    the real cookie-based auth flow end to end (test_auth.py).
+    the real Bearer-JWT auth flow end to end (test_auth_jwt.py).
 
-    ``base_url="https://testserver"``: the session cookie is `Secure`
-    (correctly, for production) — httpx's cookie jar silently drops/never
-    resends a Secure cookie over a plain-http connection, and TestClient
-    defaults to ``http://testserver``. No real TLS handshake happens either
-    way (ASGI transport, not a socket) — this only affects how httpx's
-    cookie jar classifies the scheme.
+    ``base_url="https://testserver"``: harmless holdover from when this
+    fixture also exercised a `Secure` session cookie; kept as-is since no
+    test depends on the scheme today.
     """
     from api.db.session import get_db
     from api.main import app

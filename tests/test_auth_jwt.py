@@ -163,22 +163,15 @@ def test_garbage_token_rejected(raw_client, db):
     assert raw_client.get("/api/auth/me", headers=bearer("not-a-jwt")).status_code == 401
 
 
-def test_invalid_bearer_does_not_fall_back_to_cookie(raw_client, db, monkeypatch):
-    """A presented-but-broken token must 401 even when a perfectly valid
-    legacy session cookie rides along — no silent fallback."""
-    import re
+def test_missing_bearer_is_401(raw_client, db):
+    """No Authorization header at all (the sole auth path since the phase-2
+    cutover, vires-ops#60) is an outright 401 — there's no other path left
+    to fall back to."""
+    assert raw_client.get("/api/auth/me").status_code == 401
 
-    sent: list[tuple[str, str]] = []
 
-    async def fake_send(email: str, link: str) -> None:
-        sent.append((email, link))
-
-    monkeypatch.setattr("api.routers.auth.send_magic_link", fake_send)
-    r = raw_client.post("/api/auth/magic-link", json={"email": "combo@example.com"})
-    assert r.status_code == 200
-    token = re.search(r"[?&]token=([^&]+)", sent[-1][1]).group(1)
-    assert raw_client.post("/api/auth/magic-link/verify", json={"token": token}).status_code == 200
-    # Cookie-only request works…
-    assert raw_client.get("/api/auth/me").status_code == 200
-    # …but a bad bearer alongside it is authoritative and fails.
-    assert raw_client.get("/api/auth/me", headers=bearer("broken")).status_code == 401
+def test_non_bearer_authorization_header_is_401(raw_client, db):
+    """An Authorization header present but not a Bearer scheme (e.g. Basic)
+    is rejected outright, same as a missing header."""
+    r = raw_client.get("/api/auth/me", headers={"Authorization": "Basic garbage"})
+    assert r.status_code == 401

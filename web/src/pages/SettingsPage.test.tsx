@@ -3,6 +3,7 @@ import { screen, fireEvent, waitFor } from '@testing-library/react'
 import { renderWithProviders, SETTINGS } from '../test/utils'
 import SettingsPage from './SettingsPage'
 import { api } from '../lib/api'
+import { authClient } from '../lib/authClient'
 
 beforeEach(() => vi.restoreAllMocks())
 
@@ -81,11 +82,11 @@ describe('SettingsPage', () => {
 
   it('shows the logged-in account and logs out', async () => {
     mockApis()
-    const logout = vi.spyOn(api, 'logout').mockResolvedValue(undefined)
+    const signOut = vi.spyOn(authClient, 'signOut').mockResolvedValue(undefined as never)
     renderWithProviders(<SettingsPage />)
     expect(await screen.findByText('brian@example.com')).toBeInTheDocument()
     expect(screen.getByText(/admin/)).toBeInTheDocument()
     fireEvent.click(screen.getByText('Log out'))
-    await waitFor(() => expect(logout).toHaveBeenCalled())
+    await waitFor(() => expect(signOut).toHaveBeenCalled())
   })
 })

@@ -70,72 +70,24 @@ class User(Base):
         String, nullable=True, unique=True, index=True
     )
     display_name: Mapped[str | None] = mapped_column(String, nullable=True)
-    # True only for the bootstrap first user (see auth.py's _is_bootstrap)
-    # or a user an admin later promotes by hand. Gates POST /auth/allowlist.
+    # True for a user who signed up before the shared-identity cutover as the
+    # legacy bootstrap first user, or one an admin later promoted by hand.
+    # No longer gates anything server-side (the allowlist/admin endpoints it
+    # used to gate were retired with the phase-2 migration, vires-ops#60);
+    # kept because SettingsPage's Account card still displays an "admin"
+    # badge for it.
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
 
 
 # --------------------------------------------------------------------------- #
-# Auth (magic-link + session) — see api.routers.auth, api.db.identity
+# Auth — see api.routers.auth, api.db.identity. The legacy magic-link/
+# session/allowlist tables (MagicLinkToken, UserSession, AllowedEmail) were
+# retired by the phase-2 shared-identity migration (vires-ops#60) once the
+# Bearer-JWT path against the shared nousergon-auth service was verified
+# live; see b8c9d0e1f2a3_identity_user_id and the drop migration that
+# followed it for the history.
 # --------------------------------------------------------------------------- #
-class MagicLinkToken(Base):
-    """A one-time login link sent to an email. Single-use: ``consumed_at`` is
-    set atomically on verify (rowcount-checked update — see auth.py) so a
-    replayed/double-clicked link can't be redeemed twice."""
-
-    __tablename__ = "magic_link_tokens"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    email: Mapped[str] = mapped_column(String, index=True)
-    # SHA-256 hex digest of the raw token mailed to the user — the raw value
-    # is never persisted, mirroring how a password would be hashed at rest.
-    token_hash: Mapped[str] = mapped_column(String, unique=True, index=True)
-    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
-    expires_at: Mapped[datetime] = mapped_column(UTCDateTime())
-    consumed_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
-    # Coarse abuse signal for the request-rate check (count recent rows per
-    # email/IP) — not used for anything beyond that.
-    request_ip: Mapped[str | None] = mapped_column(String, nullable=True)
-
-
-class UserSession(Base):
-    """A logged-in session, keyed by the SHA-256 hash of the opaque random
-    token set in the ``vires_session`` cookie — never the raw value, so a DB
-    leak doesn't hand over usable session tokens. Deliberately NOT a JWT:
-    an opaque, DB-backed token can be revoked (logout deletes the row)."""
-
-    __tablename__ = "user_sessions"
-
-    id: Mapped[str] = mapped_column(String, primary_key=True)
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
-    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
-    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
-    expires_at: Mapped[datetime] = mapped_column(UTCDateTime())
-    last_seen_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
-
-
-class AllowedEmail(Base):
-    """An admin-approved email — a brand-new signup is only permitted (past
-    the bootstrap first user) when their address is a row here, keyed by the
-    address itself rather than a shared secret code the user has to type in.
-    ``used_at``/``used_by_user_id`` are audit-only: unlike a shared invite
-    code, a single email can't race to create two accounts anyway (see the
-    unique index on ``users.email``), so there's no single-use enforcement
-    to get right here — just a record of when/whether it was actually used."""
-
-    __tablename__ = "allowed_emails"
-
-    email: Mapped[str] = mapped_column(String, primary_key=True)
-    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
-    created_by_user_id: Mapped[str | None] = mapped_column(
-        ForeignKey("users.id"), nullable=True
-    )
-    used_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
-    used_by_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
-    note: Mapped[str | None] = mapped_column(String, nullable=True)
-
-
 class UserSettings(Base):
     """Per-user preferences (one row per user). Drives logging defaults + units."""
 
