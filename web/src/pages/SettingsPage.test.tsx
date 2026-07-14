@@ -5,6 +5,13 @@ import SettingsPage from './SettingsPage'
 import { api } from '../lib/api'
 import { authClient } from '../lib/authClient'
 
+vi.mock('../lib/authClient', () => ({
+  AUTH_URL: 'https://auth.nousergon.ai',
+  authClient: { signOut: vi.fn() },
+}))
+
+const signOut = vi.mocked(authClient.signOut)
+
 beforeEach(() => vi.restoreAllMocks())
 
 // Distinct rest value so the test can wait for settings to load (the page
@@ -82,7 +89,7 @@ describe('SettingsPage', () => {
 
   it('shows the logged-in account and logs out', async () => {
     mockApis()
-    const signOut = vi.spyOn(authClient, 'signOut').mockResolvedValue(undefined as never)
+    signOut.mockResolvedValue(undefined as never)
     renderWithProviders(<SettingsPage />)
     expect(await screen.findByText('brian@example.com')).toBeInTheDocument()
     expect(screen.getByText(/admin/)).toBeInTheDocument()
