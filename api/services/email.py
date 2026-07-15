@@ -43,7 +43,7 @@ async def send_magic_link(email: str, link: str) -> None:
             # logger's level (Python defaults to WARNING), so an `info` call
             # here would be silently swallowed — exactly the kind of gap this
             # fallback exists to avoid.
-            log.warning("DEV magic link for %s (no RESEND_API_KEY configured): %s", email, link)
+            log.warning("DEV magic link for user (no RESEND_API_KEY configured)")
             return
         raise EmailError("Email is not configured (RESEND_API_KEY missing).")
 
