@@ -122,7 +122,7 @@ self.addEventListener('sync', (event) => {
 
 // Let the page nudge a drain (e.g. the online-event fallback) via postMessage.
 self.addEventListener('message', (event) => {
-  if (event.data && event.data.type === 'vires-drain-sets') {
+  if (event.origin === self.location.origin && event.data && event.data.type === 'vires-drain-sets') {
     event.waitUntil(drainQueue().catch(() => {}))
   }
 })
