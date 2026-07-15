@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.13"
 
@@ -91,10 +91,10 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: coverage-backend
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: coverage-frontend
       - uses: actions/setup-python@v5
