@@ -144,13 +144,11 @@ function Account() {
   const nav = useNavigate()
   const logout = useMutation({
     mutationFn: async () => {
-      // Two sessions can coexist during the shared-identity transition
-      // (vires-ops#60): the nousergon-auth cross-subdomain session and the
-      // legacy vires_session cookie. Log out of both; signOut on an absent
-      // shared session is an expected no-op (the legacy logout and token
-      // purge below still run).
+      // Sign-out lives entirely on the shared nousergon-auth service since
+      // the phase-2 cutover (vires-ops#60) retired the legacy vires_session
+      // cookie/endpoint; still clear the locally cached identity token so a
+      // stale one can't be reused before the next probe re-fetches it.
       await authClient.signOut().catch(() => {})
-      await api.logout()
       clearIdentityToken()
     },
     onSuccess: () => nav('/login', { replace: true }),

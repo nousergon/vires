@@ -15,8 +15,8 @@ let failedAt = 0
 // mid-request is a pointless 401 round-trip.
 const REFRESH_MARGIN_MS = 60_000
 // After a failed mint (not signed in to the shared service, or it's
-// unreachable), don't re-probe on every single API call — the legacy cookie
-// path still authenticates the request server-side during the transition.
+// unreachable), don't re-probe on every single API call — the caller just
+// sends the request without a bearer and gets the 401 it deserves.
 const RETRY_BACKOFF_MS = 30_000
 
 export async function getIdentityToken(): Promise<string | null> {
@@ -33,8 +33,8 @@ export async function getIdentityToken(): Promise<string | null> {
   } catch {
     // Swallowed by design: "no shared session" is an expected state, not an
     // error — the caller sends the request without a bearer and the backend's
-    // legacy-cookie path (or its 401) decides. Recorded via the 30s backoff +
-    // the eventual 401 redirect to /login.
+    // 401 decides. Recorded via the 30s backoff + the eventual 401 redirect
+    // to /login.
     cached = null
     failedAt = now
     return null

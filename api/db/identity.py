@@ -1,19 +1,19 @@
 """Current-identity resolution.
 
-Two authentication paths coexist during the shared-identity cutover
-(vires-ops#60, phase 1 — non-destructive):
+The shared-identity cutover (vires-ops#60) is complete: Bearer JWT is the
+sole authentication path.
 
-- **Bearer JWT (new, preferred):** an ``Authorization: Bearer <jwt>`` header
-  carrying a short-lived token minted by the shared nousergon-auth service,
-  verified locally against its JWKS (see ``api.services.auth_jwt``). The
-  verified ``sub`` claim resolves to a local ``User`` via the
-  ``identity_user_id`` column — matched by id first, then linked once by
-  email, else JIT-provisioned (the deliberate, planned version of the
-  backfill vires-ops#57 needed reactively).
+An ``Authorization: Bearer <jwt>`` header carries a short-lived token minted
+by the shared nousergon-auth service, verified locally against its JWKS (see
+``api.services.auth_jwt``). The verified ``sub`` claim resolves to a local
+``User`` via the ``identity_user_id`` column — matched by id first, then
+linked once by email, else JIT-provisioned (the deliberate, planned version
+of the backfill vires-ops#57 needed reactively).
 
-- **Legacy session cookie (vires-ops#49):** the ``vires_session`` cookie,
-  hashed and looked up in ``UserSession``. Retired — endpoints and tables
-  dropped — only in a later migration AFTER the JWT path is verified live.
+(The legacy ``vires_session`` cookie path from vires-ops#49 — hashed opaque
+tokens looked up in a ``UserSession`` table — was retired by the phase-2
+destructive migration once this JWT path was verified live in production;
+see git history for that code if it's ever needed for reference.)
 
 ``dev_auth_bypass`` (local-dev-only, see ``api.config``) skips all of this
 and returns the hardcoded dev identity; it must never be true in a deployed
@@ -24,40 +24,24 @@ were always built for.
 
 from __future__ import annotations
 
-import hashlib
-import secrets
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
 
-from fastapi import Cookie, Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from api.config import get_settings
-from api.db.models import Tenant, User, UserSession, UserSettings
+from api.db.models import Tenant, User, UserSettings
 from api.db.session import get_db
 from api.services.auth_jwt import IdentityTokenError, verify_identity_token
-
-SESSION_COOKIE_NAME = "vires_session"
 
 
 @dataclass(frozen=True)
 class Identity:
     tenant_id: str
     user_id: str
-
-
-def hash_token(raw: str) -> str:
-    """SHA-256 hex digest — used for both session tokens and magic-link
-    tokens. Correct for high-entropy random values (unlike a password, there's
-    no brute-force risk a slow/salted hash would need to defend against)."""
-    return hashlib.sha256(raw.encode()).hexdigest()
-
-
-def new_opaque_token() -> str:
-    return secrets.token_urlsafe(32)
 
 
 def _resolve_identity_user(db: Session, sub: str, email: str | None) -> User:
@@ -127,38 +111,16 @@ def _identity_from_bearer(db: Session, token: str) -> Identity:
 
 def current_identity(
     db: Session = Depends(get_db),
-    session_token: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
     authorization: str | None = Header(default=None),
 ) -> Identity:
     settings = get_settings()
     if settings.dev_auth_bypass:
         return Identity(tenant_id=settings.dev_tenant_id, user_id=settings.dev_user_id)
 
-    # A presented bearer token is authoritative: it either verifies or the
-    # request is 401 — no silent fallback to the cookie path, which would let
-    # a broken/expired token mask itself behind a stale session.
     if authorization is not None and authorization.lower().startswith("bearer "):
         return _identity_from_bearer(db, authorization[7:].strip())
 
-    if not session_token:
-        raise HTTPException(401, "Not authenticated")
-
-    now = datetime.now(UTC)
-    sess = db.get(UserSession, hash_token(session_token))
-    if sess is None or sess.expires_at <= now:
-        raise HTTPException(401, "Session expired or invalid")
-
-    # Rolling refresh: a session touched within the last day gets pushed back
-    # out to a full session_ttl_seconds from now (mirrors better-auth's
-    # updateAge) — an abandoned session still expires on schedule.
-    if (sess.expires_at - now) < timedelta(
-        seconds=settings.session_ttl_seconds - settings.session_refresh_threshold_seconds
-    ):
-        sess.expires_at = now + timedelta(seconds=settings.session_ttl_seconds)
-    sess.last_seen_at = now
-    db.commit()
-
-    return Identity(tenant_id=sess.tenant_id, user_id=sess.user_id)
+    raise HTTPException(401, "Not authenticated")
 
 
 def ensure_dev_identity(session: Session) -> Identity:
