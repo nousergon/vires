@@ -23,7 +23,7 @@
     "react-router-dom": "^7.18.0"
   },
   "devDependencies": {
-    "@capacitor/cli": "^7.6.7",
+    "@capacitor/cli": "^8.4.2",
     "@tailwindcss/vite": "^4.3.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
