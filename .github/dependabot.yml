@@ -1,11 +1,15 @@
 # Standard fleet Dependabot config (weekly, grouped minor+patch) — alpha-engine-config-I2525
-# Majors bundled + delayed via cooldown (NOT a second schedule block — Dependabot
+# Majors bundled into their own group (NOT a second schedule block — Dependabot
 # v2 requires a unique (ecosystem, directory, target-branch) combination per
 # `updates:` entry; two blocks for the same ecosystem+directory is a schema
 # violation ("Update configs must have a unique combination..."), which is what
-# broke this file — repo-wide Dependabot updates were silently disabled.
-# cooldown.semver-major-days delays major-bump PRs ~monthly without a second
-# schedule block. — alpha-engine-config-I2734
+# broke this file originally — repo-wide Dependabot updates were silently
+# disabled. `cooldown.semver-major-days` (to delay major PRs ~monthly) is
+# NOT supported for the github-actions ecosystem — confirmed via the live
+# `.github/dependabot.yml` check-run error ("The property
+# '#/updates/2/cooldown/semver-major-days' is not supported for the package
+# ecosystem 'github-actions'"), so it's applied to uv/npm only; github-actions
+# majors are grouped without a cooldown delay. — alpha-engine-config-I2734
 version: 2
 updates:
   - package-ecosystem: uv
@@ -50,5 +54,3 @@ updates:
       majors:
         update-types:
           - major
-    cooldown:
-      semver-major-days: 30
