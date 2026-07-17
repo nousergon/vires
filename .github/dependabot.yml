@@ -1,5 +1,11 @@
 # Standard fleet Dependabot config (weekly, grouped minor+patch) — alpha-engine-config-I2525
-# Majors are grouped into a single monthly PR per ecosystem — alpha-engine-config-I2734
+# Majors bundled + delayed via cooldown (NOT a second schedule block — Dependabot
+# v2 requires a unique (ecosystem, directory, target-branch) combination per
+# `updates:` entry; two blocks for the same ecosystem+directory is a schema
+# violation ("Update configs must have a unique combination..."), which is what
+# broke this file — repo-wide Dependabot updates were silently disabled.
+# cooldown.semver-major-days delays major-bump PRs ~monthly without a second
+# schedule block. — alpha-engine-config-I2734
 version: 2
 updates:
   - package-ecosystem: uv
@@ -11,24 +17,11 @@ updates:
         update-types:
           - minor
           - patch
-    ignore:
-      - dependency-name: "*"
-        update-types:
-          - "version-update:semver-major"
-
-  - package-ecosystem: uv
-    directory: "/"
-    schedule:
-      interval: monthly
-    groups:
       majors:
         update-types:
           - major
-    ignore:
-      - dependency-name: "*"
-        update-types:
-          - "version-update:semver-minor"
-          - "version-update:semver-patch"
+    cooldown:
+      semver-major-days: 30
 
   - package-ecosystem: npm
     directory: "/web"
@@ -39,24 +32,11 @@ updates:
         update-types:
           - minor
           - patch
-    ignore:
-      - dependency-name: "*"
-        update-types:
-          - "version-update:semver-major"
-
-  - package-ecosystem: npm
-    directory: "/web"
-    schedule:
-      interval: monthly
-    groups:
       majors:
         update-types:
           - major
-    ignore:
-      - dependency-name: "*"
-        update-types:
-          - "version-update:semver-minor"
-          - "version-update:semver-patch"
+    cooldown:
+      semver-major-days: 30
 
   - package-ecosystem: github-actions
     directory: "/"
@@ -67,22 +47,8 @@ updates:
         update-types:
           - minor
           - patch
-    ignore:
-      - dependency-name: "*"
-        update-types:
-          - "version-update:semver-major"
-
-  - package-ecosystem: github-actions
-    directory: "/"
-    schedule:
-      interval: monthly
-    groups:
       majors:
         update-types:
           - major
-    ignore:
-      - dependency-name: "*"
-        update-types:
-          - "version-update:semver-minor"
-          - "version-update:semver-patch"
-
+    cooldown:
+      semver-major-days: 30
