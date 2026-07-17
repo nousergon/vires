@@ -18,6 +18,7 @@ import sys
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
+from api.db.exercise_taxonomy import infer_movement_pattern
 from api.db.fts import build_keywords, fts_sync_exercise, fts_upsert
 from api.db.identity import ensure_dev_identity
 from api.db.models import Exercise, ExerciseAlias
@@ -91,6 +92,32 @@ def backfill_is_timed(session: Session) -> int:
     return n
 
 
+def backfill_movement_pattern(session: Session) -> int:
+    """(Re-)classify movement_pattern on every canonical exercise.
+
+    Runs on every seed() call (reset or not) so a taxonomy-rule change in
+    api.db.exercise_taxonomy lands on existing rows without a full reseed.
+    Also backfills provisional/user exercises created before this column
+    existed, since infer_movement_pattern only needs fields already on the row.
+    """
+    n = 0
+    for ex in session.scalars(select(Exercise)):
+        target = infer_movement_pattern(
+            name=ex.name,
+            primary_muscles=ex.primary_muscles,
+            secondary_muscles=ex.secondary_muscles,
+            equipment=ex.equipment,
+            mechanic=ex.mechanic,
+            category=ex.category,
+            is_timed=ex.is_timed,
+        )
+        if ex.movement_pattern != target:
+            ex.movement_pattern = target
+            n += 1
+    session.commit()
+    return n
+
+
 def seed(session: Session, reset: bool = False) -> int:
     ensure_dev_identity(session)
 
@@ -99,9 +126,11 @@ def seed(session: Session, reset: bool = False) -> int:
     )
     if existing and not reset:
         n_timed = backfill_is_timed(session)  # keep is_timed in sync without a full reseed
+        n_pattern = backfill_movement_pattern(session)
         print(
             f"Catalog already has {existing} canonical exercises; skipping "
-            f"(use --reset). Backfilled is_timed on {n_timed}."
+            f"(use --reset). Backfilled is_timed on {n_timed}, "
+            f"movement_pattern on {n_pattern}."
         )
         return 0
     if reset:
@@ -116,6 +145,7 @@ def seed(session: Session, reset: bool = False) -> int:
         if not name:
             continue
         instructions = rec.get("instructions") or []
+        is_timed = rec.get("force") == "static"  # isometric holds -> timed
         ex = Exercise(
             tenant_id=None,
             name=name,
@@ -125,9 +155,18 @@ def seed(session: Session, reset: bool = False) -> int:
             equipment=rec.get("equipment"),
             mechanic=rec.get("mechanic"),
             category=rec.get("category"),
+            movement_pattern=infer_movement_pattern(
+                name=name,
+                primary_muscles=rec.get("primaryMuscles"),
+                secondary_muscles=rec.get("secondaryMuscles"),
+                equipment=rec.get("equipment"),
+                mechanic=rec.get("mechanic"),
+                category=rec.get("category"),
+                is_timed=is_timed,
+            ),
             description="\n".join(instructions) if instructions else None,
             provenance="canonical",
-            is_timed=rec.get("force") == "static",  # isometric holds -> timed
+            is_timed=is_timed,
         )
         session.add(ex)
         session.flush()  # assign ex.id for the FTS rowid

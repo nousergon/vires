@@ -269,7 +269,14 @@ describe('PlanPage', () => {
         {
           id: 11,
           order_index: 0,
-          exercise: { id: 101, name: 'Step-up', primary_muscles: [], equipment: null, is_timed: false },
+          exercise: {
+            id: 101,
+            name: 'Step-up',
+            primary_muscles: [],
+            equipment: null,
+            is_timed: false,
+            movement_pattern: null,
+          },
           target_sets: 3,
           target_reps: 8,
           target_weight: 95,

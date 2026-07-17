@@ -84,4 +84,57 @@ describe('TemplatesPage', () => {
     fireEvent.click(await screen.findByText('Delete'))
     await waitFor(() => expect(del).toHaveBeenCalledWith(3))
   })
+
+  it('shows coach swap feedback instead of closing when a save swaps an exercise', async () => {
+    vi.spyOn(api, 'listTemplates').mockResolvedValue([makeTemplateSummary({ id: 3, name: 'Push' })])
+    vi.spyOn(api, 'getTemplate').mockResolvedValue(
+      makeTemplate({
+        id: 3,
+        name: 'Push',
+        exercises: [
+          {
+            id: 1,
+            order_index: 0,
+            exercise: makeBrief({ name: 'Bench' }),
+            target_sets: 3,
+            target_reps: 8,
+            target_weight: 135,
+            target_duration_seconds: null,
+            rest_seconds: 90,
+            notes: null,
+          },
+        ],
+      }),
+    )
+    const update = vi.spyOn(api, 'updateTemplate').mockResolvedValue(
+      makeTemplate({
+        id: 3,
+        name: 'Push',
+        swap_feedback: [
+          {
+            from_exercise: makeBrief({ id: 1, name: 'Bench' }),
+            to_exercise: makeBrief({ id: 2, name: 'Floor Press' }),
+            verdict: 'equivalent',
+            same_pattern: true,
+            muscle_overlap: 0.6,
+            equipment_changed: false,
+            rationale: 'Solid equivalent — both are horizontal_push pattern.',
+          },
+        ],
+      }),
+    )
+    renderWithProviders(<TemplatesPage />)
+    fireEvent.click(await screen.findByText('Push'))
+    fireEvent.click(await screen.findByText('Save changes'))
+    await waitFor(() => expect(update).toHaveBeenCalled())
+
+    expect(await screen.findByText('Coach feedback on your changes')).toBeInTheDocument()
+    expect(screen.getByText('Bench → Floor Press')).toBeInTheDocument()
+    expect(screen.getByText('Solid equivalent')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('Done'))
+    await waitFor(() =>
+      expect(screen.queryByText('Coach feedback on your changes')).not.toBeInTheDocument(),
+    )
+  })
 })

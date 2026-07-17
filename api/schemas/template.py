@@ -9,6 +9,19 @@ from pydantic import BaseModel, Field
 from api.schemas.exercise import ExerciseBrief
 
 
+class SwapFeedbackOut(BaseModel):
+    """Equivalence judgment for one exercise substitution detected on a
+    template update — see api.services.exercise_swap.evaluate_swap."""
+
+    from_exercise: ExerciseBrief
+    to_exercise: ExerciseBrief
+    verdict: str  # equivalent | comparable | different_stimulus
+    same_pattern: bool
+    muscle_overlap: float
+    equipment_changed: bool
+    rationale: str
+
+
 class TemplateExerciseIn(BaseModel):
     exercise_id: int
     target_sets: int | None = None
@@ -51,6 +64,9 @@ class TemplateOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     exercises: list[TemplateExerciseOut]
+    # Populated on PUT /templates/{id} when the exercise list changed —
+    # one entry per detected substitution (not present on GET/POST).
+    swap_feedback: list[SwapFeedbackOut] = []
 
 
 class TemplateSummary(BaseModel):

@@ -71,3 +71,67 @@ def test_create_template_unknown_exercise_400(client):
         "/api/templates", json={"name": "Bad", "exercises": [{"exercise_id": 99999999}]}
     )
     assert r.status_code == 400
+
+
+def _exercise_id(client, q: str) -> int:
+    return client.get("/api/exercises/search", params={"q": q}).json()[0]["exercise"]["id"]
+
+
+def test_update_template_swap_feedback_equivalent(client):
+    """Swapping RDL for trap bar deadlift (same hinge pattern) -> 'equivalent'."""
+    rdl = _exercise_id(client, "romanian deadlift")
+    trap_bar = _exercise_id(client, "trap bar deadlift")
+    tpl = client.post(
+        "/api/templates", json={"name": "Lower Body", "exercises": [{"exercise_id": rdl}]}
+    ).json()
+
+    r = client.put(
+        f"/api/templates/{tpl['id']}",
+        json={"exercises": [{"exercise_id": trap_bar}]},
+    )
+    assert r.status_code == 200
+    feedback = r.json()["swap_feedback"]
+    assert len(feedback) == 1
+    fb = feedback[0]
+    assert fb["from_exercise"]["id"] == rdl
+    assert fb["to_exercise"]["id"] == trap_bar
+    assert fb["verdict"] == "equivalent"
+    assert fb["same_pattern"] is True
+
+
+def test_update_template_swap_feedback_different_stimulus(client):
+    """Swapping a hinge movement for an isolation curl -> flagged, not silently accepted."""
+    rdl = _exercise_id(client, "romanian deadlift")
+    curl = _exercise_id(client, "barbell curl")
+    tpl = client.post(
+        "/api/templates", json={"name": "Lower Body", "exercises": [{"exercise_id": rdl}]}
+    ).json()
+
+    r = client.put(
+        f"/api/templates/{tpl['id']}",
+        json={"exercises": [{"exercise_id": curl}]},
+    )
+    assert r.status_code == 200
+    feedback = r.json()["swap_feedback"]
+    assert len(feedback) == 1
+    assert feedback[0]["verdict"] == "different_stimulus"
+    assert feedback[0]["same_pattern"] is False
+
+
+def test_update_template_no_swap_feedback_when_exercises_unchanged(client):
+    e1, _ = _two_exercise_ids(client)
+    tpl = client.post(
+        "/api/templates", json={"name": "Push Day", "exercises": [{"exercise_id": e1}]}
+    ).json()
+
+    r = client.put(f"/api/templates/{tpl['id']}", json={"name": "Push Day v2"})
+    assert r.status_code == 200
+    assert r.json()["swap_feedback"] == []
+
+
+def test_create_template_has_empty_swap_feedback(client):
+    e1, _ = _two_exercise_ids(client)
+    tpl = client.post(
+        "/api/templates", json={"name": "Push Day", "exercises": [{"exercise_id": e1}]}
+    ).json()
+    assert tpl["swap_feedback"] == []

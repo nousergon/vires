@@ -76,6 +76,7 @@ export default function ExercisePicker({
     primary_muscles: ex.primary_muscles,
     equipment: ex.equipment,
     is_timed: ex.is_timed,
+    movement_pattern: ex.movement_pattern,
   })
 
   return (

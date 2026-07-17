@@ -10,6 +10,7 @@ from api.db.identity import Identity, current_identity
 from api.db.models import Exercise, TemplateExercise, WorkoutTemplate
 from api.db.session import get_db
 from api.schemas.template import (
+    SwapFeedbackOut,
     TemplateCreate,
     TemplateExerciseIn,
     TemplateExerciseOut,
@@ -18,11 +19,14 @@ from api.schemas.template import (
     TemplateUpdate,
 )
 from api.serializers import to_exercise_brief
+from api.services.exercise_swap import detect_swaps, evaluate_swap
 
 router = APIRouter(prefix="/templates", tags=["templates"])
 
 
-def to_template_out(tpl: WorkoutTemplate) -> TemplateOut:
+def to_template_out(
+    tpl: WorkoutTemplate, swap_feedback: list[SwapFeedbackOut] | None = None
+) -> TemplateOut:
     return TemplateOut(
         id=tpl.id,
         name=tpl.name,
@@ -43,7 +47,33 @@ def to_template_out(tpl: WorkoutTemplate) -> TemplateOut:
             )
             for te in tpl.exercises
         ],
+        swap_feedback=swap_feedback or [],
     )
+
+
+def _swap_feedback(
+    db: Session, old_ids: list[int], new_ids: list[int]
+) -> list[SwapFeedbackOut]:
+    """Evaluate every detected substitution between the pre- and post-update
+    exercise lists. Both ids are always real catalog ids at this point —
+    _resolve_exercises already 400s on an unknown exercise_id."""
+    out: list[SwapFeedbackOut] = []
+    for old_id, new_id in detect_swaps(old_ids, new_ids):
+        old_ex = db.get(Exercise, old_id)
+        new_ex = db.get(Exercise, new_id)
+        evaluation = evaluate_swap(old_ex, new_ex)
+        out.append(
+            SwapFeedbackOut(
+                from_exercise=to_exercise_brief(old_ex),
+                to_exercise=to_exercise_brief(new_ex),
+                verdict=evaluation.verdict,
+                same_pattern=evaluation.same_pattern,
+                muscle_overlap=evaluation.muscle_overlap,
+                equipment_changed=evaluation.equipment_changed,
+                rationale=evaluation.rationale,
+            )
+        )
+    return out
 
 
 def _resolve_exercises(
@@ -142,11 +172,15 @@ def update_template(
         tpl.name = body.name.strip()
     if body.notes is not None:
         tpl.notes = body.notes
+    swap_feedback: list[SwapFeedbackOut] = []
     if body.exercises is not None:
-        tpl.exercises = _resolve_exercises(db, body.exercises, ident)  # replaces (orphan-deleted)
+        old_ids = [te.exercise_id for te in tpl.exercises]
+        new_rows = _resolve_exercises(db, body.exercises, ident)
+        swap_feedback = _swap_feedback(db, old_ids, [r.exercise_id for r in new_rows])
+        tpl.exercises = new_rows  # replaces (orphan-deleted)
     db.commit()
     db.refresh(tpl)
-    return to_template_out(tpl)
+    return to_template_out(tpl, swap_feedback)
 
 
 @router.delete("/{template_id}", status_code=204)

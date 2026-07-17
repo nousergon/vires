@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from api.db.exercise_taxonomy import infer_movement_pattern
 from api.db.fts import fts_sync_exercise
 from api.db.identity import Identity, current_identity
 from api.db.models import Exercise, ExerciseAlias, SessionExercise, WorkoutSession
@@ -91,6 +92,14 @@ def create_exercise(
         equipment=body.equipment,
         mechanic=body.mechanic,
         category=body.category,
+        movement_pattern=infer_movement_pattern(
+            name=name,
+            primary_muscles=body.primary_muscles,
+            secondary_muscles=body.secondary_muscles,
+            equipment=body.equipment,
+            mechanic=body.mechanic,
+            category=body.category,
+        ),
         description=body.description,
         provenance="user",
         created_by_user_id=ident.user_id,
