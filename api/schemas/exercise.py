@@ -15,6 +15,7 @@ class ExerciseOut(BaseModel):
     equipment: str | None = None
     mechanic: str | None = None
     category: str | None = None
+    movement_pattern: str | None = None
     description: str | None = None
     provenance: str
     is_timed: bool = False
@@ -29,6 +30,7 @@ class ExerciseBrief(BaseModel):
     primary_muscles: list[str] = []
     equipment: str | None = None
     is_timed: bool = False
+    movement_pattern: str | None = None
 
 
 class ExerciseSearchOut(BaseModel):

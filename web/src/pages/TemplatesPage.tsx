@@ -1,6 +1,12 @@
 import { useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, type ExerciseBrief, type Template, type TemplateExerciseInput } from '../lib/api'
+import {
+  api,
+  type ExerciseBrief,
+  type SwapFeedback,
+  type Template,
+  type TemplateExerciseInput,
+} from '../lib/api'
 import { Button, Card, EmptyState, PageTitle, Sheet, Spinner } from '../components/ui'
 import ExercisePicker from '../components/ExercisePicker'
 import { useSettings } from '../lib/useSettings'
@@ -90,6 +96,7 @@ function TemplateEditor({
     })) ?? [],
   )
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [swapFeedback, setSwapFeedback] = useState<SwapFeedback[] | null>(null)
   const settings = useSettings()
 
   const save = useMutation({
@@ -106,7 +113,15 @@ function TemplateEditor({
         ? api.updateTemplate(initial.id, { name, exercises })
         : api.createTemplate({ name, exercises })
     },
-    onSuccess: onSaved,
+    onSuccess: (saved) => {
+      // Show the coach's swap feedback before closing, rather than silently
+      // accepting the substitution — the whole point of computing it.
+      if (saved.swap_feedback.length > 0) {
+        setSwapFeedback(saved.swap_feedback)
+      } else {
+        onSaved()
+      }
+    },
   })
 
   const addRow = (ex: ExerciseBrief) =>
@@ -128,6 +143,21 @@ function TemplateEditor({
   const removeRow = (i: number) => setRows((r) => r.filter((_, idx) => idx !== i))
 
   const numOrNull = (v: string) => (v === '' ? null : Number(v))
+
+  if (swapFeedback) {
+    return (
+      <Sheet open onClose={onSaved} title="Coach feedback on your changes">
+        <div className="space-y-3">
+          {swapFeedback.map((fb, i) => (
+            <SwapFeedbackCard key={i} feedback={fb} />
+          ))}
+        </div>
+        <Button className="mt-4 w-full" onClick={onSaved}>
+          Done
+        </Button>
+      </Sheet>
+    )
+  }
 
   return (
     <Sheet open onClose={onClose} title={initial ? 'Edit routine' : 'New routine'}>
@@ -190,6 +220,32 @@ function TemplateEditor({
 
       <ExercisePicker open={pickerOpen} onClose={() => setPickerOpen(false)} onSelect={addRow} />
     </Sheet>
+  )
+}
+
+const VERDICT_STYLE: Record<SwapFeedback['verdict'], { label: string; className: string }> = {
+  equivalent: { label: 'Solid equivalent', className: 'bg-emerald-900/40 text-emerald-300' },
+  comparable: { label: 'Reasonable alternative', className: 'bg-amber-900/40 text-amber-300' },
+  different_stimulus: {
+    label: 'Different stimulus',
+    className: 'bg-red-900/40 text-red-300',
+  },
+}
+
+function SwapFeedbackCard({ feedback }: { feedback: SwapFeedback }) {
+  const style = VERDICT_STYLE[feedback.verdict]
+  return (
+    <Card className="p-3">
+      <div className="mb-1 flex items-center justify-between">
+        <span className="text-sm font-medium">
+          {feedback.from_exercise.name} → {feedback.to_exercise.name}
+        </span>
+        <span className={`rounded-full px-2 py-0.5 text-xs ${style.className}`}>
+          {style.label}
+        </span>
+      </div>
+      <p className="text-xs text-slate-400">{feedback.rationale}</p>
+    </Card>
   )
 }
 

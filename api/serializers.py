@@ -33,6 +33,7 @@ def to_exercise_out(ex: Exercise) -> ExerciseOut:
         equipment=ex.equipment,
         mechanic=ex.mechanic,
         category=ex.category,
+        movement_pattern=ex.movement_pattern,
         description=ex.description,
         provenance=ex.provenance,
         is_timed=ex.is_timed,
@@ -47,6 +48,7 @@ def to_exercise_brief(ex: Exercise) -> ExerciseBrief:
         primary_muscles=ex.primary_muscles or [],
         equipment=ex.equipment,
         is_timed=ex.is_timed,
+        movement_pattern=ex.movement_pattern,
     )
 
 

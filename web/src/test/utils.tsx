@@ -44,7 +44,15 @@ export const SETTINGS: Settings = {
 // ---- typed fixture builders ----------------------------------------------- //
 
 export function makeBrief(over: Partial<ExerciseBrief> = {}): ExerciseBrief {
-  return { id: 1, name: 'Bench Press', primary_muscles: ['chest'], equipment: 'barbell', is_timed: false, ...over }
+  return {
+    id: 1,
+    name: 'Bench Press',
+    primary_muscles: ['chest'],
+    equipment: 'barbell',
+    is_timed: false,
+    movement_pattern: 'horizontal_push',
+    ...over,
+  }
 }
 
 export function makeExercise(over: Partial<Exercise> = {}): Exercise {
@@ -148,6 +156,7 @@ export function makeTemplate(over: Partial<Template> = {}): Template {
     created_at: '2026-06-20T00:00:00Z',
     updated_at: '2026-06-20T00:00:00Z',
     exercises: [],
+    swap_feedback: [],
     ...over,
   }
 }

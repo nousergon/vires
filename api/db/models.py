@@ -156,6 +156,9 @@ class Exercise(Base):
     equipment: Mapped[str | None] = mapped_column(String, nullable=True)
     mechanic: Mapped[str | None] = mapped_column(String, nullable=True)  # compound/isolation
     category: Mapped[str | None] = mapped_column(String, nullable=True)  # strength/cardio/...
+    # Fundamental movement pattern (squat/hinge/horizontal_push/...) — see
+    # api.db.exercise_taxonomy. Drives exercise-swap equivalence evaluation.
+    movement_pattern: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 'canonical' (curated), 'provisional' (model/user-created, unverified), 'user'
     provenance: Mapped[str] = mapped_column(String, default="provisional", index=True)

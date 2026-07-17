@@ -51,6 +51,7 @@ export interface ExerciseBrief {
   primary_muscles: string[]
   equipment: string | null
   is_timed: boolean
+  movement_pattern: string | null
 }
 
 export interface Exercise extends ExerciseBrief {
@@ -300,6 +301,16 @@ export interface TemplateExercise {
   notes: string | null
 }
 
+export interface SwapFeedback {
+  from_exercise: ExerciseBrief
+  to_exercise: ExerciseBrief
+  verdict: 'equivalent' | 'comparable' | 'different_stimulus'
+  same_pattern: boolean
+  muscle_overlap: number
+  equipment_changed: boolean
+  rationale: string
+}
+
 export interface Template {
   id: number
   name: string
@@ -307,6 +318,8 @@ export interface Template {
   created_at: string
   updated_at: string
   exercises: TemplateExercise[]
+  // Populated on PUT (a save that changed the exercise list); empty on GET/POST.
+  swap_feedback: SwapFeedback[]
 }
 
 export interface TemplateSummary {

@@ -158,7 +158,14 @@ describe('HistoryPage', () => {
     vi.spyOn(api, 'listWorkouts').mockResolvedValue([])
     vi.spyOn(api, 'records').mockResolvedValue([
       {
-        exercise: { id: 5, name: 'Bench Press', primary_muscles: [], equipment: null, is_timed: false },
+        exercise: {
+          id: 5,
+          name: 'Bench Press',
+          primary_muscles: [],
+          equipment: null,
+          is_timed: false,
+          movement_pattern: null,
+        },
         is_timed: false,
         est_1rm: { value: 247.5, weight: 225, reps: 3, date: '2026-06-20' },
         heaviest: { value: 225, weight: 225, reps: 1, date: '2026-06-20' },
