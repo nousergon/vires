@@ -4,16 +4,17 @@ Reports the build-id (git SHA in CI, else the local short SHA) of the frontend
 bundle currently on disk — ``web/dist/version.json``, written by the Vite build.
 
 This is served here by FastAPI, deliberately NOT as a precached static asset, so
-an already-open PWA can detect staleness with a plain ``fetch('/version')`` even
-when the service worker's own ``autoUpdate`` path is wedged (the failure that
-left an installed app silently running 5-day-old JS on 2026-07-10). Because the
-response carries ``Cache-Control: no-store`` and the route is not a navigation
-request, neither the HTTP cache nor the Workbox SW ever hands back a stale copy
-of it — so the staleness signal keeps working even if the SW update path breaks
-again.
+an already-open PWA can detect staleness with a plain ``fetch('/app/version')``
+even when the service worker's own ``autoUpdate`` path is wedged (the failure
+that left an installed app silently running 5-day-old JS on 2026-07-10).
+Because the response carries ``Cache-Control: no-store`` and the route is not a
+navigation request, neither the HTTP cache nor the Workbox SW ever hands back a
+stale copy of it — so the staleness signal keeps working even if the SW update
+path breaks again.
 
-Kept at root (like ``/health``), registered before the SPA catch-all in
-``api.main`` so it resolves ahead of the ``/{full_path:path}`` fallback.
+Mounted under ``/app`` (unlike ``/health``, which stays at bare root for the
+origin-only deploy healthcheck) — registered before the SPA catch-all in
+``api.main`` so it resolves ahead of the ``/app/{full_path:path}`` fallback.
 """
 
 from __future__ import annotations

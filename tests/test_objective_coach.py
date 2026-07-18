@@ -254,7 +254,7 @@ def test_recurring_event_is_expanded_into_coach_context(client, db):
 
     # A weekly leg-heavy commitment anchored on an in-window Tuesday.
     r = client.post(
-        "/api/workouts/activity",
+        "/app/api/workouts/activity",
         json={
             "name": "Wednesday hoops",
             "template_key": "league_game",
@@ -327,7 +327,7 @@ def test_logged_activity_reaches_the_coach_context(client, db):
     from api.services.coach.context import build_coach_objective_context
 
     r = client.post(
-        "/api/workouts/activity",
+        "/app/api/workouts/activity",
         json={
             "name": "Indoor top-rope",
             "template_key": "climbing_indoor_toprope",
@@ -355,7 +355,7 @@ def test_activity_outside_the_lookback_window_does_not_reach_the_coach(client, d
     from api.services.coach.context import build_coach_objective_context
 
     r = client.post(
-        "/api/workouts/activity",
+        "/app/api/workouts/activity",
         json={
             "name": "Old swim",
             "regions": "full",
@@ -420,15 +420,15 @@ def _install_capturing(monkeypatch, tpl_id: int):
 
 def test_generate_feeds_active_objective_and_constraint(client, monkeypatch):
     # a template to ground on
-    hits = client.get("/api/exercises/search", params={"q": "step up"}).json()
+    hits = client.get("/app/api/exercises/search", params={"q": "step up"}).json()
     ex_id = hits[0]["exercise"]["id"]
     tpl = client.post(
-        "/api/templates",
+        "/app/api/templates",
         json={"name": "Lower", "exercises": [{"exercise_id": ex_id, "target_sets": 3}]},
     ).json()
     # an active objective + constraint
     client.post(
-        "/api/objectives",
+        "/app/api/objectives",
         json={
             "name": "Climb Baker",
             "kind": "dated",
@@ -438,7 +438,7 @@ def test_generate_feeds_active_objective_and_constraint(client, monkeypatch):
         },
     )
     client.post(
-        "/api/constraints",
+        "/app/api/constraints",
         json={
             "kind": "injury",
             "label": "recovering L4-L5 disc",
@@ -447,7 +447,7 @@ def test_generate_feeds_active_objective_and_constraint(client, monkeypatch):
     )
 
     _install_capturing(monkeypatch, tpl["id"])
-    r = client.post("/api/coach/generate", json={"message": "build my plan"})
+    r = client.post("/app/api/coach/generate", json={"message": "build my plan"})
     assert r.status_code == 200, r.text
 
     # the model saw the objective + constraint in its user message
@@ -461,25 +461,25 @@ def test_generate_feeds_active_objective_and_constraint(client, monkeypatch):
 def test_generate_feeds_full_dated_timeline(client, monkeypatch):
     """With two dated objectives, the model sees the timeline (both peaks),
     focused on the nearer one. Far-future dates keep 'upcoming' run-date-stable."""
-    hits = client.get("/api/exercises/search", params={"q": "step up"}).json()
+    hits = client.get("/app/api/exercises/search", params={"q": "step up"}).json()
     ex_id = hits[0]["exercise"]["id"]
     tpl = client.post(
-        "/api/templates",
+        "/app/api/templates",
         json={"name": "Lower", "exercises": [{"exercise_id": ex_id, "target_sets": 3}]},
     ).json()
     # two dated peaks, neither pinned -> focus is derived as the soonest
     client.post(
-        "/api/objectives",
+        "/app/api/objectives",
         json={"name": "Climb Baker", "kind": "dated", "target_date": "2030-09-05",
               "sport": "alpine"},
     )
     client.post(
-        "/api/objectives",
+        "/app/api/objectives",
         json={"name": "Run a 50k", "kind": "dated", "target_date": "2030-07-15"},
     )
 
     _install_capturing(monkeypatch, tpl["id"])
-    r = client.post("/api/coach/generate", json={"message": "build my plan"})
+    r = client.post("/app/api/coach/generate", json={"message": "build my plan"})
     assert r.status_code == 200, r.text
 
     user_text = _CapturingClient.captured[0]["messages"][0]["content"]
@@ -546,18 +546,18 @@ def test_generate_accepts_and_materializes_a_phased_season(client, monkeypatch):
 
     from api.config import get_settings
 
-    e = client.get("/api/exercises/search", params={"q": "step up"}).json()[0]["exercise"]["id"]
+    e = client.get("/app/api/exercises/search", params={"q": "step up"}).json()[0]["exercise"]["id"]
     tpl = client.post(
-        "/api/templates",
+        "/app/api/templates",
         json={"name": "Lower", "exercises": [{"exercise_id": e, "target_sets": 3}]},
     ).json()
     o1 = client.post(
-        "/api/objectives",
+        "/app/api/objectives",
         json={"name": "Baker", "kind": "dated", "target_date": "2030-06-23",
               "event_end_date": "2030-06-25", "sport": "alpine"},
     ).json()
     o2 = client.post(
-        "/api/objectives",
+        "/app/api/objectives",
         json={"name": "Kangaroo Temple", "kind": "dated", "target_date": "2030-07-21"},
     ).json()
 
@@ -599,7 +599,7 @@ def test_generate_accepts_and_materializes_a_phased_season(client, monkeypatch):
     monkeypatch.setattr(get_settings(), "anthropic_api_key", "test-key")
     monkeypatch.setattr(anthropic, "Anthropic", _Cli)
 
-    r = client.post("/api/coach/generate", json={"message": "plan my whole season"})
+    r = client.post("/app/api/coach/generate", json={"message": "plan my whole season"})
     assert r.status_code == 200, r.text
     # both blocks materialized (2 weeks each)
     assert len(r.json()["planned_workouts"]) == 4
@@ -635,7 +635,7 @@ def test_future_activity_is_an_event_not_a_recent_activity(client, db):
     from api.services.coach.context import build_coach_objective_context
 
     client.post(
-        "/api/workouts/activity",
+        "/app/api/workouts/activity",
         json={
             "name": "Boston Marathon",
             "template_key": "race",
@@ -654,7 +654,7 @@ def test_closed_out_past_activity_is_recent_not_an_event(client, db):
     from api.services.coach.context import build_coach_objective_context
 
     client.post(
-        "/api/workouts/activity",
+        "/app/api/workouts/activity",
         json={
             "name": "Morning run",
             "template_key": "run",

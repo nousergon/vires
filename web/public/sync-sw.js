@@ -76,7 +76,7 @@ async function drainQueue() {
     }
     try {
       const res = await fetch(
-        `/api/workouts/${entry.sessionId}/exercises/${entry.seId}/sets`,
+        `/app/api/workouts/${entry.sessionId}/exercises/${entry.seId}/sets`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

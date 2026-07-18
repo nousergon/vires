@@ -4,15 +4,15 @@ from __future__ import annotations
 
 
 def _two_exercise_ids(client) -> list[int]:
-    a = client.get("/api/exercises/search", params={"q": "bench press"}).json()
-    b = client.get("/api/exercises/search", params={"q": "squat"}).json()
+    a = client.get("/app/api/exercises/search", params={"q": "bench press"}).json()
+    b = client.get("/app/api/exercises/search", params={"q": "squat"}).json()
     return [a[0]["exercise"]["id"], b[0]["exercise"]["id"]]
 
 
 def test_create_and_get_template(client):
     e1, e2 = _two_exercise_ids(client)
     r = client.post(
-        "/api/templates",
+        "/app/api/templates",
         json={
             "name": "Push Day",
             "notes": "heavy",
@@ -28,16 +28,16 @@ def test_create_and_get_template(client):
     assert [te["order_index"] for te in tpl["exercises"]] == [0, 1]
     assert tpl["exercises"][0]["target_sets"] == 3
 
-    got = client.get(f"/api/templates/{tpl['id']}")
+    got = client.get(f"/app/api/templates/{tpl['id']}")
     assert got.status_code == 200
     assert got.json()["exercises"][1]["exercise"]["id"] == e2
 
 
 def test_list_templates(client):
     e1, _ = _two_exercise_ids(client)
-    client.post("/api/templates", json={"name": "A", "exercises": [{"exercise_id": e1}]})
-    client.post("/api/templates", json={"name": "B", "exercises": []})
-    rows = client.get("/api/templates").json()
+    client.post("/app/api/templates", json={"name": "A", "exercises": [{"exercise_id": e1}]})
+    client.post("/app/api/templates", json={"name": "B", "exercises": []})
+    rows = client.get("/app/api/templates").json()
     names = {t["name"] for t in rows}
     assert {"A", "B"} <= names
     a = next(t for t in rows if t["name"] == "A")
@@ -47,10 +47,10 @@ def test_list_templates(client):
 def test_update_template_replaces_exercises(client):
     e1, e2 = _two_exercise_ids(client)
     tpl = client.post(
-        "/api/templates", json={"name": "Leg Day", "exercises": [{"exercise_id": e1}]}
+        "/app/api/templates", json={"name": "Leg Day", "exercises": [{"exercise_id": e1}]}
     ).json()
     r = client.put(
-        f"/api/templates/{tpl['id']}",
+        f"/app/api/templates/{tpl['id']}",
         json={"name": "Leg Day v2", "exercises": [{"exercise_id": e2, "target_sets": 4}]},
     )
     assert r.status_code == 200
@@ -61,20 +61,20 @@ def test_update_template_replaces_exercises(client):
 
 
 def test_delete_template(client):
-    tpl = client.post("/api/templates", json={"name": "Temp", "exercises": []}).json()
-    assert client.delete(f"/api/templates/{tpl['id']}").status_code == 204
-    assert client.get(f"/api/templates/{tpl['id']}").status_code == 404
+    tpl = client.post("/app/api/templates", json={"name": "Temp", "exercises": []}).json()
+    assert client.delete(f"/app/api/templates/{tpl['id']}").status_code == 204
+    assert client.get(f"/app/api/templates/{tpl['id']}").status_code == 404
 
 
 def test_create_template_unknown_exercise_400(client):
     r = client.post(
-        "/api/templates", json={"name": "Bad", "exercises": [{"exercise_id": 99999999}]}
+        "/app/api/templates", json={"name": "Bad", "exercises": [{"exercise_id": 99999999}]}
     )
     assert r.status_code == 400
 
 
 def _exercise_id(client, q: str) -> int:
-    return client.get("/api/exercises/search", params={"q": q}).json()[0]["exercise"]["id"]
+    return client.get("/app/api/exercises/search", params={"q": q}).json()[0]["exercise"]["id"]
 
 
 def test_update_template_swap_feedback_equivalent(client):
@@ -82,11 +82,11 @@ def test_update_template_swap_feedback_equivalent(client):
     rdl = _exercise_id(client, "romanian deadlift")
     trap_bar = _exercise_id(client, "trap bar deadlift")
     tpl = client.post(
-        "/api/templates", json={"name": "Lower Body", "exercises": [{"exercise_id": rdl}]}
+        "/app/api/templates", json={"name": "Lower Body", "exercises": [{"exercise_id": rdl}]}
     ).json()
 
     r = client.put(
-        f"/api/templates/{tpl['id']}",
+        f"/app/api/templates/{tpl['id']}",
         json={"exercises": [{"exercise_id": trap_bar}]},
     )
     assert r.status_code == 200
@@ -104,11 +104,11 @@ def test_update_template_swap_feedback_different_stimulus(client):
     rdl = _exercise_id(client, "romanian deadlift")
     curl = _exercise_id(client, "barbell curl")
     tpl = client.post(
-        "/api/templates", json={"name": "Lower Body", "exercises": [{"exercise_id": rdl}]}
+        "/app/api/templates", json={"name": "Lower Body", "exercises": [{"exercise_id": rdl}]}
     ).json()
 
     r = client.put(
-        f"/api/templates/{tpl['id']}",
+        f"/app/api/templates/{tpl['id']}",
         json={"exercises": [{"exercise_id": curl}]},
     )
     assert r.status_code == 200
@@ -121,10 +121,10 @@ def test_update_template_swap_feedback_different_stimulus(client):
 def test_update_template_no_swap_feedback_when_exercises_unchanged(client):
     e1, _ = _two_exercise_ids(client)
     tpl = client.post(
-        "/api/templates", json={"name": "Push Day", "exercises": [{"exercise_id": e1}]}
+        "/app/api/templates", json={"name": "Push Day", "exercises": [{"exercise_id": e1}]}
     ).json()
 
-    r = client.put(f"/api/templates/{tpl['id']}", json={"name": "Push Day v2"})
+    r = client.put(f"/app/api/templates/{tpl['id']}", json={"name": "Push Day v2"})
     assert r.status_code == 200
     assert r.json()["swap_feedback"] == []
 
@@ -132,6 +132,6 @@ def test_update_template_no_swap_feedback_when_exercises_unchanged(client):
 def test_create_template_has_empty_swap_feedback(client):
     e1, _ = _two_exercise_ids(client)
     tpl = client.post(
-        "/api/templates", json={"name": "Push Day", "exercises": [{"exercise_id": e1}]}
+        "/app/api/templates", json={"name": "Push Day", "exercises": [{"exercise_id": e1}]}
     ).json()
     assert tpl["swap_feedback"] == []

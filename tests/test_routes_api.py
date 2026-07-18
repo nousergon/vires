@@ -19,7 +19,7 @@ def test_measure_with_embedded_elevation(client):
         {"lat": 47.60, "lon": -122.33, "ele_m": 100},
         {"lat": 47.62, "lon": -122.33, "ele_m": 300},
     ]}
-    r = client.post("/api/routes/measure", json=body)
+    r = client.post("/app/api/routes/measure", json=body)
     assert r.status_code == 200
     out = r.json()
     assert out["distance_m"] > 0
@@ -32,13 +32,13 @@ def test_measure_failsoft_when_dem_unavailable(client, monkeypatch):
     # No elevation on the points + DEM fill degrades → gain None, still 200.
     monkeypatch.setattr(elevation, "fill_elevations", lambda pts, **kw: pts)
     body = {"points": [{"lat": 47.60, "lon": -122.33}, {"lat": 47.62, "lon": -122.33}]}
-    r = client.post("/api/routes/measure", json=body)
+    r = client.post("/app/api/routes/measure", json=body)
     assert r.status_code == 200
     assert r.json()["elevation_gain_m"] is None
 
 
 def test_measure_rejects_single_point(client):
-    r = client.post("/api/routes/measure", json={"points": [{"lat": 1, "lon": 1}]})
+    r = client.post("/app/api/routes/measure", json={"points": [{"lat": 1, "lon": 1}]})
     assert r.status_code == 422  # min_length=2
 
 
@@ -59,7 +59,7 @@ def test_search_returns_candidates(client, monkeypatch):
     _patch_search(monkeypatch, [GeoPoint(47.60, -121.67), GeoPoint(47.62, -121.66)])
     # DEM unavailable (uphill orientation degrades to stitched order) — no network.
     monkeypatch.setattr(elevation, "fill_elevations", lambda pts, **kw: pts)
-    r = client.get("/api/routes/search", params={"q": "Mailbox Peak"})
+    r = client.get("/app/api/routes/search", params={"q": "Mailbox Peak"})
     assert r.status_code == 200
     out = r.json()
     assert out["provider_ok"] is True
@@ -83,7 +83,7 @@ def test_search_orients_candidates_uphill(client, monkeypatch):
         ]
 
     monkeypatch.setattr(elevation, "fill_elevations", _fill)
-    r = client.get("/api/routes/search", params={"q": "Mailbox Peak"})
+    r = client.get("/app/api/routes/search", params={"q": "Mailbox Peak"})
     pts = r.json()["candidates"][0]["points"]
     assert pts[0]["lat"] == 47.62  # low end now first
     assert pts[-1]["lat"] == 47.60
@@ -98,17 +98,17 @@ def test_search_surfaces_provider_outage(client, monkeypatch):
         "search_trails",
         lambda q, **kw: overpass.TrailSearchResult(candidates=[], provider_ok=False),
     )
-    r = client.get("/api/routes/search", params={"q": "Mailbox Peak"})
+    r = client.get("/app/api/routes/search", params={"q": "Mailbox Peak"})
     assert r.status_code == 200
     assert r.json() == {"candidates": [], "provider_ok": False}
 
 
 def test_search_short_query_rejected(client):
-    assert client.get("/api/routes/search", params={"q": "ab"}).status_code == 422
+    assert client.get("/app/api/routes/search", params={"q": "ab"}).status_code == 422
 
 
 def test_import_gpx_derives_distance_elevation_duration(client):
-    r = client.post("/api/routes/import-gpx", content=_GPX)
+    r = client.post("/app/api/routes/import-gpx", content=_GPX)
     assert r.status_code == 200
     out = r.json()
     assert out["distance_m"] > 0
@@ -117,5 +117,5 @@ def test_import_gpx_derives_distance_elevation_duration(client):
 
 
 def test_import_gpx_rejects_malformed(client):
-    r = client.post("/api/routes/import-gpx", content="not gpx <<<")
+    r = client.post("/app/api/routes/import-gpx", content="not gpx <<<")
     assert r.status_code == 422

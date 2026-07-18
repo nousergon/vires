@@ -612,7 +612,7 @@ def feed_url(
     if not us.feed_token:
         us.feed_token = secrets.token_urlsafe(24)
         db.commit()
-    return FeedUrl(token=us.feed_token, ics_path=f"/api/plan/feed/{us.feed_token}.ics")
+    return FeedUrl(token=us.feed_token, ics_path=f"/app/api/plan/feed/{us.feed_token}.ics")
 
 
 @router.post("/feed-url/rotate", response_model=FeedUrl)
@@ -624,7 +624,7 @@ def rotate_feed_url(
     us = get_or_create_settings(db, ident)
     us.feed_token = secrets.token_urlsafe(24)
     db.commit()
-    return FeedUrl(token=us.feed_token, ics_path=f"/api/plan/feed/{us.feed_token}.ics")
+    return FeedUrl(token=us.feed_token, ics_path=f"/app/api/plan/feed/{us.feed_token}.ics")
 
 
 def _describe_planned(pw: PlannedWorkout, unit: str) -> str:

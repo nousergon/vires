@@ -1,9 +1,9 @@
 // Typed client for the Vires API. Same-origin in production; the Vite dev
-// server proxies /api -> FastAPI (see vite.config.ts).
+// server proxies /app/api -> FastAPI (see vite.config.ts).
 
 import { getIdentityToken } from './identityToken'
 
-const BASE = '/api'
+const BASE = '/app/api'
 
 // Paths whose own 401 is an expected, handled state — never auto-redirect for
 // these (avoids a loop: useAuth's own "am I logged in" probe 401s by design

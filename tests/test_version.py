@@ -26,7 +26,7 @@ def test_version_reports_deployed_build_id(monkeypatch, tmp_path):
     (tmp_path / "version.json").write_text(json.dumps({"buildId": "abc1234"}))
     _point_dist_at(monkeypatch, str(tmp_path))
 
-    resp = client.get("/version")
+    resp = client.get("/app/version")
 
     assert resp.status_code == 200
     assert resp.json() == {"buildId": "abc1234"}
@@ -38,7 +38,7 @@ def test_version_unknown_when_no_bundle(monkeypatch, tmp_path):
     # No version.json written -> graceful "unknown", not a 500.
     _point_dist_at(monkeypatch, str(tmp_path))
 
-    resp = client.get("/version")
+    resp = client.get("/app/version")
 
     assert resp.status_code == 200
     assert resp.json() == {"buildId": "unknown"}
@@ -48,18 +48,18 @@ def test_version_unknown_on_garbled_file(monkeypatch, tmp_path):
     (tmp_path / "version.json").write_text("not json{")
     _point_dist_at(monkeypatch, str(tmp_path))
 
-    assert client.get("/version").json() == {"buildId": "unknown"}
+    assert client.get("/app/version").json() == {"buildId": "unknown"}
 
 
 def test_version_unknown_on_missing_key(monkeypatch, tmp_path):
     (tmp_path / "version.json").write_text(json.dumps({"other": "x"}))
     _point_dist_at(monkeypatch, str(tmp_path))
 
-    assert client.get("/version").json() == {"buildId": "unknown"}
+    assert client.get("/app/version").json() == {"buildId": "unknown"}
 
 
 def test_version_route_wins_over_spa_fallback():
     # /version is a real route, not the SPA catch-all: JSON, not index.html.
-    resp = client.get("/version")
+    resp = client.get("/app/version")
     assert resp.headers["content-type"].startswith("application/json")
     assert set(resp.json().keys()) == {"buildId"}

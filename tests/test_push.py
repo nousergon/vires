@@ -23,22 +23,22 @@ _SUB = {"endpoint": "https://push.example.com/abc", "keys": {"p256dh": "p256", "
 # config gating
 # --------------------------------------------------------------------------- #
 def test_public_key_503_without_config(client):
-    assert client.get("/api/push/public-key").status_code == 503
+    assert client.get("/app/api/push/public-key").status_code == 503
 
 
 def test_public_key_with_config(client, monkeypatch):
     _configure(monkeypatch)
-    r = client.get("/api/push/public-key")
+    r = client.get("/app/api/push/public-key")
     assert r.status_code == 200 and r.json()["key"] == "BTestPublicKey"
 
 
 def test_subscribe_503_without_config(client):
-    assert client.post("/api/push/subscribe", json=_SUB).status_code == 503
+    assert client.post("/app/api/push/subscribe", json=_SUB).status_code == 503
 
 
 def test_schedule_503_without_config(client):
     body = {"timer_id": "t1", "delay_seconds": 5, "title": "Rest over"}
-    assert client.post("/api/push/schedule", json=body).status_code == 503
+    assert client.post("/app/api/push/schedule", json=body).status_code == 503
 
 
 # --------------------------------------------------------------------------- #
@@ -46,9 +46,9 @@ def test_schedule_503_without_config(client):
 # --------------------------------------------------------------------------- #
 def test_subscribe_is_idempotent_upsert(client, db, monkeypatch):
     _configure(monkeypatch)
-    assert client.post("/api/push/subscribe", json=_SUB).status_code == 204
+    assert client.post("/app/api/push/subscribe", json=_SUB).status_code == 204
     # same endpoint again — updates, doesn't duplicate
-    assert client.post("/api/push/subscribe", json=_SUB).status_code == 204
+    assert client.post("/app/api/push/subscribe", json=_SUB).status_code == 204
     rows = db.query(PushSubscription).filter_by(endpoint=_SUB["endpoint"]).all()
     assert len(rows) == 1
     assert rows[0].p256dh == "p256" and rows[0].auth == "auth"
@@ -56,8 +56,8 @@ def test_subscribe_is_idempotent_upsert(client, db, monkeypatch):
 
 def test_unsubscribe_removes_row(client, db, monkeypatch):
     _configure(monkeypatch)
-    client.post("/api/push/subscribe", json=_SUB)
-    r = client.post("/api/push/unsubscribe", json={"endpoint": _SUB["endpoint"]})
+    client.post("/app/api/push/subscribe", json=_SUB)
+    r = client.post("/app/api/push/unsubscribe", json={"endpoint": _SUB["endpoint"]})
     assert r.status_code == 204
     assert db.query(PushSubscription).filter_by(endpoint=_SUB["endpoint"]).count() == 0
 
@@ -68,10 +68,10 @@ def test_schedule_and_cancel_return_202(client, monkeypatch):
     monkeypatch.setattr(push, "schedule", lambda *a, **k: calls.setdefault("schedule", a))
     monkeypatch.setattr(push, "cancel", lambda *a, **k: calls.setdefault("cancel", a))
     r1 = client.post(
-        "/api/push/schedule",
+        "/app/api/push/schedule",
         json={"timer_id": "t1", "delay_seconds": 5, "title": "Rest over", "body": "x"},
     )
-    r2 = client.post("/api/push/cancel", json={"timer_id": "t1"})
+    r2 = client.post("/app/api/push/cancel", json={"timer_id": "t1"})
     assert r1.status_code == 202 and r2.status_code == 202
     assert "schedule" in calls and "cancel" in calls
 

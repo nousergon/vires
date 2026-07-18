@@ -9,7 +9,7 @@
 //
 // This module is a deliberately SW-independent net: the id this bundle was
 // compiled with (`__BUILD_ID__`, injected by Vite) compared against a plain
-// `fetch('/version')` of what the backend currently serves. It relies on
+// `fetch('/app/version')` of what the backend currently serves. It relies on
 // nothing about the SW registering, activating, or calling
 // skipWaiting/clientsClaim — so it still fires if the SW update path breaks
 // again. Pure functions live here; the polling hook + banner live in
@@ -28,7 +28,7 @@ const NO_SIGNAL = new Set(['', 'dev', 'unknown'])
 // parse error resolves to null so a transient blip never shows a false banner.
 export async function fetchDeployedBuildId(signal?: AbortSignal): Promise<string | null> {
   try {
-    const resp = await fetch('/version', { cache: 'no-store', signal })
+    const resp = await fetch('/app/version', { cache: 'no-store', signal })
     if (!resp.ok) return null
     const body: unknown = await resp.json()
     const id = (body as { buildId?: unknown } | null)?.buildId

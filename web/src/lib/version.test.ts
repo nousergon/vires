@@ -34,11 +34,11 @@ function stubFetch(impl: (input: unknown, init?: unknown) => Promise<Response>) 
 }
 
 describe('fetchDeployedBuildId', () => {
-  it('requests /version with no-store and returns the buildId', async () => {
+  it('requests /app/version with no-store and returns the buildId', async () => {
     const fetchMock = stubFetch(async () => new Response(JSON.stringify({ buildId: 'sha123' })))
     const id = await fetchDeployedBuildId()
     expect(id).toBe('sha123')
-    expect(fetchMock).toHaveBeenCalledWith('/version', expect.objectContaining({ cache: 'no-store' }))
+    expect(fetchMock).toHaveBeenCalledWith('/app/version', expect.objectContaining({ cache: 'no-store' }))
   })
 
   it('returns null on a non-ok response', async () => {

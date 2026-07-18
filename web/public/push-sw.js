@@ -18,8 +18,8 @@ self.addEventListener('push', (event) => {
       // Buzz on the locked screen too, so an end-of-timer alert reaches the
       // user out of the app (the in-app beep/vibrate can't fire backgrounded).
       vibrate: [120, 60, 120],
-      icon: '/icon-192.png',
-      badge: '/icon-192.png',
+      icon: '/app/icon-192.png',
+      badge: '/app/icon-192.png',
     }),
   )
 })
