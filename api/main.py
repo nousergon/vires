@@ -46,29 +46,32 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Health stays at root (deploy/nginx healthcheck); feature APIs live under /api
-# so they never collide with the SPA's client-side routes served at root.
+# Health stays at bare root — it's hit directly against the EC2 origin by the
+# deploy script / nginx healthcheck, never through the public vires.nousergon.ai
+# domain (which now routes only /app* here via a Cloudflare Worker; the domain
+# root belongs to the marketing/waitlist site).
 app.include_router(health.router)
-# /version also stays at root and MUST be registered before _mount_spa()'s
-# catch-all so it isn't swallowed by the SPA fallback (vires-ops#59).
-app.include_router(version.router)
-app.include_router(auth.router, prefix="/api")
-app.include_router(exercises.router, prefix="/api")
-app.include_router(templates.router, prefix="/api")
-app.include_router(workouts.router, prefix="/api")
-app.include_router(settings_router.router, prefix="/api")
-app.include_router(plan.router, prefix="/api")
-app.include_router(coach.router, prefix="/api")
-app.include_router(objectives.router, prefix="/api")
-app.include_router(constraints.router, prefix="/api")
-app.include_router(ailments.router, prefix="/api")
-app.include_router(records.router, prefix="/api")
-app.include_router(push.router, prefix="/api")
-app.include_router(routes.router, prefix="/api")
+# Everything the browser reaches over the public domain — the SPA, its API, and
+# /version (an already-open PWA's own SW-independent staleness fetch, vires-ops#59)
+# — lives under /app, matching the Worker route and the app's Vite `base`.
+app.include_router(version.router, prefix="/app")
+app.include_router(auth.router, prefix="/app/api")
+app.include_router(exercises.router, prefix="/app/api")
+app.include_router(templates.router, prefix="/app/api")
+app.include_router(workouts.router, prefix="/app/api")
+app.include_router(settings_router.router, prefix="/app/api")
+app.include_router(plan.router, prefix="/app/api")
+app.include_router(coach.router, prefix="/app/api")
+app.include_router(objectives.router, prefix="/app/api")
+app.include_router(constraints.router, prefix="/app/api")
+app.include_router(ailments.router, prefix="/app/api")
+app.include_router(records.router, prefix="/app/api")
+app.include_router(push.router, prefix="/app/api")
+app.include_router(routes.router, prefix="/app/api")
 
 
 def _mount_spa() -> None:
-    """Serve the built PWA, with SPA fallback to index.html for client routes."""
+    """Serve the built PWA under /app, with SPA fallback for client routes."""
     dist = settings.web_dist_dir
     index = os.path.join(dist, "index.html")
     if not os.path.isdir(dist) or not os.path.isfile(index):
@@ -76,9 +79,9 @@ def _mount_spa() -> None:
 
     assets = os.path.join(dist, "assets")
     if os.path.isdir(assets):
-        app.mount("/assets", StaticFiles(directory=assets), name="assets")
+        app.mount("/app/assets", StaticFiles(directory=assets), name="assets")
 
-    @app.get("/{full_path:path}", include_in_schema=False)
+    @app.get("/app/{full_path:path}", include_in_schema=False)
     async def spa_fallback(full_path: str) -> FileResponse:
         candidate = os.path.join(dist, full_path)
         if full_path and os.path.isfile(candidate):

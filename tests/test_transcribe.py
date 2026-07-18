@@ -21,7 +21,7 @@ def test_transcribe_returns_text(client, monkeypatch):
     _set_key(monkeypatch)
     monkeypatch.setattr("api.routers.coach.transcribe_audio", fake)
     resp = client.post(
-        "/api/coach/transcribe",
+        "/app/api/coach/transcribe",
         content=b"fake-audio-bytes",
         headers={"content-type": "audio/webm"},
     )
@@ -34,7 +34,7 @@ def test_transcribe_503_without_key(client, monkeypatch):
 
     monkeypatch.setattr(get_settings(), "stt_api_key", None)
     resp = client.post(
-        "/api/coach/transcribe", content=b"x", headers={"content-type": "audio/webm"}
+        "/app/api/coach/transcribe", content=b"x", headers={"content-type": "audio/webm"}
     )
     assert resp.status_code == 503
 
@@ -42,7 +42,7 @@ def test_transcribe_503_without_key(client, monkeypatch):
 def test_transcribe_400_on_empty_body(client, monkeypatch):
     _set_key(monkeypatch)
     resp = client.post(
-        "/api/coach/transcribe", content=b"", headers={"content-type": "audio/webm"}
+        "/app/api/coach/transcribe", content=b"", headers={"content-type": "audio/webm"}
     )
     assert resp.status_code == 400
 
@@ -54,7 +54,7 @@ def test_transcribe_502_on_provider_error(client, monkeypatch):
     _set_key(monkeypatch)
     monkeypatch.setattr("api.routers.coach.transcribe_audio", boom)
     resp = client.post(
-        "/api/coach/transcribe", content=b"abc", headers={"content-type": "audio/webm"}
+        "/app/api/coach/transcribe", content=b"abc", headers={"content-type": "audio/webm"}
     )
     assert resp.status_code == 502
 

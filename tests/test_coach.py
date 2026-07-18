@@ -228,10 +228,10 @@ def _install_fake(monkeypatch, canned: list[dict], key: str | None = "test-key")
 
 
 def _bench_template(client) -> tuple[int, int]:
-    hits = client.get("/api/exercises/search", params={"q": "bench press"}).json()
+    hits = client.get("/app/api/exercises/search", params={"q": "bench press"}).json()
     e1 = hits[0]["exercise"]["id"]
     tpl = client.post(
-        "/api/templates",
+        "/app/api/templates",
         json={
             "name": "Upper",
             "exercises": [
@@ -263,7 +263,7 @@ def _canned_spec(template_id: int, weeks: int = 4) -> dict:
 def test_generate_returns_preview(client, monkeypatch):
     tpl_id, _ = _bench_template(client)
     _install_fake(monkeypatch, [_canned_spec(tpl_id, weeks=4)])
-    resp = client.post("/api/coach/generate", json={"message": "4 weeks, 10 to 4 reps"})
+    resp = client.post("/app/api/coach/generate", json={"message": "4 weeks, 10 to 4 reps"})
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert len(body["planned_workouts"]) == 4
@@ -278,7 +278,7 @@ def test_generate_retries_on_invalid_grounding(client, monkeypatch):
     bad["schedule"] = [{"template_id": 999999, "weekday": 0}]  # unknown template -> retry
     good = _canned_spec(tpl_id)
     _install_fake(monkeypatch, [bad, good])
-    resp = client.post("/api/coach/generate", json={"message": "go"})
+    resp = client.post("/app/api/coach/generate", json={"message": "go"})
     assert resp.status_code == 200, resp.text
     assert _FakeClient.calls == 2  # initial + one correction
 
@@ -288,20 +288,20 @@ def test_generate_503_without_key(client, monkeypatch):
     from api.config import get_settings
 
     monkeypatch.setattr(get_settings(), "anthropic_api_key", None)
-    resp = client.post("/api/coach/generate", json={"message": "anything"})
+    resp = client.post("/app/api/coach/generate", json={"message": "anything"})
     assert resp.status_code == 503
 
 
 def test_generate_400_without_templates(client, monkeypatch):
     _install_fake(monkeypatch, [_canned_spec(1)])  # key present, but no routines exist
-    resp = client.post("/api/coach/generate", json={"message": "plan me"})
+    resp = client.post("/app/api/coach/generate", json={"message": "plan me"})
     assert resp.status_code == 400
 
 
 def test_save_program_persists_and_materializes(client):
     tpl_id, _ = _bench_template(client)
     prog = client.post(
-        "/api/coach/programs", json={"spec": _canned_spec(tpl_id, weeks=8)}
+        "/app/api/coach/programs", json={"spec": _canned_spec(tpl_id, weeks=8)}
     ).json()
     assert len(prog["planned_workouts"]) == 8
     assert prog["status"] == "active"
@@ -331,11 +331,13 @@ def _future_spec(template_id: int, weeks: int, start: date) -> dict:
 def test_modify_preview_does_not_persist(client, monkeypatch):
     tpl_id, _ = _bench_template(client)
     start = date.today() + timedelta(days=3)
-    prog = client.post("/api/coach/programs", json={"spec": _future_spec(tpl_id, 4, start)}).json()
+    prog = client.post(
+        "/app/api/coach/programs", json={"spec": _future_spec(tpl_id, 4, start)}
+    ).json()
     # the (mocked) coach returns a 6-week version
     _install_fake(monkeypatch, [_future_spec(tpl_id, 6, start)])
     resp = client.post(
-        f"/api/coach/programs/{prog['id']}/modify", json={"message": "make it 6 weeks"}
+        f"/app/api/coach/programs/{prog['id']}/modify", json={"message": "make it 6 weeks"}
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -344,35 +346,39 @@ def test_modify_preview_does_not_persist(client, monkeypatch):
     assert body["future_count"] == 6  # start is future, nothing completed yet
     assert len(body["preview"]["planned_workouts"]) == 6
     # nothing persisted: the program still has its original 4
-    progs = client.get("/api/plan/programs").json()
+    progs = client.get("/app/api/plan/programs").json()
     assert next(p for p in progs if p["id"] == prog["id"])["planned_count"] == 4
 
 
 def test_apply_keeps_completed_replaces_future(client):
     tpl_id, _ = _bench_template(client)
     start = date.today() + timedelta(days=3)
-    prog = client.post("/api/coach/programs", json={"spec": _future_spec(tpl_id, 4, start)}).json()
+    prog = client.post(
+        "/app/api/coach/programs", json={"spec": _future_spec(tpl_id, 4, start)}
+    ).json()
     assert len(prog["planned_workouts"]) == 4
     # complete week 1 (its date = start)
-    client.post(f"/api/plan/planned/{prog['planned_workouts'][0]['id']}/start")
+    client.post(f"/app/api/plan/planned/{prog['planned_workouts'][0]['id']}/start")
 
     applied = client.put(
-        f"/api/coach/programs/{prog['id']}", json={"spec": _future_spec(tpl_id, 6, start)}
+        f"/app/api/coach/programs/{prog['id']}", json={"spec": _future_spec(tpl_id, 6, start)}
     ).json()
     statuses = [pw["status"] for pw in applied["planned_workouts"]]
     assert statuses.count("completed") == 1  # the trained day is preserved
     # cutover = start+1 → new weeks 2..6 (5) inserted + 1 completed = 6
     assert len(applied["planned_workouts"]) == 6
-    summary = next(p for p in client.get("/api/plan/programs").json() if p["id"] == prog["id"])
+    summary = next(p for p in client.get("/app/api/plan/programs").json() if p["id"] == prog["id"])
     assert summary["planned_count"] == 6 and summary["completed_count"] == 1
 
 
 def test_apply_without_completed_fully_replaces(client):
     tpl_id, _ = _bench_template(client)
     start = date.today() + timedelta(days=3)
-    prog = client.post("/api/coach/programs", json={"spec": _future_spec(tpl_id, 4, start)}).json()
+    prog = client.post(
+        "/app/api/coach/programs", json={"spec": _future_spec(tpl_id, 4, start)}
+    ).json()
     applied = client.put(
-        f"/api/coach/programs/{prog['id']}", json={"spec": _future_spec(tpl_id, 2, start)}
+        f"/app/api/coach/programs/{prog['id']}", json={"spec": _future_spec(tpl_id, 2, start)}
     ).json()
     assert len(applied["planned_workouts"]) == 2  # all future → fully replaced
     assert all(pw["status"] == "planned" for pw in applied["planned_workouts"])
@@ -381,16 +387,18 @@ def test_apply_without_completed_fully_replaces(client):
 def test_modify_503_without_key(client, monkeypatch):
     tpl_id, _ = _bench_template(client)
     start = date.today() + timedelta(days=3)
-    prog = client.post("/api/coach/programs", json={"spec": _future_spec(tpl_id, 4, start)}).json()
+    prog = client.post(
+        "/app/api/coach/programs", json={"spec": _future_spec(tpl_id, 4, start)}
+    ).json()
     from api.config import get_settings
 
     monkeypatch.setattr(get_settings(), "anthropic_api_key", None)
-    resp = client.post(f"/api/coach/programs/{prog['id']}/modify", json={"message": "x"})
+    resp = client.post(f"/app/api/coach/programs/{prog['id']}/modify", json={"message": "x"})
     assert resp.status_code == 503
 
 
 def test_modify_404_unknown_program(client):
-    resp = client.post("/api/coach/programs/99999/modify", json={"message": "x"})
+    resp = client.post("/app/api/coach/programs/99999/modify", json={"message": "x"})
     assert resp.status_code == 404
 
 

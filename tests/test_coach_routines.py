@@ -213,7 +213,7 @@ def _install_fake(monkeypatch, payload):
 
 def _set_alpine_objective(client):
     client.post(
-        "/api/objectives",
+        "/app/api/objectives",
         json={"name": "Climb Baker", "kind": "dated", "target_date": "2026-09-05",
               "sport": "alpine", "is_primary": True},
     )
@@ -222,7 +222,7 @@ def _set_alpine_objective(client):
 def test_generate_and_save_authored_routine(client, monkeypatch):
     _set_alpine_objective(client)
     # a real catalog exercise that is in the alpine candidate pool ("step up")
-    hits = client.get("/api/exercises/search", params={"q": "step up"}).json()
+    hits = client.get("/app/api/exercises/search", params={"q": "step up"}).json()
     ex_id = hits[0]["exercise"]["id"]
 
     canned = {
@@ -246,28 +246,28 @@ def test_generate_and_save_authored_routine(client, monkeypatch):
     _install_fake(monkeypatch, canned)
 
     # generate → preview shows the routine it will create + materialized workouts
-    prev = client.post("/api/coach/generate", json={"message": "build my plan"})
+    prev = client.post("/app/api/coach/generate", json={"message": "build my plan"})
     assert prev.status_code == 200, prev.text
     body = prev.json()
     assert body["created_routines"][0]["name"] == "Lower + Carry"
     assert len(body["planned_workouts"]) == 4
 
     # save → the routine becomes a real reusable template + the program schedules it
-    saved = client.post("/api/coach/programs", json={"spec": body["spec"]})
+    saved = client.post("/app/api/coach/programs", json={"spec": body["spec"]})
     assert saved.status_code == 201, saved.text
     prog = saved.json()
     assert len(prog["planned_workouts"]) == 4
     new_tid = prog["planned_workouts"][0]["template_id"]
     assert new_tid is not None and new_tid > 0  # real id, not synthetic
 
-    templates = client.get("/api/templates").json()
+    templates = client.get("/app/api/templates").json()
     assert any(t["name"] == "Lower + Carry" for t in templates)
 
 
 def test_generate_works_with_objective_and_no_existing_routines(client, monkeypatch):
     # the whole point: a user with an objective but NO routines can still generate
     _set_alpine_objective(client)
-    hits = client.get("/api/exercises/search", params={"q": "romanian deadlift"}).json()
+    hits = client.get("/app/api/exercises/search", params={"q": "romanian deadlift"}).json()
     ex_id = hits[0]["exercise"]["id"]
     canned = {
         "name": "Block", "start_date": "2026-06-29", "duration_weeks": 2,
@@ -282,7 +282,7 @@ def test_generate_works_with_objective_and_no_existing_routines(client, monkeypa
         "progressions": [], "deload_weeks": [], "coach_summary": "go",
     }
     _install_fake(monkeypatch, canned)
-    r = client.post("/api/coach/generate", json={"message": "plan me"})
+    r = client.post("/app/api/coach/generate", json={"message": "plan me"})
     assert r.status_code == 200, r.text
     assert r.json()["created_routines"][0]["name"] == "Posterior"
 

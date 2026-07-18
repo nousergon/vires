@@ -12,7 +12,7 @@ def _mk_objective(client, **over):
         "is_primary": True,
     }
     body.update(over)
-    return client.post("/api/objectives", json=body)
+    return client.post("/app/api/objectives", json=body)
 
 
 # --------------------------------------------------------------------------- #
@@ -44,7 +44,7 @@ def test_open_ended_objective_allows_no_date(client):
 def test_only_one_primary_enforced_on_create(client):
     a = _mk_objective(client, name="Climb Baker").json()
     b = _mk_objective(client, name="Run a 50k").json()
-    objs = client.get("/api/objectives").json()
+    objs = client.get("/app/api/objectives").json()
     primaries = [o for o in objs if o["is_primary"]]
     assert len(primaries) == 1 and primaries[0]["id"] == b["id"]
     # the first one was demoted
@@ -55,30 +55,30 @@ def test_patch_set_primary_demotes_others(client):
     a = _mk_objective(client, name="Climb Baker").json()
     b = _mk_objective(client, name="Run a 50k").json()  # b is now primary
     # promote a back to primary
-    r = client.patch(f"/api/objectives/{a['id']}", json={"is_primary": True})
+    r = client.patch(f"/app/api/objectives/{a['id']}", json={"is_primary": True})
     assert r.status_code == 200, r.text
-    objs = {o["id"]: o for o in client.get("/api/objectives").json()}
+    objs = {o["id"]: o for o in client.get("/app/api/objectives").json()}
     assert objs[a["id"]]["is_primary"] is True
     assert objs[b["id"]]["is_primary"] is False
 
 
 def test_patch_dated_without_date_rejected(client):
     o = _mk_objective(client, kind="open_ended", target_date=None, sport=None).json()
-    r = client.patch(f"/api/objectives/{o['id']}", json={"kind": "dated"})
+    r = client.patch(f"/app/api/objectives/{o['id']}", json={"kind": "dated"})
     assert r.status_code == 400  # merged row would be dated with no target_date
 
 
 def test_patch_sport_refreshes_demands_profile(client):
     o = _mk_objective(client, sport=None, demands_profile=None).json()
     assert o["demands_profile"] is None
-    r = client.patch(f"/api/objectives/{o['id']}", json={"sport": "alpine"})
+    r = client.patch(f"/app/api/objectives/{o['id']}", json={"sport": "alpine"})
     assert r.json()["demands_profile"]["sport"] == "alpine"
 
 
 def test_delete_objective(client):
     o = _mk_objective(client).json()
-    assert client.delete(f"/api/objectives/{o['id']}").status_code == 204
-    assert client.get(f"/api/objectives/{o['id']}").status_code == 404
+    assert client.delete(f"/app/api/objectives/{o['id']}").status_code == 204
+    assert client.get(f"/app/api/objectives/{o['id']}").status_code == 404
 
 
 # --------------------------------------------------------------------------- #
@@ -86,7 +86,7 @@ def test_delete_objective(client):
 # --------------------------------------------------------------------------- #
 def test_injury_constraint_defaults_defer_to_professional(client):
     r = client.post(
-        "/api/constraints",
+        "/app/api/constraints",
         json={"kind": "injury", "label": "recovering L4-L5 disc", "directives": "avoid axial load"},
     )
     assert r.status_code == 201, r.text
@@ -94,22 +94,22 @@ def test_injury_constraint_defaults_defer_to_professional(client):
 
 
 def test_non_injury_constraint_does_not_defer(client):
-    r = client.post("/api/constraints", json={"kind": "equipment", "label": "no barbell"})
+    r = client.post("/app/api/constraints", json={"kind": "equipment", "label": "no barbell"})
     assert r.json()["defer_to_professional"] is False
 
 
 def test_constraint_explicit_defer_override(client):
     r = client.post(
-        "/api/constraints",
+        "/app/api/constraints",
         json={"kind": "injury", "label": "tweaked wrist", "defer_to_professional": False},
     )
     assert r.json()["defer_to_professional"] is False
 
 
 def test_deactivate_constraint_drops_it_from_active(client):
-    c = client.post("/api/constraints", json={"kind": "schedule", "label": "MWF only"}).json()
-    client.patch(f"/api/constraints/{c['id']}", json={"is_active": False})
-    active = client.get("/api/objectives/active").json()
+    c = client.post("/app/api/constraints", json={"kind": "schedule", "label": "MWF only"}).json()
+    client.patch(f"/app/api/constraints/{c['id']}", json={"is_active": False})
+    active = client.get("/app/api/objectives/active").json()
     assert all(x["id"] != c["id"] for x in active["constraints"])
 
 
@@ -119,17 +119,17 @@ def test_deactivate_constraint_drops_it_from_active(client):
 def test_active_endpoint_returns_primary_and_constraints(client):
     _mk_objective(client)
     client.post(
-        "/api/constraints",
+        "/app/api/constraints",
         json={"kind": "injury", "label": "recovering L4-L5 disc"},
     )
-    active = client.get("/api/objectives/active").json()
+    active = client.get("/app/api/objectives/active").json()
     assert active["objective"]["name"] == "Climb Baker"
     assert len(active["constraints"]) == 1
     assert active["constraints"][0]["label"] == "recovering L4-L5 disc"
 
 
 def test_active_endpoint_empty_when_unset(client):
-    active = client.get("/api/objectives/active").json()
+    active = client.get("/app/api/objectives/active").json()
     assert active["objective"] is None and active["constraints"] == []
     assert active["objectives"] == []
 
@@ -145,7 +145,7 @@ def test_active_focus_is_soonest_upcoming_dated(client):
     soon = _mk_objective(
         client, name="Run a 50k", target_date="2030-07-15", is_primary=False, sport=None
     ).json()
-    active = client.get("/api/objectives/active").json()
+    active = client.get("/app/api/objectives/active").json()
     # focus = the soonest upcoming peak
     assert active["objective"]["id"] == soon["id"]
     # timeline carries both, chronologically
@@ -159,14 +159,14 @@ def test_active_primary_overrides_derived_focus(client):
     _mk_objective(
         client, name="Run a 50k", target_date="2030-07-15", is_primary=False, sport=None
     )
-    active = client.get("/api/objectives/active").json()
+    active = client.get("/app/api/objectives/active").json()
     assert active["objective"]["id"] == far["id"]  # the manual pin wins
 
 
 def test_create_and_patch_priority(client):
     o = _mk_objective(client, priority=5).json()
     assert o["priority"] == 5
-    r = client.patch(f"/api/objectives/{o['id']}", json={"priority": 9})
+    r = client.patch(f"/app/api/objectives/{o['id']}", json={"priority": 9})
     assert r.status_code == 200 and r.json()["priority"] == 9
 
 
@@ -196,11 +196,11 @@ def test_event_end_without_target_rejected(client):
 def test_patch_event_end_date_validated_against_merged_row(client):
     o = _mk_objective(client, target_date="2026-07-09").json()
     ok = client.patch(
-        f"/api/objectives/{o['id']}", json={"event_end_date": "2026-07-11"}
+        f"/app/api/objectives/{o['id']}", json={"event_end_date": "2026-07-11"}
     )
     assert ok.status_code == 200 and ok.json()["event_end_date"] == "2026-07-11"
     bad = client.patch(
-        f"/api/objectives/{o['id']}", json={"event_end_date": "2026-07-01"}
+        f"/app/api/objectives/{o['id']}", json={"event_end_date": "2026-07-01"}
     )
     assert bad.status_code == 400  # before target_date, merged-row check
 
@@ -223,7 +223,7 @@ def _mk_sub(client, parent_id, **over):
         "parent_objective_id": parent_id,
     }
     body.update(over)
-    return client.post("/api/objectives", json=body)
+    return client.post("/app/api/objectives", json=body)
 
 
 def test_create_sub_objective_nests_under_parent(client):
@@ -236,7 +236,7 @@ def test_create_sub_objective_nests_under_parent(client):
 def test_sub_objective_does_not_appear_as_top_level_in_active(client):
     parent = _mk_parent(client)
     sub = _mk_sub(client, parent["id"]).json()
-    active = client.get("/api/objectives/active").json()
+    active = client.get("/app/api/objectives/active").json()
     # focus stays the parent; the sub is surfaced under milestones, not objectives
     assert active["objective"]["id"] == parent["id"]
     top_ids = {o["id"] for o in active["objectives"]}
@@ -287,7 +287,7 @@ def test_parent_with_children_cannot_become_a_sub(client):
     other = _mk_objective(client, name="Run a 50k", target_date="2026-10-01").json()
     # parent already has a milestone -> it cannot itself be nested
     r = client.patch(
-        f"/api/objectives/{parent['id']}",
+        f"/app/api/objectives/{parent['id']}",
         json={"parent_objective_id": other["id"], "is_primary": False},
     )
     assert r.status_code == 400
@@ -296,7 +296,7 @@ def test_parent_with_children_cannot_become_a_sub(client):
 def test_objective_cannot_be_its_own_parent(client):
     o = _mk_objective(client, name="Run a 50k", target_date="2026-10-01").json()
     r = client.patch(
-        f"/api/objectives/{o['id']}", json={"parent_objective_id": o["id"]}
+        f"/app/api/objectives/{o['id']}", json={"parent_objective_id": o["id"]}
     )
     assert r.status_code == 400
 
@@ -310,12 +310,12 @@ def test_patch_detaches_sub_objective_to_standalone(client):
     parent = _mk_parent(client)
     sub = _mk_sub(client, parent["id"]).json()
     r = client.patch(
-        f"/api/objectives/{sub['id']}", json={"parent_objective_id": None}
+        f"/app/api/objectives/{sub['id']}", json={"parent_objective_id": None}
     )
     assert r.status_code == 200, r.text
     assert r.json()["parent_objective_id"] is None
     # now a standalone dated objective -> appears in the top-level timeline
-    active = client.get("/api/objectives/active").json()
+    active = client.get("/app/api/objectives/active").json()
     assert sub["id"] in {o["id"] for o in active["objectives"]}
     assert active["milestones"] == []
 
@@ -323,7 +323,7 @@ def test_patch_detaches_sub_objective_to_standalone(client):
 def test_deleting_parent_leaves_sub_as_standalone(client):
     parent = _mk_parent(client)
     sub = _mk_sub(client, parent["id"]).json()
-    assert client.delete(f"/api/objectives/{parent['id']}").status_code == 204
-    got = client.get(f"/api/objectives/{sub['id']}")
+    assert client.delete(f"/app/api/objectives/{parent['id']}").status_code == 204
+    got = client.get(f"/app/api/objectives/{sub['id']}")
     assert got.status_code == 200
     assert got.json()["parent_objective_id"] is None  # SET NULL on parent delete

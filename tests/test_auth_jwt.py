@@ -62,7 +62,7 @@ def bearer(token: str) -> dict[str, str]:
 
 
 def get_me(raw_client, token: str):
-    return raw_client.get("/api/auth/me", headers=bearer(token))
+    return raw_client.get("/app/api/auth/me", headers=bearer(token))
 
 
 def _add_user(db, *, email: str | None, identity_user_id: str | None) -> tuple[str, str]:
@@ -146,32 +146,32 @@ def test_expired_token_rejected(raw_client, db):
 
 def test_wrong_issuer_rejected(raw_client, db):
     tok = make_token("idu-x", "x@example.com", issuer="https://evil.example.com")
-    assert raw_client.get("/api/auth/me", headers=bearer(tok)).status_code == 401
+    assert raw_client.get("/app/api/auth/me", headers=bearer(tok)).status_code == 401
 
 
 def test_wrong_audience_rejected(raw_client, db):
     tok = make_token("idu-x", "x@example.com", audience="https://other.example.com")
-    assert raw_client.get("/api/auth/me", headers=bearer(tok)).status_code == 401
+    assert raw_client.get("/app/api/auth/me", headers=bearer(tok)).status_code == 401
 
 
 def test_wrong_key_rejected(raw_client, db):
     tok = make_token("idu-x", "x@example.com", key=Ed25519PrivateKey.generate())
-    assert raw_client.get("/api/auth/me", headers=bearer(tok)).status_code == 401
+    assert raw_client.get("/app/api/auth/me", headers=bearer(tok)).status_code == 401
 
 
 def test_garbage_token_rejected(raw_client, db):
-    assert raw_client.get("/api/auth/me", headers=bearer("not-a-jwt")).status_code == 401
+    assert raw_client.get("/app/api/auth/me", headers=bearer("not-a-jwt")).status_code == 401
 
 
 def test_missing_bearer_is_401(raw_client, db):
     """No Authorization header at all (the sole auth path since the phase-2
     cutover, vires-ops#60) is an outright 401 — there's no other path left
     to fall back to."""
-    assert raw_client.get("/api/auth/me").status_code == 401
+    assert raw_client.get("/app/api/auth/me").status_code == 401
 
 
 def test_non_bearer_authorization_header_is_401(raw_client, db):
     """An Authorization header present but not a Bearer scheme (e.g. Basic)
     is rejected outright, same as a missing header."""
-    r = raw_client.get("/api/auth/me", headers={"Authorization": "Basic garbage"})
+    r = raw_client.get("/app/api/auth/me", headers={"Authorization": "Basic garbage"})
     assert r.status_code == 401

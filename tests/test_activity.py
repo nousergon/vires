@@ -9,7 +9,7 @@ _LB_TO_KG = 0.45359237
 
 def test_log_activity_from_template(client):
     r = client.post(
-        "/api/workouts/activity",
+        "/app/api/workouts/activity",
         json={
             "name": "Indoor top-rope",
             "template_key": "climbing_indoor_toprope",
@@ -35,7 +35,7 @@ def test_log_activity_from_template(client):
 
 def test_log_activity_custom_freeform(client):
     r = client.post(
-        "/api/workouts/activity",
+        "/app/api/workouts/activity",
         json={"name": "Ultimate frisbee", "regions": "legs", "intensity": "hard"},
     )
     assert r.status_code == 201
@@ -47,13 +47,13 @@ def test_log_activity_custom_freeform(client):
 
 
 def test_log_activity_requires_name(client):
-    r = client.post("/api/workouts/activity", json={"regions": "full", "intensity": "light"})
+    r = client.post("/app/api/workouts/activity", json={"regions": "full", "intensity": "light"})
     assert r.status_code == 422
 
 
 def test_log_activity_rejects_unknown_region(client):
     r = client.post(
-        "/api/workouts/activity",
+        "/app/api/workouts/activity",
         json={"name": "Mystery sport", "regions": "arms", "intensity": "moderate"},
     )
     assert r.status_code == 422  # not in the LoadRegions literal
@@ -62,7 +62,7 @@ def test_log_activity_rejects_unknown_region(client):
 def test_log_activity_backdates_to_a_past_date(client):
     yesterday = datetime.now(UTC) - timedelta(days=1)
     r = client.post(
-        "/api/workouts/activity",
+        "/app/api/workouts/activity",
         json={
             "name": "Yoga",
             "regions": "full",
@@ -77,7 +77,7 @@ def test_log_activity_backdates_to_a_past_date(client):
 
 def test_activity_appears_in_history_list(client):
     client.post(
-        "/api/workouts/activity",
+        "/app/api/workouts/activity",
         json={
             "name": "Swim",
             "template_key": "swimming",
@@ -85,7 +85,7 @@ def test_activity_appears_in_history_list(client):
             "intensity": "moderate",
         },
     )
-    rows = client.get("/api/workouts").json()
+    rows = client.get("/app/api/workouts").json()
     activity_rows = [w for w in rows if w["session_type"] == "activity"]
     assert len(activity_rows) == 1
     assert activity_rows[0]["activity"]["template_key"] == "swimming"
@@ -95,7 +95,7 @@ def test_activity_appears_in_history_list(client):
 
 
 def test_activity_templates_catalog_is_nonempty_and_shaped(client):
-    r = client.get("/api/workouts/activity-templates")
+    r = client.get("/app/api/workouts/activity-templates")
     assert r.status_code == 200
     templates = r.json()
     assert len(templates) > 0
@@ -118,7 +118,7 @@ def test_activity_templates_catalog_is_nonempty_and_shaped(client):
 def test_log_hike_with_pack_converts_to_si_and_computes_load(client):
     # Default account unit is 'lb' ⇒ distance in miles, elevation in feet.
     r = client.post(
-        "/api/workouts/activity",
+        "/app/api/workouts/activity",
         json={
             "name": "Morning hike",
             "template_key": "hike",
@@ -149,9 +149,9 @@ def test_log_hike_with_pack_converts_to_si_and_computes_load(client):
 
 
 def test_log_hike_metric_unit_no_conversion(client):
-    client.put("/api/settings", json={"weight_unit": "kg"})
+    client.put("/app/api/settings", json={"weight_unit": "kg"})
     r = client.post(
-        "/api/workouts/activity",
+        "/app/api/workouts/activity",
         json={
             "name": "Hike",
             "template_key": "hike",
@@ -169,7 +169,7 @@ def test_log_hike_metric_unit_no_conversion(client):
 
 def test_loaded_activity_without_distance_has_no_load(client):
     r = client.post(
-        "/api/workouts/activity",
+        "/app/api/workouts/activity",
         json={"name": "Hike", "template_key": "hike", "pack_weight": 40, "bodyweight": 175},
     )
     assert r.status_code == 201
@@ -181,7 +181,7 @@ def test_walk_with_no_pack_never_computes_a_load_number(client):
     # Pack weight is optional on every template — an unloaded walk/run/hike
     # never computes a metabolic cost at all, not even a synthetic 0.
     r = client.post(
-        "/api/workouts/activity",
+        "/app/api/workouts/activity",
         json={
             "name": "Evening walk",
             "template_key": "walk",
@@ -197,10 +197,10 @@ def test_walk_with_no_pack_never_computes_a_load_number(client):
 
 def test_run_appears_in_history_with_route_and_no_pack(client):
     client.post(
-        "/api/workouts/activity",
+        "/app/api/workouts/activity",
         json={"name": "Tempo run", "template_key": "run", "distance": 5, "duration_s": 1500},
     )
-    rows = client.get("/api/workouts").json()
+    rows = client.get("/app/api/workouts").json()
     run_rows = [w for w in rows if w["activity"] and w["activity"]["template_key"] == "run"]
     assert len(run_rows) == 1
     assert run_rows[0]["activity"]["pack_weight_kg"] is None
@@ -212,7 +212,7 @@ def test_run_appears_in_history_with_route_and_no_pack(client):
 
 def test_pack_weight_without_bodyweight_is_rejected(client):
     r = client.post(
-        "/api/workouts/activity",
+        "/app/api/workouts/activity",
         json={"name": "Hike", "template_key": "hike", "pack_weight": 40, "distance": 3},
     )
     assert r.status_code == 422  # Pandolf's load ratio is undefined without bodyweight
@@ -222,7 +222,7 @@ def test_bodyweight_without_pack_weight_is_accepted_and_ignored(client):
     # Bodyweight alone (no pack) isn't required/used for anything — the
     # validator only fires pack-without-bodyweight, not the reverse.
     r = client.post(
-        "/api/workouts/activity",
+        "/app/api/workouts/activity",
         json={"name": "Walk", "template_key": "walk", "bodyweight": 180, "distance": 2},
     )
     assert r.status_code == 201
@@ -233,7 +233,7 @@ def test_bodyweight_without_pack_weight_is_accepted_and_ignored(client):
 
 def test_activity_rejects_zero_pack_weight(client):
     r = client.post(
-        "/api/workouts/activity",
+        "/app/api/workouts/activity",
         json={
             "name": "Hike",
             "template_key": "hike",
@@ -249,7 +249,7 @@ def test_activity_rejects_zero_pack_weight(client):
 def test_activity_records_route_input_source(client):
     # A derived-mode log (e.g. GPX import) tags its source; default stays 'manual'.
     r = client.post(
-        "/api/workouts/activity",
+        "/app/api/workouts/activity",
         json={
             "name": "Hike",
             "template_key": "hike",
@@ -262,7 +262,7 @@ def test_activity_records_route_input_source(client):
     assert r.status_code == 201
     assert r.json()["activity"]["source"] == "gpx"
     dflt = client.post(
-        "/api/workouts/activity",
+        "/app/api/workouts/activity",
         json={"name": "Walk", "template_key": "walk", "distance": 2},
     ).json()
     assert dflt["activity"]["source"] == "manual"
@@ -270,7 +270,7 @@ def test_activity_records_route_input_source(client):
 
 def test_activity_rejects_unknown_route_source(client):
     r = client.post(
-        "/api/workouts/activity",
+        "/app/api/workouts/activity",
         json={"name": "Hike", "template_key": "hike", "distance": 3, "source": "strava"},
     )
     assert r.status_code == 422  # not in the RouteSource literal
@@ -280,7 +280,7 @@ def test_activity_accepts_health_route_source(client):
     # Automatic capture from the phone's health store (vires-ops#37) tags
     # source='health' and rides the identical load path.
     r = client.post(
-        "/api/workouts/activity",
+        "/app/api/workouts/activity",
         json={
             "name": "Hike",
             "template_key": "hike",
@@ -309,10 +309,10 @@ def test_heavier_pack_logs_higher_load(client):
         "duration_s": 4500,
     }
     light = client.post(
-        "/api/workouts/activity", json={**common, "pack_weight": 10}
+        "/app/api/workouts/activity", json={**common, "pack_weight": 10}
     ).json()["activity"]["metabolic_cost_kj"]
     heavy = client.post(
-        "/api/workouts/activity", json={**common, "pack_weight": 50}
+        "/app/api/workouts/activity", json={**common, "pack_weight": 50}
     ).json()["activity"]["metabolic_cost_kj"]
     assert heavy > light
 
@@ -326,7 +326,7 @@ def test_heavier_pack_logs_higher_load(client):
 def test_log_activity_future_date_leaves_ended_at_null(client):
     future = datetime.now(UTC) + timedelta(days=7)
     r = client.post(
-        "/api/workouts/activity",
+        "/app/api/workouts/activity",
         json={
             "name": "Mailbox Peak",
             "template_key": "race",
@@ -345,7 +345,7 @@ def test_log_activity_recurring_weekly_never_closes_out(client):
     # perpetual series, not a single occurrence).
     past = datetime.now(UTC) - timedelta(days=3)
     r = client.post(
-        "/api/workouts/activity",
+        "/app/api/workouts/activity",
         json={
             "name": "Tuesday league",
             "template_key": "league_game",
@@ -363,7 +363,7 @@ def test_log_activity_recurring_weekly_never_closes_out(client):
 
 def test_log_activity_rejects_event_end_date_before_start(client):
     r = client.post(
-        "/api/workouts/activity",
+        "/app/api/workouts/activity",
         json={
             "name": "Ski trip",
             "regions": "legs",
@@ -377,7 +377,7 @@ def test_log_activity_rejects_event_end_date_before_start(client):
 
 def test_log_activity_rejects_event_end_date_with_weekly_recurrence(client):
     r = client.post(
-        "/api/workouts/activity",
+        "/app/api/workouts/activity",
         json={
             "name": "Tuesday league",
             "regions": "full",
@@ -391,7 +391,7 @@ def test_log_activity_rejects_event_end_date_with_weekly_recurrence(client):
 
 def test_log_activity_objective_id_must_exist(client):
     r = client.post(
-        "/api/workouts/activity",
+        "/app/api/workouts/activity",
         json={"name": "Race", "regions": "legs", "intensity": "hard", "objective_id": 999},
     )
     assert r.status_code == 404
@@ -399,11 +399,11 @@ def test_log_activity_objective_id_must_exist(client):
 
 def test_log_activity_objective_id_anchors_activity(client):
     obj = client.post(
-        "/api/objectives",
+        "/app/api/objectives",
         json={"name": "Boston Marathon", "kind": "dated", "target_date": "2026-10-12"},
     ).json()
     r = client.post(
-        "/api/workouts/activity",
+        "/app/api/workouts/activity",
         json={
             "name": "Boston Marathon",
             "template_key": "race",
@@ -420,7 +420,7 @@ def test_log_activity_objective_id_anchors_activity(client):
 def test_history_list_excludes_future_activities(client):
     future = datetime.now(UTC) + timedelta(days=5)
     client.post(
-        "/api/workouts/activity",
+        "/app/api/workouts/activity",
         json={
             "name": "Future race",
             "regions": "legs",
@@ -429,7 +429,7 @@ def test_history_list_excludes_future_activities(client):
         },
     )
     client.post(
-        "/api/workouts/activity",
+        "/app/api/workouts/activity",
         json={
             "name": "Past swim",
             "template_key": "swimming",
@@ -437,7 +437,7 @@ def test_history_list_excludes_future_activities(client):
             "intensity": "moderate",
         },
     )
-    rows = client.get("/api/workouts").json()
+    rows = client.get("/app/api/workouts").json()
     names = {w["name"] for w in rows}
     assert "Past swim" in names
     assert "Future race" not in names
@@ -449,10 +449,10 @@ def test_history_list_excludes_future_activities(client):
 # --------------------------------------------------------------------------- #
 def test_patch_activity_updates_estimate_fields(client):
     ws = client.post(
-        "/api/workouts/activity",
+        "/app/api/workouts/activity",
         json={"name": "Custom", "regions": "full", "intensity": "light"},
     ).json()
-    r = client.patch(f"/api/workouts/{ws['id']}", json={"regions": "legs", "intensity": "hard"})
+    r = client.patch(f"/app/api/workouts/{ws['id']}", json={"regions": "legs", "intensity": "hard"})
     assert r.status_code == 200
     activity = r.json()["activity"]
     assert activity["regions"] == "legs"
@@ -462,7 +462,7 @@ def test_patch_activity_updates_estimate_fields(client):
 def test_patch_activity_sets_ended_at_closes_it_out(client):
     future = datetime.now(UTC) + timedelta(days=2)
     ws = client.post(
-        "/api/workouts/activity",
+        "/app/api/workouts/activity",
         json={
             "name": "Race",
             "regions": "legs",
@@ -473,7 +473,7 @@ def test_patch_activity_sets_ended_at_closes_it_out(client):
     assert ws["ended_at"] is None
     now = datetime.now(UTC).isoformat()
     r = client.patch(
-        f"/api/workouts/{ws['id']}",
+        f"/app/api/workouts/{ws['id']}",
         json={"ended_at": now, "distance": 10, "duration_s": 3000},
     )
     assert r.status_code == 200
@@ -481,14 +481,14 @@ def test_patch_activity_sets_ended_at_closes_it_out(client):
 
 
 def test_patch_activity_rejects_activity_only_fields_on_strength_session(client):
-    ws = client.post("/api/workouts", json={}).json()
-    r = client.patch(f"/api/workouts/{ws['id']}", json={"regions": "legs"})
+    ws = client.post("/app/api/workouts", json={}).json()
+    r = client.patch(f"/app/api/workouts/{ws['id']}", json={"regions": "legs"})
     assert r.status_code == 400
 
 
 def test_patch_materialized_occurrence_rejects_setting_recurrence_weekly(client):
     template = client.post(
-        "/api/workouts/activity",
+        "/app/api/workouts/activity",
         json={
             "name": "Tuesday league",
             "regions": "full",
@@ -499,9 +499,9 @@ def test_patch_materialized_occurrence_rejects_setting_recurrence_weekly(client)
     ).json()
     occ_date = (datetime.now(UTC) + timedelta(days=7)).date().isoformat()
     occurrence = client.post(
-        f"/api/workouts/{template['id']}/occurrences", json={"occurrence_date": occ_date}
+        f"/app/api/workouts/{template['id']}/occurrences", json={"occurrence_date": occ_date}
     ).json()
-    r = client.patch(f"/api/workouts/{occurrence['id']}", json={"recurrence": "weekly"})
+    r = client.patch(f"/app/api/workouts/{occurrence['id']}", json={"recurrence": "weekly"})
     assert r.status_code == 400
 
 
@@ -510,7 +510,7 @@ def test_patch_materialized_occurrence_rejects_setting_recurrence_weekly(client)
 # --------------------------------------------------------------------------- #
 def test_materialize_occurrence_creates_linked_session(client):
     template = client.post(
-        "/api/workouts/activity",
+        "/app/api/workouts/activity",
         json={
             "name": "Tuesday league",
             "template_key": "league_game",
@@ -522,7 +522,7 @@ def test_materialize_occurrence_creates_linked_session(client):
     ).json()
     occ_date = (datetime.now(UTC) + timedelta(days=14)).date().isoformat()
     r = client.post(
-        f"/api/workouts/{template['id']}/occurrences", json={"occurrence_date": occ_date}
+        f"/app/api/workouts/{template['id']}/occurrences", json={"occurrence_date": occ_date}
     )
     assert r.status_code == 201
     occurrence = r.json()
@@ -534,7 +534,7 @@ def test_materialize_occurrence_creates_linked_session(client):
 
 def test_materialize_occurrence_is_idempotent(client):
     template = client.post(
-        "/api/workouts/activity",
+        "/app/api/workouts/activity",
         json={
             "name": "Tuesday league",
             "regions": "full",
@@ -545,21 +545,21 @@ def test_materialize_occurrence_is_idempotent(client):
     ).json()
     occ_date = (datetime.now(UTC) + timedelta(days=7)).date().isoformat()
     first = client.post(
-        f"/api/workouts/{template['id']}/occurrences", json={"occurrence_date": occ_date}
+        f"/app/api/workouts/{template['id']}/occurrences", json={"occurrence_date": occ_date}
     ).json()
     second = client.post(
-        f"/api/workouts/{template['id']}/occurrences", json={"occurrence_date": occ_date}
+        f"/app/api/workouts/{template['id']}/occurrences", json={"occurrence_date": occ_date}
     ).json()
     assert first["id"] == second["id"]
 
 
 def test_materialize_occurrence_404s_on_non_recurring_session(client):
     ws = client.post(
-        "/api/workouts/activity",
+        "/app/api/workouts/activity",
         json={"name": "One-off", "regions": "full", "intensity": "moderate"},
     ).json()
     r = client.post(
-        f"/api/workouts/{ws['id']}/occurrences",
+        f"/app/api/workouts/{ws['id']}/occurrences",
         json={"occurrence_date": datetime.now(UTC).date().isoformat()},
     )
     assert r.status_code == 400

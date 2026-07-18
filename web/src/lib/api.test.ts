@@ -29,7 +29,7 @@ describe('req helper', () => {
     const r = await api.listTemplates()
     expect(r).toEqual([{ id: 1 }])
     expect(f).toHaveBeenCalledWith(
-      '/api/templates',
+      '/app/api/templates',
       expect.objectContaining({ headers: { 'Content-Type': 'application/json' } }),
     )
   })
@@ -60,14 +60,14 @@ describe('req helper', () => {
   it('URL-encodes the search query and limit', async () => {
     const f = mockFetch({ json: [] })
     await api.searchExercises('over head', 5)
-    expect(f).toHaveBeenCalledWith('/api/exercises/search?q=over%20head&limit=5', expect.anything())
+    expect(f).toHaveBeenCalledWith('/app/api/exercises/search?q=over%20head&limit=5', expect.anything())
   })
 
   it('POSTs a JSON-serialized body', async () => {
     const f = mockFetch({ json: { id: 1 } })
     await api.startWorkout({ template_id: 7 })
     const [url, init] = f.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe('/api/workouts')
+    expect(url).toBe('/app/api/workouts')
     expect(init.method).toBe('POST')
     expect(JSON.parse(init.body as string)).toEqual({ template_id: 7 })
   })
@@ -77,7 +77,7 @@ describe('req helper', () => {
     const f = mockFetch({ json: [] })
     await api.listTemplates()
     expect(f).toHaveBeenCalledWith(
-      '/api/templates',
+      '/app/api/templates',
       expect.objectContaining({
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer jwt-123' },
       }),
@@ -91,7 +91,7 @@ describe('transcribe (raw blob upload)', () => {
     const out = await api.transcribe(new Blob(['x'], { type: 'audio/webm' }))
     expect(out).toBe('three sets of ten')
     const [url, init] = f.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe('/api/coach/transcribe')
+    expect(url).toBe('/app/api/coach/transcribe')
     expect((init.headers as Record<string, string>)['Content-Type']).toBe('audio/webm')
   })
 

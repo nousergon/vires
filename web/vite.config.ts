@@ -46,6 +46,9 @@ function emitVersionJson(buildId: string): Plugin {
 
 // https://vite.dev/config/
 export default defineConfig({
+  // The app is served under vires.nousergon.ai/app (marketing/waitlist owns the
+  // domain root — a Cloudflare Worker route proxies /app* to this app's origin).
+  base: '/app/',
   define: {
     // Bundle's own build-id, compared against /version at runtime (vires-ops#59).
     __BUILD_ID__: JSON.stringify(BUILD_ID),
@@ -73,11 +76,12 @@ export default defineConfig({
         display: 'standalone',
         orientation: 'portrait',
         start_url: '/app/',
+        scope: '/app/',
         icons: [
-          { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
-          { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
+          { src: '/app/icon-192.png', sizes: '192x192', type: 'image/png' },
+          { src: '/app/icon-512.png', sizes: '512x512', type: 'image/png' },
           {
-            src: '/icon-512-maskable.png',
+            src: '/app/icon-512-maskable.png',
             sizes: '512x512',
             type: 'image/png',
             purpose: 'maskable',
@@ -90,7 +94,7 @@ export default defineConfig({
         // avoids an injectManifest migration). sync-sw.js handles the
         // Background-Sync 'sync' event for the queued-writes replay
         // (vires-ops#48) — independent of push.
-        importScripts: ['/push-sw.js', '/sync-sw.js'],
+        importScripts: ['/app/push-sw.js', '/app/sync-sw.js'],
         // App shell offline; API GETs cached network-first so history is
         // viewable offline (writes still need connectivity — MVP).
         // `cacheableResponse` restricts what NetworkFirst is allowed to cache
@@ -101,7 +105,7 @@ export default defineConfig({
         // declarative shorthand, not a constructed CacheableResponsePlugin.
         runtimeCaching: [
           {
-            urlPattern: ({ url }) => url.pathname.startsWith('/api/'),
+            urlPattern: ({ url }) => url.pathname.startsWith('/app/api/'),
             handler: 'NetworkFirst',
             options: {
               cacheName: 'vires-api',
@@ -115,9 +119,9 @@ export default defineConfig({
   ],
   server: {
     proxy: {
-      '/api': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      '/app/api': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/health': { target: 'http://127.0.0.1:8000', changeOrigin: true },
-      '/version': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      '/app/version': { target: 'http://127.0.0.1:8000', changeOrigin: true },
     },
   },
 })
