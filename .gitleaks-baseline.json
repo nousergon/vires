@@ -1,0 +1,23 @@
+[
+ {
+  "RuleID": "generic-api-key",
+  "Description": "Detected a Generic API Key, potentially exposing access to various services and sensitive operations.",
+  "StartLine": 45,
+  "EndLine": 45,
+  "StartColumn": 6,
+  "EndColumn": 28,
+  "Match": "key: REDACTED ",
+  "Secret": "REDACTED",
+  "File": "tests/test_auth_jwt.py",
+  "SymlinkFile": "",
+  "Commit": "8f36a3404c7e63301c43f9b9282fb55234f2cfc4",
+  "Link": "https://github.com/nousergon/vires/blob/8f36a3404c7e63301c43f9b9282fb55234f2cfc4/tests/test_auth_jwt.py#L45",
+  "Entropy": 3.8521688,
+  "Author": "Brian McMahon",
+  "Email": "brian@nousergon.ai",
+  "Date": "2026-07-11T14:02:49Z",
+  "Message": "Auth cutover to shared nousergon-auth identity service (phase 1)\n\nNon-destructive first phase of vires-ops#60: Vires stops owning login and\ndelegates identity to the shared nousergon-auth service, while the legacy\nmagic-link/session/allowlist machinery stays fully functional until the new\npath is verified live (phase 2 then drops it).\n\nBackend:\n- users.identity_user_id (nullable, unique, indexed) — additive migration\n- current_identity() accepts `Authorization: Bearer \u003cjwt\u003e` verified against\n  the service's JWKS (pyjwt/EdDSA, cached — no per-request round-trip);\n  resolution ladder: identity_user_id -\u003e one-time email link -\u003e JIT-provision.\n  Replaces verify-time \"always mint new\" (root cause of vires-ops#57).\n- A presented bearer is authoritative: invalid =\u003e 401, no cookie fallback.\n- Same email linked to a DIFFERENT identity =\u003e loud 409, never a silent relink.\n\nSPA:\n- Sign-in via better-auth client against the shared service (invite-code\n  field for new signups; metadata.product=\"vires\")\n- Short-lived identity JWT minted from the cross-subdomain session and sent\n  as Bearer on every /api call (cached, 60s refresh margin, 30s backoff)\n- /auth/verify page deleted — the shared service's verify endpoint sets the\n  cookie and redirects itself\n- Logout clears both the shared session and the legacy cookie\n\nPart of vires-ops#60; merge is gated on nousergon-auth#1 (live deploy of\nauth.nousergon.ai) — landing this before then would point login at a\nnot-yet-live service.\n\nCo-Authored-By: Claude Fable 5 \u003cnoreply@anthropic.com\u003e",
+  "Tags": [],
+  "Fingerprint": "8f36a3404c7e63301c43f9b9282fb55234f2cfc4:tests/test_auth_jwt.py:generic-api-key:45"
+ }
+]
