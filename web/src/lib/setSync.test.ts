@@ -31,6 +31,28 @@ beforeEach(() => {
 })
 afterEach(() => vi.restoreAllMocks())
 
+describe('newUuid fallback (no crypto.randomUUID)', () => {
+  it('uses crypto.getRandomValues, never Math.random, when randomUUID is absent', async () => {
+    const originalRandomUUID = crypto.randomUUID
+    // @ts-expect-error simulating an env without randomUUID (older browser)
+    delete crypto.randomUUID
+    const mathRandom = vi.spyOn(Math, 'random')
+    try {
+      const logSet = vi
+        .spyOn(api, 'logSet')
+        .mockResolvedValue({ id: 1, set_number: 1 } as never)
+      await logSetOfflineFirst(1, 2, { reps: 5 }, backend)
+      const body = logSet.mock.calls[0][2] as { client_uuid?: string }
+      expect(body.client_uuid).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+      )
+      expect(mathRandom).not.toHaveBeenCalled()
+    } finally {
+      crypto.randomUUID = originalRandomUUID
+    }
+  })
+})
+
 describe('logSetOfflineFirst', () => {
   it('POSTs immediately when online and does not enqueue', async () => {
     const logSet = vi
