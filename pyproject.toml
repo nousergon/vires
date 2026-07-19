@@ -16,6 +16,9 @@ dependencies = [
     "fastembed>=0.4",
     "numpy>=1.26",
     "httpx>=0.27",
+    # Hardened XML parsing for uploaded GPX (api/services/geo/gpx.py) — stdlib
+    # ElementTree has no entity-expansion-bomb protection (config#2632).
+    "defusedxml>=0.7.1",
     # krepis provider-agnostic LLM adapter (Anthropic / OpenAI / OpenRouter
     # behind one call surface). Active coach model = /vires/llm/coach SSM
     # param or VIRES_COACH_LLM env; both SDK transports installed.

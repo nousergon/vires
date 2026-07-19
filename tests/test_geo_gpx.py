@@ -1,4 +1,4 @@
-"""GPX parsing — stdlib, namespace-robust, with duration from timestamps."""
+"""GPX parsing — namespace-robust, with duration from timestamps."""
 
 from __future__ import annotations
 
@@ -49,3 +49,19 @@ def test_parse_rejects_too_few_points():
 def test_parse_accepts_bytes():
     track = parse_gpx(_GPX.encode("utf-8"))
     assert len(track.points) == 3
+
+
+def test_parse_rejects_entity_expansion_bomb():
+    # "Billion laughs" — stdlib ElementTree has no protection against this;
+    # defusedxml rejects it before expansion (CodeQL py/xml-bomb, config#2632).
+    bomb = """<?xml version="1.0"?>
+    <!DOCTYPE gpx [
+      <!ENTITY lol "lol">
+      <!ENTITY lol2 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">
+      <!ENTITY lol3 "&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;">
+    ]>
+    <gpx xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg>
+      <trkpt lat="47.6" lon="-122.3"><name>&lol3;</name></trkpt>
+    </trkseg></trk></gpx>"""
+    with pytest.raises(GpxParseError):
+        parse_gpx(bomb)

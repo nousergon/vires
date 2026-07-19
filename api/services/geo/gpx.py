@@ -1,15 +1,22 @@
-"""Parse a GPX file into route points — stdlib only, no new dependency.
+"""Parse a GPX file into route points.
 
 GPX is simple XML; we want trackpoints/routepoints with lat/lon and (usually
 embedded) elevation. Parsed namespace-robustly so GPX 1.0 and 1.1, and both
 ``<trkpt>`` tracks and ``<rtept>`` routes, work without pinning a namespace.
+
+Uses ``defusedxml`` rather than stdlib ``xml.etree.ElementTree`` directly:
+uploaded GPX is untrusted input, and stdlib ElementTree has no protection
+against internal entity-expansion ("billion laughs") bombs (CodeQL
+py/xml-bomb, config#2632).
 """
 
 from __future__ import annotations
 
-import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime
+
+import defusedxml.ElementTree as ET
+from defusedxml.common import DefusedXmlException
 
 from api.services.geo.measure import GeoPoint
 
@@ -52,6 +59,8 @@ def parse_gpx(data: bytes | str) -> GpxTrack:
         root = ET.fromstring(data)
     except ET.ParseError as e:
         raise GpxParseError(f"not valid GPX/XML: {e}") from e
+    except DefusedXmlException as e:
+        raise GpxParseError(f"GPX rejected for unsafe XML constructs: {e}") from e
 
     points: list[GeoPoint] = []
     times: list[datetime] = []
