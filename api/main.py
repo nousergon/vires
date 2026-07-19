@@ -9,6 +9,7 @@ to this API over CORS.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -70,6 +71,24 @@ app.include_router(push.router, prefix="/app/api")
 app.include_router(routes.router, prefix="/app/api")
 
 
+def _safe_dist_path(dist_root: Path, full_path: str) -> Path | None:
+    """Resolve ``full_path`` against ``dist_root``, or None if it would escape it.
+
+    full_path is attacker-controlled (any %2e%2e-style segment the ASGI server
+    hands the ``{path}`` converter survives — browser-level ".." collapsing
+    doesn't apply to a raw HTTP client). Resolving symlinks/".." and requiring
+    containment is load-bearing: ``os.path.join`` + ``isfile`` alone (the prior
+    code) let a request like /app/../../../../etc/passwd escape dist_root and
+    get served back verbatim.
+    """
+    if not full_path:
+        return None
+    candidate = (dist_root / full_path).resolve()
+    if candidate.is_relative_to(dist_root) and candidate.is_file():
+        return candidate
+    return None
+
+
 def _mount_spa() -> None:
     """Serve the built PWA under /app, with SPA fallback for client routes."""
     dist = settings.web_dist_dir
@@ -81,12 +100,18 @@ def _mount_spa() -> None:
     if os.path.isdir(assets):
         app.mount("/app/assets", StaticFiles(directory=assets), name="assets")
 
-    @app.get("/app/{full_path:path}", include_in_schema=False)
+    dist_root = Path(dist).resolve()
+    # Drop any spa_fallback route from a previous _mount_spa() call (tests
+    # re-invoke this with a different dist_root; without this the earliest
+    # registration would keep matching first forever).
+    app.router.routes = [
+        r for r in app.router.routes if getattr(r, "name", None) != "spa_fallback"
+    ]
+
+    @app.get("/app/{full_path:path}", include_in_schema=False, name="spa_fallback")
     async def spa_fallback(full_path: str) -> FileResponse:
-        candidate = os.path.join(dist, full_path)
-        if full_path and os.path.isfile(candidate):
-            return FileResponse(candidate)
-        return FileResponse(index)
+        safe = _safe_dist_path(dist_root, full_path)
+        return FileResponse(safe) if safe is not None else FileResponse(index)
 
 
 _mount_spa()
