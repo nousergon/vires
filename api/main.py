@@ -76,17 +76,24 @@ def _safe_dist_path(dist_root: Path, full_path: str) -> Path | None:
 
     full_path is attacker-controlled (any %2e%2e-style segment the ASGI server
     hands the ``{path}`` converter survives — browser-level ".." collapsing
-    doesn't apply to a raw HTTP client). Resolving symlinks/".." and requiring
-    containment is load-bearing: ``os.path.join`` + ``isfile`` alone (the prior
-    code) let a request like /app/../../../../etc/passwd escape dist_root and
-    get served back verbatim.
+    doesn't apply to a raw HTTP client). Normalizing to a real, absolute path
+    and checking string containment against ``dist_root`` (rather than
+    pathlib's ``Path.is_relative_to``, which CodeQL's py/path-injection
+    dataflow doesn't recognize as a sanitizing barrier) is load-bearing:
+    ``os.path.join`` + ``isfile`` alone (the prior code) let a request like
+    /app/../../../../etc/passwd escape dist_root and get served back
+    verbatim.
     """
     if not full_path:
         return None
-    candidate = (dist_root / full_path).resolve()
-    if candidate.is_relative_to(dist_root) and candidate.is_file():
-        return candidate
-    return None
+    dist_root_str = os.path.realpath(str(dist_root))
+    candidate_str = os.path.realpath(os.path.join(dist_root_str, full_path))
+    if candidate_str != dist_root_str and not candidate_str.startswith(
+        dist_root_str + os.sep
+    ):
+        return None
+    candidate = Path(candidate_str)
+    return candidate if candidate.is_file() else None
 
 
 def _mount_spa() -> None:
