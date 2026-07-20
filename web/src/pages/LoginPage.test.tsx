@@ -56,4 +56,27 @@ describe('LoginPage', () => {
     renderWithProviders(<LoginPage />)
     expect(screen.getByText('Send login link')).toBeDisabled()
   })
+
+  it('surfaces a failed magic-link verify redirect (`?error=INVALID_TOKEN`)', () => {
+    renderWithProviders(<LoginPage />, { route: '/login?error=INVALID_TOKEN' })
+    expect(screen.getByText(/expired or was already used/)).toBeInTheDocument()
+  })
+
+  it('falls back to a generic message for an unrecognized verify error code', () => {
+    renderWithProviders(<LoginPage />, { route: '/login?error=failed_to_create_user' })
+    expect(screen.getByText(/Something went wrong signing you in/)).toBeInTheDocument()
+  })
+
+  it('clears the stale verify error once a fresh link is requested', async () => {
+    magicLink.mockResolvedValue({ error: null } as never)
+    renderWithProviders(<LoginPage />, { route: '/login?error=INVALID_TOKEN' })
+    expect(screen.getByText(/expired or was already used/)).toBeInTheDocument()
+
+    fireEvent.change(screen.getByPlaceholderText('you@example.com'), {
+      target: { value: 'brian@example.com' },
+    })
+    fireEvent.click(screen.getByText('Send login link'))
+
+    expect(await screen.findByText(/Check your email/)).toBeInTheDocument()
+  })
 })
