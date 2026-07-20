@@ -76,23 +76,24 @@ def _safe_dist_path(dist_root: Path, full_path: str) -> Path | None:
 
     full_path is attacker-controlled (any %2e%2e-style segment the ASGI server
     hands the ``{path}`` converter survives — browser-level ".." collapsing
-    doesn't apply to a raw HTTP client). Normalizing to a real, absolute path
-    and checking string containment against ``dist_root`` (rather than
-    pathlib's ``Path.is_relative_to``, which CodeQL's py/path-injection
-    dataflow doesn't recognize as a sanitizing barrier) is load-bearing:
-    ``os.path.join`` + ``isfile`` alone (the prior code) let a request like
-    /app/../../../../etc/passwd escape dist_root and get served back
-    verbatim.
+    doesn't apply to a raw HTTP client). Every file this route legitimately
+    serves (manifest.json, favicon.*, the service workers — see web/public/)
+    is a flat, single-segment name at dist_root's top level; nested paths
+    like /app/assets/* are served by their own StaticFiles mount, never by
+    this fallback. So rather than joining full_path onto dist_root and
+    re-validating containment after the fact (the prior os.path.realpath +
+    string-prefix approach — CodeQL's py/path-injection dataflow kept
+    treating the joined result as tainted no matter how it was validated),
+    take os.path.basename(full_path) up front: any ".." or "/" segment makes
+    it disagree with full_path and gets rejected before dist_root is ever
+    touched, which is the sanitizing pattern the query itself documents.
     """
     if not full_path:
         return None
-    dist_root_str = os.path.realpath(str(dist_root))
-    candidate_str = os.path.realpath(os.path.join(dist_root_str, full_path))
-    if candidate_str != dist_root_str and not candidate_str.startswith(
-        dist_root_str + os.sep
-    ):
+    name = os.path.basename(full_path)
+    if not name or name != full_path:
         return None
-    candidate = Path(candidate_str)
+    candidate = dist_root / name
     return candidate if candidate.is_file() else None
 
 
