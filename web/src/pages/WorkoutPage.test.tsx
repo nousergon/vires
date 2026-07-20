@@ -299,6 +299,47 @@ describe('WorkoutPage — ActiveWorkout', () => {
     await waitFor(() => expect(rm).toHaveBeenCalledWith(10, 100))
   })
 
+  it('replaces an exercise with a suggested similar one in place', async () => {
+    vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession())
+    vi.spyOn(api, 'similarExercises').mockResolvedValue([
+      {
+        exercise: makeBrief({ id: 55, name: 'Dumbbell Bench Press' }),
+        verdict: 'equivalent',
+        same_pattern: true,
+        muscle_overlap: 0.8,
+        equipment_changed: true,
+        rationale: 'Solid equivalent.',
+      },
+    ])
+    const replace = vi
+      .spyOn(api, 'replaceWorkoutExercise')
+      .mockResolvedValue(makeSessionExercise({ exercise: makeBrief({ id: 55 }) }))
+
+    renderWithProviders(<WorkoutPage />)
+    fireEvent.click(await screen.findByText('replace'))
+    // Sheet opens on the ranked similar-exercise list — no search/drag needed.
+    expect(await screen.findByText('Replace Bench Press')).toBeInTheDocument()
+    fireEvent.click(await screen.findByText('Dumbbell Bench Press'))
+    await waitFor(() => expect(replace).toHaveBeenCalledWith(10, 100, 55))
+  })
+
+  it('replaces via free search when no suggestion fits', async () => {
+    vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession())
+    vi.spyOn(api, 'similarExercises').mockResolvedValue([])
+    vi.spyOn(api, 'searchExercises').mockResolvedValue([makeHit({ id: 77, name: 'Machine Chest Press' })])
+    const replace = vi
+      .spyOn(api, 'replaceWorkoutExercise')
+      .mockResolvedValue(makeSessionExercise({ exercise: makeBrief({ id: 77 }) }))
+
+    renderWithProviders(<WorkoutPage />)
+    fireEvent.click(await screen.findByText('replace'))
+    fireEvent.change(await screen.findByPlaceholderText('Or search for any exercise…'), {
+      target: { value: 'chest press' },
+    })
+    fireEvent.click(await screen.findByText('Machine Chest Press'))
+    await waitFor(() => expect(replace).toHaveBeenCalledWith(10, 100, 77))
+  })
+
   it('finishes the workout by skipping the end-of-workout rating', async () => {
     vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession())
     const fin = vi.spyOn(api, 'finishWorkout').mockResolvedValue(makeSession({ ended_at: 'x' }))

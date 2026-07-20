@@ -266,6 +266,91 @@ def test_mark_set_done_toggles_completed_at(client):
     assert undone["completed_at"] is None
 
 
+def test_replace_exercise_swaps_in_place_preserving_position(client):
+    # Replace should keep the exercise's slot in the sequence — the whole
+    # point vs. remove + re-add (which lands the new move at the end).
+    a = _ex_id(client, "barbell bench press")
+    b = _ex_id(client, "barbell squat")
+    sub = _ex_id(client, "barbell deadlift")
+    ws = client.post("/app/api/workouts", json={}).json()
+    se_a = client.post(f"/app/api/workouts/{ws['id']}/exercises", json={"exercise_id": a}).json()
+    se_b = client.post(f"/app/api/workouts/{ws['id']}/exercises", json={"exercise_id": b}).json()
+
+    r = client.post(
+        f"/app/api/workouts/{ws['id']}/exercises/{se_a['id']}/replace",
+        json={"exercise_id": sub},
+    )
+    assert r.status_code == 200
+    replaced = r.json()
+    assert replaced["id"] == se_a["id"]  # same slot/row
+    assert replaced["order_index"] == se_a["order_index"] == 0
+    assert replaced["exercise"]["id"] == sub
+
+    # Order preserved: the replaced move stays first, the untouched one second.
+    fresh = client.get(f"/app/api/workouts/{ws['id']}").json()
+    assert [e["id"] for e in fresh["exercises"]] == [se_a["id"], se_b["id"]]
+    assert fresh["exercises"][0]["exercise"]["id"] == sub
+
+
+def test_replace_exercise_reseeds_sets_and_clears_targets(client):
+    ex = _ex_id(client, "barbell bench press")
+    sub = _ex_id(client, "barbell squat")
+    ws = client.post("/app/api/workouts", json={}).json()
+    se = client.post(
+        f"/app/api/workouts/{ws['id']}/exercises",
+        json={"exercise_id": ex, "target_sets": 3, "target_reps": 5, "target_weight": 185},
+    ).json()
+    assert len(se["sets"]) == 3
+
+    replaced = client.post(
+        f"/app/api/workouts/{ws['id']}/exercises/{se['id']}/replace",
+        json={"exercise_id": sub},
+    ).json()
+    # Set/rep scheme carries across the swap; the old exercise-specific weight
+    # and its set rows are re-seeded fresh for the new move.
+    assert replaced["target_sets"] == 3
+    assert replaced["target_reps"] == 5
+    assert replaced["target_weight"] is None
+    assert len(replaced["sets"]) == 3
+    assert all(s["reps"] == 5 for s in replaced["sets"])
+    assert all(s["completed_at"] is None for s in replaced["sets"])
+
+
+def test_replace_exercise_with_itself_is_a_noop(client):
+    ex = _ex_id(client, "barbell bench press")
+    ws = client.post("/app/api/workouts", json={}).json()
+    se = client.post(
+        f"/app/api/workouts/{ws['id']}/exercises",
+        json={"exercise_id": ex, "target_sets": 2, "target_reps": 5, "target_weight": 185},
+    ).json()
+    replaced = client.post(
+        f"/app/api/workouts/{ws['id']}/exercises/{se['id']}/replace",
+        json={"exercise_id": ex},
+    ).json()
+    assert replaced["exercise"]["id"] == ex
+    assert replaced["target_weight"] == 185  # untouched
+
+
+def test_replace_exercise_rejects_unknown_exercise(client):
+    ex = _ex_id(client, "barbell bench press")
+    ws = client.post("/app/api/workouts", json={}).json()
+    se = client.post(f"/app/api/workouts/{ws['id']}/exercises", json={"exercise_id": ex}).json()
+    r = client.post(
+        f"/app/api/workouts/{ws['id']}/exercises/{se['id']}/replace",
+        json={"exercise_id": 99999999},
+    )
+    assert r.status_code == 400
+
+
+def test_replace_exercise_404_for_unknown_slot(client):
+    ws = client.post("/app/api/workouts", json={}).json()
+    r = client.post(
+        f"/app/api/workouts/{ws['id']}/exercises/99999999/replace",
+        json={"exercise_id": _ex_id(client, "barbell squat")},
+    )
+    assert r.status_code == 404
+
+
 def test_started_at_is_timezone_aware(client):
     ws = client.post("/app/api/workouts", json={}).json()
     # tz-aware ISO so clients don't misread UTC as local (elapsed-timer fix)

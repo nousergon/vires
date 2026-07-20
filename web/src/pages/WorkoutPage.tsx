@@ -27,6 +27,7 @@ import { useSettings } from '../lib/useSettings'
 import { useTagSuggestions } from '../lib/useTagSuggestions'
 import { Button, Card, EmptyState, PageTitle, Sheet, Spinner } from '../components/ui'
 import ExercisePicker from '../components/ExercisePicker'
+import ReplaceExerciseSheet from '../components/ReplaceExerciseSheet'
 import PlateCalculatorSheet from '../components/PlateCalculatorSheet'
 import ActivityForm from '../components/ActivityForm'
 import { AilmentCheckInForm } from '../components/AilmentsPanel'
@@ -669,6 +670,7 @@ function ExerciseBlock({
   const holdSecs = se.target_duration_seconds ?? 60
 
   const [plateCalcOpen, setPlateCalcOpen] = useState(false)
+  const [replaceOpen, setReplaceOpen] = useState(false)
   const lastSetWeight = se.sets[se.sets.length - 1]?.weight
   const plateCalcSeed = lastSetWeight ?? se.target_weight ?? prev?.sets[0]?.weight ?? null
 
@@ -733,16 +735,31 @@ function ExerciseBlock({
           </button>
           <h3 className="font-semibold text-slate-100">{se.exercise.name}</h3>
         </div>
-        <button
-          className="text-xs text-slate-500"
-          onClick={async () => {
-            await api.removeWorkoutExercise(session.id, se.id)
-            onChanged()
-          }}
-        >
-          remove
-        </button>
+        <div className="flex items-center gap-3">
+          <button className="text-xs text-slate-500" onClick={() => setReplaceOpen(true)}>
+            replace
+          </button>
+          <button
+            className="text-xs text-slate-500"
+            onClick={async () => {
+              await api.removeWorkoutExercise(session.id, se.id)
+              onChanged()
+            }}
+          >
+            remove
+          </button>
+        </div>
       </div>
+
+      <ReplaceExerciseSheet
+        open={replaceOpen}
+        onClose={() => setReplaceOpen(false)}
+        exercise={se.exercise}
+        onReplace={async (ex) => {
+          await api.replaceWorkoutExercise(session.id, se.id, ex.id)
+          onChanged()
+        }}
+      />
 
       <PrevHint prev={prev} unit={settings.weight_unit} />
 
