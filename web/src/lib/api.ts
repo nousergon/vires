@@ -68,6 +68,18 @@ export interface SearchHit {
   score: number
 }
 
+// A ranked substitute for an exercise (the in-workout "replace" suggestions).
+// Verdict is always 'equivalent' or 'comparable' — different-stimulus
+// candidates are filtered out server-side.
+export interface ExerciseSuggestion {
+  exercise: ExerciseBrief
+  verdict: 'equivalent' | 'comparable'
+  same_pattern: boolean
+  muscle_overlap: number
+  equipment_changed: boolean
+  rationale: string
+}
+
 export interface CreateResult {
   created: boolean
   reason: 'created' | 'exact'
@@ -677,6 +689,9 @@ export const api = {
   }) => req<CreateResult>('/exercises', { method: 'POST', body: JSON.stringify(body) }),
   exerciseHistory: (id: number, limit = 10) =>
     req<ExercisePerformance[]>(`/exercises/${id}/history?limit=${limit}`),
+  // Ranked "similar exercise" substitutes for the in-workout replace action.
+  similarExercises: (id: number, limit = 8) =>
+    req<ExerciseSuggestion[]>(`/exercises/${id}/similar?limit=${limit}`),
 
   // templates
   listTemplates: () => req<TemplateSummary[]>('/templates'),
@@ -765,6 +780,13 @@ export const api = {
     }),
   removeWorkoutExercise: (sessionId: number, seId: number) =>
     req<void>(`/workouts/${sessionId}/exercises/${seId}`, { method: 'DELETE' }),
+  // Swap an exercise for another in place (same slot/position). Keeps the
+  // set/rep/rest scheme; re-seeds fresh set rows for the new move.
+  replaceWorkoutExercise: (sessionId: number, seId: number, exerciseId: number) =>
+    req<SessionExercise>(`/workouts/${sessionId}/exercises/${seId}/replace`, {
+      method: 'POST',
+      body: JSON.stringify({ exercise_id: exerciseId }),
+    }),
   logSet: (
     sessionId: number,
     seId: number,

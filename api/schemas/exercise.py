@@ -63,6 +63,21 @@ class ExerciseCreateResult(BaseModel):
     similar_to_similarity: float | None = None
 
 
+class ExerciseSuggestion(BaseModel):
+    """A ranked substitute for an exercise the user wants to replace — the
+    swap judgment (see ``api.services.exercise_swap.evaluate_swap``) attached
+    to a candidate. Powers the in-workout "replace" action; the verdict is
+    always ``equivalent`` or ``comparable`` (different-stimulus candidates are
+    filtered out server-side)."""
+
+    exercise: ExerciseBrief
+    verdict: str
+    same_pattern: bool
+    muscle_overlap: float
+    equipment_changed: bool
+    rationale: str
+
+
 class AliasCreate(BaseModel):
     alias_text: str = Field(min_length=1)
 
