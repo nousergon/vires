@@ -140,6 +140,7 @@ export interface Countdown {
   running: boolean
   start: (seconds: number, onFinish?: () => void, label?: string) => void
   stop: () => void
+  finish: () => void
   addSeconds: (delta: number) => void
   setDuration: (seconds: number) => void
 }
@@ -203,6 +204,23 @@ export function useCountdown(onAlert?: (label?: string) => void): Countdown {
     setRemaining(0)
   }, [])
 
+  // Complete the countdown NOW, as if it had reached zero — runs the onFinish
+  // callback (e.g. a hold logging its set and rolling into the rest timer) but
+  // WITHOUT firing the end alert, since this is a deliberate user tap rather
+  // than an unattended timeout. Backs the hold bar's "Done" button so finishing
+  // a plank early still logs the set and starts rest instead of silently
+  // aborting (which the old "Stop" did).
+  const finish = useCallback(() => {
+    if (endRef.current == null) return
+    firedRef.current = true
+    endRef.current = null
+    setRunning(false)
+    setRemaining(0)
+    const cb = onFinishRef.current
+    onFinishRef.current = null
+    cb?.()
+  }, [])
+
   const addSeconds = useCallback((delta: number) => {
     if (endRef.current == null) return
     endRef.current += delta * 1000
@@ -220,7 +238,7 @@ export function useCountdown(onAlert?: (label?: string) => void): Countdown {
     setRemaining(seconds)
   }, [])
 
-  return { remaining, total, running, start, stop, addSeconds, setDuration }
+  return { remaining, total, running, start, stop, finish, addSeconds, setDuration }
 }
 
 export function fmtClock(totalSeconds: number): string {

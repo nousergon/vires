@@ -465,6 +465,31 @@ describe('WorkoutPage — ActiveWorkout', () => {
     expect(upd.mock.calls[0][3]).toMatchObject({ done: true, duration_seconds: 45 })
   })
 
+  it('finishing a hold via "Done" logs the set and rolls into the rest timer', async () => {
+    // Regression: tapping the hold bar's button when you finish a plank used to
+    // just abort the countdown ("Stop") — the set was never logged and rest
+    // never started. It now completes the set and kicks off rest.
+    const timed = makeSessionExercise({
+      id: 200,
+      exercise: makeBrief({ id: 2, name: 'Plank', is_timed: true, equipment: 'bodyweight' }),
+      target_duration_seconds: 45,
+      rest_seconds: 90,
+      sets: [makeSet({ id: 2000, reps: null, weight: null, duration_seconds: 45 })],
+    })
+    vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession({ exercises: [timed] }))
+    const upd = vi.spyOn(api, 'updateSet').mockResolvedValue(makeSet())
+    renderWithProviders(<WorkoutPage />)
+    await screen.findByText('Plank')
+    fireEvent.click(screen.getByTitle('Start hold')) // ▶ → hold timer
+    expect(await screen.findByText('Hold')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('Done')) // finish the hold
+    await waitFor(() => expect(upd).toHaveBeenCalled())
+    expect(upd.mock.calls[0][3]).toMatchObject({ done: true, duration_seconds: 45 })
+    // rest timer kicks in
+    expect(await screen.findByText('Rest')).toBeInTheDocument()
+  })
+
   it('hides the weight column when its toggle is turned off', async () => {
     vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession())
     renderWithProviders(<WorkoutPage />)
