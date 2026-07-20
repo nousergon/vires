@@ -568,12 +568,16 @@ function InlineTimerBar({
   onAdd,
   onSub,
   onSkip,
+  onFinish,
 }: {
   timer: ReturnType<typeof useCountdown>
   kind: TimerKind
   onAdd: () => void
   onSub: () => void
   onSkip: () => void
+  // Hold only: finish the hold now — logs the set done and rolls into rest
+  // (vs. onSkip, which just cancels). Rest uses onSkip ("Skip") to dismiss.
+  onFinish: () => void
 }) {
   const pct = timer.total > 0 ? (timer.remaining / timer.total) * 100 : 0
   const hold = kind === 'hold'
@@ -615,8 +619,11 @@ function InlineTimerBar({
           <button className="rounded px-2 py-0.5 text-xs text-slate-300" onClick={onAdd}>
             +30s
           </button>
-          <button className="rounded px-2 py-0.5 text-xs text-slate-300" onClick={onSkip}>
-            {hold ? 'Stop' : 'Skip'}
+          <button
+            className="rounded px-2 py-0.5 text-xs text-slate-300"
+            onClick={hold ? onFinish : onSkip}
+          >
+            {hold ? 'Done' : 'Skip'}
           </button>
         </div>
       </div>
@@ -849,6 +856,7 @@ function ExerciseBlock({
                 onAdd={() => timer.addSeconds(30)}
                 onSub={() => timer.addSeconds(-30)}
                 onSkip={stopTimer}
+                onFinish={() => timer.finish()}
               />
             )}
           </div>
