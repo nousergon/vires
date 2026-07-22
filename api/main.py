@@ -83,6 +83,18 @@ def _mount_spa() -> None:
         app.mount("/app/assets", StaticFiles(directory=assets), name="assets")
 
     dist_root = Path(dist).resolve()
+    # Build a whitelist of flat single-segment files at dist_root. The SPA
+    # fallback only serves these (nested paths like /app/assets/* are served
+    # by their own StaticFiles mount). Populating the whitelist at mount time
+    # from actual on-disk entries means the route handler looks up the path
+    # string from a pre-computed dict instead of constructing it from user
+    # input — CodeQL's py/path-injection query cannot trace a dataflow from
+    # full_path to a dict value populated during mount.
+    _fallback_files: dict[str, str] = {}
+    for _entry in dist_root.iterdir():
+        if _entry.is_file() and _entry.name != "index.html":
+            _fallback_files[_entry.name] = str(_entry)
+
     # Drop any spa_fallback route from a previous _mount_spa() call (tests
     # re-invoke this with a different dist_root; without this the earliest
     # registration would keep matching first forever).
@@ -92,33 +104,32 @@ def _mount_spa() -> None:
 
     @app.get("/app/{full_path:path}", include_in_schema=False, name="spa_fallback")
     async def spa_fallback(full_path: str) -> FileResponse:
-        """Serve SPA static files or index.html.
+        """Serve SPA static files or index.html (whitelist-only).
 
         full_path is attacker-controlled (any %2e%2e-style segment the ASGI
         server hands the ``{path}`` converter survives — browser-level ".."
         collapsing doesn't apply to a raw HTTP client). Every file this route
-        legitimately serves (manifest.json, favicon.*, the service workers —
-        see web/public/) is a flat, single-segment name at dist_root's top
+        legitimately serves is a flat, single-segment name at dist_root's top
         level; nested paths like /app/assets/* are served by their own
         StaticFiles mount, never by this fallback.
 
-        Security -- two-layer containment guarantee:
-        1. os.path.basename extracts just the final filename component; the
-           equality check rejects any input containing "/", "\\", or "..".
-        2. resolve() + relative_to() provides a canonical-path containment
-           check as a second layer.
+        Security: os.path.basename strips path separators; the equality check
+        rejects any input containing ".." or "/". The resulting single-segment
+        name is looked up in a whitelist pre-populated from actual on-disk
+        files at mount time — the FileResponse target is a dict value written
+        at mount, not a value constructed from user input.
         """
         if not full_path:
             return FileResponse(index)
         name = os.path.basename(full_path)
         if not name or name != full_path:
             return FileResponse(index)
-        candidate = (dist_root / name).resolve()
-        try:
-            candidate.relative_to(dist_root)
-        except ValueError:
-            return FileResponse(index)
-        return FileResponse(str(candidate)) if candidate.is_file() else FileResponse(index)
+        # Whitelist lookup — value comes from mount-time filesystem scan,
+        # not from user input. index.html is excluded from the whitelist
+        # (it has its own explicit fallback below), so repeated lookups
+        # for it skip the dict.
+        target = _fallback_files.get(name)
+        return FileResponse(target) if target is not None else FileResponse(index)
 
 
 _mount_spa()
