@@ -71,32 +71,6 @@ app.include_router(push.router, prefix="/app/api")
 app.include_router(routes.router, prefix="/app/api")
 
 
-def _safe_dist_path(dist_root: Path, full_path: str) -> Path | None:
-    """Resolve ``full_path`` against ``dist_root``, or None if it would escape it.
-
-    full_path is attacker-controlled (any %2e%2e-style segment the ASGI server
-    hands the ``{path}`` converter survives — browser-level ".." collapsing
-    doesn't apply to a raw HTTP client). Every file this route legitimately
-    serves (manifest.json, favicon.*, the service workers — see web/public/)
-    is a flat, single-segment name at dist_root's top level; nested paths
-    like /app/assets/* are served by their own StaticFiles mount, never by
-    this fallback. So rather than joining full_path onto dist_root and
-    re-validating containment after the fact (the prior os.path.realpath +
-    string-prefix approach — CodeQL's py/path-injection dataflow kept
-    treating the joined result as tainted no matter how it was validated),
-    take os.path.basename(full_path) up front: any ".." or "/" segment makes
-    it disagree with full_path and gets rejected before dist_root is ever
-    touched, which is the sanitizing pattern the query itself documents.
-    """
-    if not full_path:
-        return None
-    name = os.path.basename(full_path)
-    if not name or name != full_path:
-        return None
-    candidate = dist_root / name
-    return candidate if candidate.is_file() else None
-
-
 def _mount_spa() -> None:
     """Serve the built PWA under /app, with SPA fallback for client routes."""
     dist = settings.web_dist_dir
@@ -118,8 +92,33 @@ def _mount_spa() -> None:
 
     @app.get("/app/{full_path:path}", include_in_schema=False, name="spa_fallback")
     async def spa_fallback(full_path: str) -> FileResponse:
-        safe = _safe_dist_path(dist_root, full_path)
-        return FileResponse(safe) if safe is not None else FileResponse(index)
+        """Serve SPA static files or index.html.
+
+        full_path is attacker-controlled (any %2e%2e-style segment the ASGI
+        server hands the ``{path}`` converter survives — browser-level ".."
+        collapsing doesn't apply to a raw HTTP client). Every file this route
+        legitimately serves (manifest.json, favicon.*, the service workers —
+        see web/public/) is a flat, single-segment name at dist_root's top
+        level; nested paths like /app/assets/* are served by their own
+        StaticFiles mount, never by this fallback.
+
+        Security -- two-layer containment guarantee:
+        1. os.path.basename extracts just the final filename component; the
+           equality check rejects any input containing "/", "\\", or "..".
+        2. resolve() + relative_to() provides a canonical-path containment
+           check as a second layer.
+        """
+        if not full_path:
+            return FileResponse(index)
+        name = os.path.basename(full_path)
+        if not name or name != full_path:
+            return FileResponse(index)
+        candidate = (dist_root / name).resolve()
+        try:
+            candidate.relative_to(dist_root)
+        except ValueError:
+            return FileResponse(index)
+        return FileResponse(str(candidate)) if candidate.is_file() else FileResponse(index)
 
 
 _mount_spa()
