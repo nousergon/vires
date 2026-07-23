@@ -27,6 +27,7 @@ import { useSettings } from '../lib/useSettings'
 import { useTagSuggestions } from '../lib/useTagSuggestions'
 import { Button, Card, EmptyState, PageTitle, Sheet, Spinner } from '../components/ui'
 import ExercisePicker from '../components/ExercisePicker'
+import ReplaceExerciseSheet from '../components/ReplaceExerciseSheet'
 import PlateCalculatorSheet from '../components/PlateCalculatorSheet'
 import ActivityForm from '../components/ActivityForm'
 import { AilmentCheckInForm } from '../components/AilmentsPanel'
@@ -567,12 +568,16 @@ function InlineTimerBar({
   onAdd,
   onSub,
   onSkip,
+  onFinish,
 }: {
   timer: ReturnType<typeof useCountdown>
   kind: TimerKind
   onAdd: () => void
   onSub: () => void
   onSkip: () => void
+  // Hold only: finish the hold now — logs the set done and rolls into rest
+  // (vs. onSkip, which just cancels). Rest uses onSkip ("Skip") to dismiss.
+  onFinish: () => void
 }) {
   const pct = timer.total > 0 ? (timer.remaining / timer.total) * 100 : 0
   const hold = kind === 'hold'
@@ -614,8 +619,11 @@ function InlineTimerBar({
           <button className="rounded px-2 py-0.5 text-xs text-slate-300" onClick={onAdd}>
             +30s
           </button>
-          <button className="rounded px-2 py-0.5 text-xs text-slate-300" onClick={onSkip}>
-            {hold ? 'Stop' : 'Skip'}
+          <button
+            className="rounded px-2 py-0.5 text-xs text-slate-300"
+            onClick={hold ? onFinish : onSkip}
+          >
+            {hold ? 'Done' : 'Skip'}
           </button>
         </div>
       </div>
@@ -669,6 +677,7 @@ function ExerciseBlock({
   const holdSecs = se.target_duration_seconds ?? 60
 
   const [plateCalcOpen, setPlateCalcOpen] = useState(false)
+  const [replaceOpen, setReplaceOpen] = useState(false)
   const lastSetWeight = se.sets[se.sets.length - 1]?.weight
   const plateCalcSeed = lastSetWeight ?? se.target_weight ?? prev?.sets[0]?.weight ?? null
 
@@ -733,16 +742,31 @@ function ExerciseBlock({
           </button>
           <h3 className="font-semibold text-slate-100">{se.exercise.name}</h3>
         </div>
-        <button
-          className="text-xs text-slate-500"
-          onClick={async () => {
-            await api.removeWorkoutExercise(session.id, se.id)
-            onChanged()
-          }}
-        >
-          remove
-        </button>
+        <div className="flex items-center gap-3">
+          <button className="text-xs text-slate-500" onClick={() => setReplaceOpen(true)}>
+            replace
+          </button>
+          <button
+            className="text-xs text-slate-500"
+            onClick={async () => {
+              await api.removeWorkoutExercise(session.id, se.id)
+              onChanged()
+            }}
+          >
+            remove
+          </button>
+        </div>
       </div>
+
+      <ReplaceExerciseSheet
+        open={replaceOpen}
+        onClose={() => setReplaceOpen(false)}
+        exercise={se.exercise}
+        onReplace={async (ex) => {
+          await api.replaceWorkoutExercise(session.id, se.id, ex.id)
+          onChanged()
+        }}
+      />
 
       <PrevHint prev={prev} unit={settings.weight_unit} />
 
@@ -832,6 +856,7 @@ function ExerciseBlock({
                 onAdd={() => timer.addSeconds(30)}
                 onSub={() => timer.addSeconds(-30)}
                 onSkip={stopTimer}
+                onFinish={() => timer.finish()}
               />
             )}
           </div>

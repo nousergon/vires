@@ -19,9 +19,12 @@ from api.schemas.exercise import (
     ExerciseOut,
     ExercisePerformance,
     ExerciseSearchOut,
+    ExerciseSuggestion,
     PerformedSet,
 )
+from api.serializers import to_exercise_brief
 from api.serializers import to_exercise_out as to_out
+from api.services.exercise_swap import suggest_substitutes
 from api.services.search import get_search_service
 
 router = APIRouter(prefix="/exercises", tags=["exercises"])
@@ -128,6 +131,43 @@ def get_exercise(
     if not _visible(ex, ident):
         raise HTTPException(404, "Exercise not found")
     return to_out(ex)
+
+
+@router.get("/{exercise_id}/similar", response_model=list[ExerciseSuggestion])
+def similar_exercises(
+    exercise_id: int,
+    limit: int = Query(8, ge=1, le=25),
+    db: Session = Depends(get_db),
+    ident: Identity = Depends(current_identity),
+) -> list[ExerciseSuggestion]:
+    """Ranked substitute suggestions for an exercise — powers the in-workout
+    "replace" action (swap a move for a similar one in place, instead of a
+    manual remove + re-add + drag-back). Rule-based (movement pattern +
+    target-muscle overlap, via ``api.services.exercise_swap``), not LLM-judged,
+    for the same auditability reasons as the template-edit swap feedback."""
+    source = db.get(Exercise, exercise_id)
+    if not _visible(source, ident):
+        raise HTTPException(404, "Exercise not found")
+    candidates = list(
+        db.scalars(
+            select(Exercise).where(
+                Exercise.canonical_exercise_id.is_(None),  # skip alias rows
+                Exercise.id != exercise_id,
+                or_(Exercise.tenant_id.is_(None), Exercise.tenant_id == ident.tenant_id),
+            )
+        )
+    )
+    return [
+        ExerciseSuggestion(
+            exercise=to_exercise_brief(cand),
+            verdict=ev.verdict,
+            same_pattern=ev.same_pattern,
+            muscle_overlap=ev.muscle_overlap,
+            equipment_changed=ev.equipment_changed,
+            rationale=ev.rationale,
+        )
+        for cand, ev in suggest_substitutes(source, candidates, limit=limit)
+    ]
 
 
 @router.post("/{exercise_id}/aliases", response_model=ExerciseOut)

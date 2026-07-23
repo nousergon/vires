@@ -299,6 +299,47 @@ describe('WorkoutPage — ActiveWorkout', () => {
     await waitFor(() => expect(rm).toHaveBeenCalledWith(10, 100))
   })
 
+  it('replaces an exercise with a suggested similar one in place', async () => {
+    vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession())
+    vi.spyOn(api, 'similarExercises').mockResolvedValue([
+      {
+        exercise: makeBrief({ id: 55, name: 'Dumbbell Bench Press' }),
+        verdict: 'equivalent',
+        same_pattern: true,
+        muscle_overlap: 0.8,
+        equipment_changed: true,
+        rationale: 'Solid equivalent.',
+      },
+    ])
+    const replace = vi
+      .spyOn(api, 'replaceWorkoutExercise')
+      .mockResolvedValue(makeSessionExercise({ exercise: makeBrief({ id: 55 }) }))
+
+    renderWithProviders(<WorkoutPage />)
+    fireEvent.click(await screen.findByText('replace'))
+    // Sheet opens on the ranked similar-exercise list — no search/drag needed.
+    expect(await screen.findByText('Replace Bench Press')).toBeInTheDocument()
+    fireEvent.click(await screen.findByText('Dumbbell Bench Press'))
+    await waitFor(() => expect(replace).toHaveBeenCalledWith(10, 100, 55))
+  })
+
+  it('replaces via free search when no suggestion fits', async () => {
+    vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession())
+    vi.spyOn(api, 'similarExercises').mockResolvedValue([])
+    vi.spyOn(api, 'searchExercises').mockResolvedValue([makeHit({ id: 77, name: 'Machine Chest Press' })])
+    const replace = vi
+      .spyOn(api, 'replaceWorkoutExercise')
+      .mockResolvedValue(makeSessionExercise({ exercise: makeBrief({ id: 77 }) }))
+
+    renderWithProviders(<WorkoutPage />)
+    fireEvent.click(await screen.findByText('replace'))
+    fireEvent.change(await screen.findByPlaceholderText('Or search for any exercise…'), {
+      target: { value: 'chest press' },
+    })
+    fireEvent.click(await screen.findByText('Machine Chest Press'))
+    await waitFor(() => expect(replace).toHaveBeenCalledWith(10, 100, 77))
+  })
+
   it('finishes the workout by skipping the end-of-workout rating', async () => {
     vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession())
     const fin = vi.spyOn(api, 'finishWorkout').mockResolvedValue(makeSession({ ended_at: 'x' }))
@@ -422,6 +463,31 @@ describe('WorkoutPage — ActiveWorkout', () => {
     fireEvent.click(screen.getByTitle('Mark done')) // ✓
     await waitFor(() => expect(upd).toHaveBeenCalled())
     expect(upd.mock.calls[0][3]).toMatchObject({ done: true, duration_seconds: 45 })
+  })
+
+  it('finishing a hold via "Done" logs the set and rolls into the rest timer', async () => {
+    // Regression: tapping the hold bar's button when you finish a plank used to
+    // just abort the countdown ("Stop") — the set was never logged and rest
+    // never started. It now completes the set and kicks off rest.
+    const timed = makeSessionExercise({
+      id: 200,
+      exercise: makeBrief({ id: 2, name: 'Plank', is_timed: true, equipment: 'bodyweight' }),
+      target_duration_seconds: 45,
+      rest_seconds: 90,
+      sets: [makeSet({ id: 2000, reps: null, weight: null, duration_seconds: 45 })],
+    })
+    vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession({ exercises: [timed] }))
+    const upd = vi.spyOn(api, 'updateSet').mockResolvedValue(makeSet())
+    renderWithProviders(<WorkoutPage />)
+    await screen.findByText('Plank')
+    fireEvent.click(screen.getByTitle('Start hold')) // ▶ → hold timer
+    expect(await screen.findByText('Hold')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('Done')) // finish the hold
+    await waitFor(() => expect(upd).toHaveBeenCalled())
+    expect(upd.mock.calls[0][3]).toMatchObject({ done: true, duration_seconds: 45 })
+    // rest timer kicks in
+    expect(await screen.findByText('Rest')).toBeInTheDocument()
   })
 
   it('hides the weight column when its toggle is turned off', async () => {

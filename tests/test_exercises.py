@@ -137,6 +137,35 @@ def test_get_exercise_404(client):
     assert client.get("/app/api/exercises/99999999").status_code == 404
 
 
+def test_similar_exercises_ranks_substitutes_and_excludes_self(client):
+    ex_id = _ex_id(client, "barbell bench press")
+    r = client.get(f"/app/api/exercises/{ex_id}/similar", params={"limit": 8})
+    assert r.status_code == 200
+    suggestions = r.json()
+    assert suggestions, "expected at least one substitute for a common press"
+    # Never suggests the exercise being replaced.
+    assert all(s["exercise"]["id"] != ex_id for s in suggestions)
+    # Only usable substitutes — different-stimulus candidates are filtered out.
+    assert all(s["verdict"] in {"equivalent", "comparable"} for s in suggestions)
+    # A shared-pattern press (another chest push) should surface near the top.
+    names = " ".join(s["exercise"]["name"].lower() for s in suggestions)
+    assert "press" in names or "bench" in names
+    # Equivalents rank ahead of comparables.
+    ranks = [0 if s["verdict"] == "equivalent" else 1 for s in suggestions]
+    assert ranks == sorted(ranks)
+
+
+def test_similar_exercises_respects_limit(client):
+    ex_id = _ex_id(client, "barbell bench press")
+    r = client.get(f"/app/api/exercises/{ex_id}/similar", params={"limit": 3})
+    assert r.status_code == 200
+    assert len(r.json()) <= 3
+
+
+def test_similar_exercises_404_for_unknown(client):
+    assert client.get("/app/api/exercises/99999999/similar").status_code == 404
+
+
 def _ex_id(client, q: str) -> int:
     return client.get("/app/api/exercises/search", params={"q": q}).json()[0]["exercise"]["id"]
 

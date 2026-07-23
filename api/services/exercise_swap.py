@@ -121,6 +121,46 @@ def evaluate_swap(from_exercise: Exercise, to_exercise: Exercise) -> SwapEvaluat
     )
 
 
+# Verdict bands ordered best-substitute-first, for ranking suggestions.
+_VERDICT_RANK = {EQUIVALENT: 0, COMPARABLE: 1, DIFFERENT_STIMULUS: 2}
+
+
+def suggest_substitutes(
+    source: Exercise, candidates: list[Exercise], *, limit: int = 8
+) -> list[tuple[Exercise, SwapEvaluation]]:
+    """Rank ``candidates`` as substitutes for ``source``, best match first.
+
+    Reuses ``evaluate_swap`` for the per-candidate judgment, then orders by
+    verdict band (equivalent before comparable), then muscle overlap, then a
+    same-pattern / equipment-continuity tiebreak. Candidates judged
+    ``DIFFERENT_STIMULUS`` — neither pattern nor muscles line up — are dropped:
+    they aren't reasonable replacements, and listing them would defeat the
+    point of a "similar exercise" suggestion. ``source`` itself (matched by id)
+    is always excluded, so the caller needn't pre-filter it out.
+
+    Returns ``(candidate, evaluation)`` pairs so the caller has both the
+    exercise to surface and the rationale to show beside it.
+    """
+    scored: list[tuple[Exercise, SwapEvaluation]] = []
+    for cand in candidates:
+        if cand.id == source.id:
+            continue
+        evaluation = evaluate_swap(source, cand)
+        if evaluation.verdict == DIFFERENT_STIMULUS:
+            continue
+        scored.append((cand, evaluation))
+    scored.sort(
+        key=lambda pair: (
+            _VERDICT_RANK[pair[1].verdict],
+            -pair[1].muscle_overlap,
+            not pair[1].same_pattern,
+            pair[1].equipment_changed,
+            pair[1].to_name.lower(),
+        )
+    )
+    return scored[:limit]
+
+
 def detect_swaps(
     old_exercise_ids: list[int], new_exercise_ids: list[int]
 ) -> list[tuple[int, int]]:

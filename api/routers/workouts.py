@@ -31,6 +31,7 @@ from api.schemas.workout import (
     SessionExerciseIn,
     SessionExerciseOut,
     SessionExerciseReorder,
+    SessionExerciseReplace,
     SessionExerciseUpdate,
     SetIn,
     SetOut,
@@ -820,6 +821,51 @@ def update_session_exercise(
     se = _get_se(db, ws, se_id)
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(se, field, value)
+    db.commit()
+    db.refresh(se)
+    return _se_out(db, ident, se)
+
+
+@router.post("/{session_id}/exercises/{se_id}/replace", response_model=SessionExerciseOut)
+def replace_session_exercise(
+    session_id: int,
+    se_id: int,
+    body: SessionExerciseReplace,
+    db: Session = Depends(get_db),
+    ident: Identity = Depends(current_identity),
+) -> SessionExerciseOut:
+    """Swap this slot's exercise for another, in place — the one-tap "replace"
+    that spares the user a manual remove + re-add + drag-back-into-sequence.
+
+    Keeps the slot (same ``order_index`` and id) and its set/rep/rest scheme,
+    but retargets it and re-seeds fresh set rows for the new move: the old
+    exercise-specific weight/hold-duration and any set rows are discarded (a
+    replaced move wasn't the one you did). Replacing an exercise with itself
+    is a no-op — the existing rows are left untouched."""
+    from api.db.models import Exercise
+
+    ws = _get_session(db, session_id, ident)
+    se = _get_se(db, ws, se_id)
+    if body.exercise_id == se.exercise_id:
+        return _se_out(db, ident, se)
+    ex = db.get(Exercise, body.exercise_id)
+    if ex is None or (ex.tenant_id is not None and ex.tenant_id != ident.tenant_id):
+        raise HTTPException(400, f"Unknown exercise_id {body.exercise_id}")
+
+    se.exercise_id = body.exercise_id
+    # Exercise-specific targets and the prior move's logged/planned sets don't
+    # carry across a swap; the set/rep count and rest cadence do (same slot in
+    # the routine). notes was written for the old exercise, so clear it too.
+    se.target_weight = None
+    se.target_duration_seconds = None
+    se.notes = None
+    for s in list(se.sets):
+        db.delete(s)
+    db.flush()
+    db.refresh(se)
+    # Re-seed ready-to-fill rows for the new move (from ITS own history, else
+    # the retained target_reps), exactly like a fresh from-template exercise.
+    _seed_planned_sets(db, ident, se)
     db.commit()
     db.refresh(se)
     return _se_out(db, ident, se)

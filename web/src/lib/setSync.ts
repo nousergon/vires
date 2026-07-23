@@ -33,11 +33,24 @@ export interface LogSetBody {
 
 function newUuid(): string {
   // crypto.randomUUID() is available in every SW-capable browser and in Node
-  // 19+/jsdom's webcrypto. Fallback keeps non-crypto envs from throwing.
+  // 19+/jsdom's webcrypto.
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID()
   }
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`
+  // crypto.getRandomValues has near-universal support (predates randomUUID by
+  // a decade) — build a UUID v4 manually from it rather than falling back to
+  // Math.random()/Date.now(), which is not cryptographically secure: a
+  // predictable client_uuid lets one client's dedup key collide with or be
+  // guessed for another's, corrupting the server-side dedup this ID exists
+  // for (CodeQL js/insecure-randomness, config-I2628).
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    const bytes = crypto.getRandomValues(new Uint8Array(16))
+    bytes[6] = (bytes[6] & 0x0f) | 0x40 // version 4
+    bytes[8] = (bytes[8] & 0x3f) | 0x80 // variant 10
+    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+  }
+  throw new Error('vires: no secure random source available to mint a client_uuid')
 }
 
 function online(): boolean {

@@ -127,6 +127,16 @@ class SessionExerciseReorder(BaseModel):
     exercise_ids: list[int] = Field(min_length=1)
 
 
+class SessionExerciseReplace(BaseModel):
+    """Swap an in-progress exercise for another, in place — the "replace"
+    action. Keeps the slot's position (``order_index``) and set/rep/rest
+    scheme, but retargets it to ``exercise_id`` and re-seeds fresh set rows
+    for the new move (the old, exercise-specific weight/duration and any
+    logged sets are discarded)."""
+
+    exercise_id: int
+
+
 class SessionExerciseOut(BaseModel):
     id: int
     order_index: int

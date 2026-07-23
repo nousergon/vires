@@ -16,12 +16,16 @@ dependencies = [
     "fastembed>=0.4",
     "numpy>=1.26",
     "httpx>=0.27",
+    # Guards untrusted GPX-file XML parsing against entity-expansion/DTD
+    # attacks (api/services/geo/gpx.py, config-I2632) — stdlib ElementTree
+    # resolves DOCTYPE-declared entities by default.
+    "defusedxml>=0.7.1",
     # krepis provider-agnostic LLM adapter (Anthropic / OpenAI / OpenRouter
     # behind one call surface). Active coach model = /vires/llm/coach SSM
     # param or VIRES_COACH_LLM env; both SDK transports installed.
     # >=0.11.0 for ModelSpec.reasoning (krepis#16) — required by
     # _resolve_spec()'s OpenRouter reasoning-exclude override (config#1999).
-    "krepis[anthropic,openai]>=0.14.0",
+    "krepis[anthropic,openai]>=0.16.2",
     "pywebpush>=1.14",
     # Verifies nousergon-auth's EdDSA/Ed25519 JWTs against its JWKS
     # (vires-ops#60) — [crypto] pulls in `cryptography` for the Ed25519 path.
