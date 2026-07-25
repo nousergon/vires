@@ -26,15 +26,22 @@ MAX_DELAY_SECONDS = 3600.0
 
 
 def _sanitize(s: str) -> str:
-    """Strip CR/LF to prevent log forging (CRLF injection).
+    """Strip control chars (except tab) to prevent log forging (CRLF injection).
 
     CodeQL ``py/log-injection`` sink guard — user-controlled values that reach a
     log call are passed through this so an attacker cannot forge log entries via
-    embedded CR/LF sequences in timer_id / user_id.
+    embedded CR/LF/NUL sequences in timer_id / user_id.
+
+    The explicit ``.replace("\r", "").replace("\n", "")`` calls are load-bearing:
+    they are the pattern CodeQL recognises as a CRLF sanitizer. The subsequent
+    generator expression strips every remaining C0 control character (0x00-0x1f)
+    except tab (0x09, kept because it is harmless in log output and common in
+    structured formatting).
     """
     if not s:
         return s
-    return s.replace("\r", "").replace("\n", "")
+    s = s.replace("\r", "").replace("\n", "")
+    return "".join(c for c in s if c == "\t" or c >= "\x20")
 
 
 def push_configured() -> bool:
