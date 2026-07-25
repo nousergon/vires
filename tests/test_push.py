@@ -129,3 +129,38 @@ def test_schedule_replaces_same_timer_id(monkeypatch):
 
     asyncio.run(run())
     assert delivered == ["NEW"]  # the old one was cancelled
+
+
+# --------------------------------------------------------------------------- #
+# log sanitization  (CodeQL py/log-injection guard)
+# --------------------------------------------------------------------------- #
+def test_sanitize_passes_clean_string_through():
+    """Normal values are not altered."""
+    assert push._sanitize("hello-world") == "hello-world"
+    assert push._sanitize("timer_42") == "timer_42"
+    assert push._sanitize("user_uuid_abc") == "user_uuid_abc"
+
+
+def test_sanitize_strips_control_chars():
+    """CR (\r), null (\x00), and other control chars (except tab, newline) are stripped."""
+    assert push._sanitize("foo\rbar") == "foobar"
+    assert push._sanitize("foo\x00bar") == "foobar"
+    assert push._sanitize("foo\x01bar") == "foobar"
+    assert push._sanitize("foo\x1fbar") == "foobar"
+
+
+def test_sanitize_keeps_tab():
+    """Tab (0x09) — legitimate whitespace — survives."""
+    assert push._sanitize("foo\tbar") == "foo\tbar"
+
+
+def test_sanitize_strips_newlines():
+    """Newline (0x0a) — the primary log-forging vector — is stripped."""
+    assert push._sanitize("foo\nbar") == "foobar"
+
+
+def test_sanitize_empty():
+    """Empty string stays empty."""
+    assert push._sanitize("") == ""
+    assert push._sanitize("a\r\nb") == "ab"
+    assert push._sanitize("\r\n") == ""
