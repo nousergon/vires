@@ -25,18 +25,16 @@ log = logging.getLogger("vires.push")
 MAX_DELAY_SECONDS = 3600.0
 
 
-_LOG_CONTROL_CHARS = str.maketrans({chr(i): None for i in range(32) if i != 9})
-
-
 def _sanitize(s: str) -> str:
-    """Strip control chars (except tab) to prevent log forging (CRLF injection).
+    """Strip CR/LF to prevent log forging (CRLF injection).
 
     CodeQL ``py/log-injection`` sink guard — user-controlled values that reach a
     log call are passed through this so an attacker cannot forge log entries via
-    embedded CR/LF sequences in timer_id / user_id. Tab (0x09) is kept as it is
-    harmless in log text and commonly used for structured formatting.
+    embedded CR/LF sequences in timer_id / user_id.
     """
-    return s.translate(_LOG_CONTROL_CHARS) if s else s
+    if not s:
+        return s
+    return s.replace("\r", "").replace("\n", "")
 
 
 def push_configured() -> bool:
