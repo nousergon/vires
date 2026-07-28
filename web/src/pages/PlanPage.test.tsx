@@ -300,7 +300,7 @@ describe('PlanPage', () => {
 
   it('renders an upcoming activity as a marker distinct from objectives', async () => {
     mockEmpty()
-    const iso = isoDate(new Date(Date.now() + 7 * 864e5)) // a week out — safely "upcoming"
+    const iso = isoDate(new Date(Date.now() + 1 * 864e5)) // tomorrow — safely within the current month grid
     vi.spyOn(api, 'calendar').mockResolvedValue([
       {
         kind: 'session',
