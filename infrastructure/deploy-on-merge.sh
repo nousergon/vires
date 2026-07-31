@@ -118,6 +118,26 @@ else
   echo "coach: no key at ${OR_PARAM} — open-model providers unavailable (non-fatal)"
 fi
 
+# --- LLM SFT capture: hydrate the capture flag from SSM into .env ------------- #
+# Coach invocations gate SFT distillation rows on LLM_SFT_CAPTURE_ENABLED
+# (krepis.llm_capture). Defaults to "true" per EPIC I1658 intent: distillation
+# rows should accrue from day one for single-tenant owner deployments. Flip to
+# "false" via the SSM param to disable capture without redeploying.
+# NON-FATAL: missing param => default-on; capture accrues automatically.
+SFT_PARAM="${VIRES_SFT_CAPTURE_SSM_PARAM:-/vires/llm_sft_capture_enabled}"
+SFT_VALUE=$(aws ssm get-parameter --name "$SFT_PARAM" --query Parameter.Value --output text 2>/dev/null || true)
+if [ -n "$SFT_VALUE" ] && [ "$SFT_VALUE" != "None" ]; then
+  echo "coach: SFT capture flag from SSM: ${SFT_VALUE}"
+else
+  echo "coach: no SFT capture flag at ${SFT_PARAM} — defaulting to true"
+  SFT_VALUE="true"
+fi
+grep -v '^LLM_SFT_CAPTURE_ENABLED=' "$ENV_FILE" > "$ENV_FILE.tmp" || true
+mv "$ENV_FILE.tmp" "$ENV_FILE"
+printf 'LLM_SFT_CAPTURE_ENABLED=%s\n' "$SFT_VALUE" >> "$ENV_FILE"
+chmod 600 "$ENV_FILE"
+unset SFT_VALUE
+
 # --- Speech-to-text: hydrate the STT key from SSM into .env ------------------ #
 # NON-FATAL: missing key => /coach/transcribe 503s and the mic is hidden client-side.
 STT_PARAM="${VIRES_STT_SSM_PARAM:-/vires/stt_api_key}"
