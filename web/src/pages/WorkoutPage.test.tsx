@@ -4,6 +4,7 @@ import {
   renderWithProviders,
   SETTINGS,
   makeBrief,
+  makeExercise,
   makeHit,
   makeSession,
   makeSessionExercise,
@@ -540,5 +541,142 @@ describe('WorkoutPage — ActiveWorkout', () => {
     // bar sits after set 1 and before set 2
     expect(set1.compareDocumentPosition(restBar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(restBar.compareDocumentPosition(set2) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+})
+
+// --------------------------------------------------------------------------- //
+// Regression cover for the 2026-08-03 incident: the API was wedged (vires.service
+// pinned at its cgroup MemoryHigh, answering nothing), every write rejected, and
+// the UI showed no sign of it — ✓ did not tick, "replace" did nothing, "Finish"
+// sat on "Finishing…". Reads kept rendering from the service worker cache, so the
+// app looked alive while every tap was discarded.
+describe('WorkoutPage — a failed write is never silent', () => {
+  beforeEach(() => {
+    localStorage.setItem(ACTIVE_KEY, '10')
+    vi.spyOn(window, 'alert').mockImplementation(() => {})
+  })
+
+  it('surfaces a failed set completion and does not start the rest timer', async () => {
+    vi.spyOn(api, 'getWorkout').mockResolvedValue(
+      makeSession({
+        exercises: [
+          makeSessionExercise({ id: 100, sets: [makeSet({ id: 1, set_number: 1, reps: 10 })] }),
+        ],
+      }),
+    )
+    const update = vi
+      .spyOn(api, 'updateSet')
+      .mockRejectedValue(new Error('502: Bad Gateway'))
+
+    renderWithProviders(<WorkoutPage />)
+    fireEvent.click(await screen.findByTitle('Mark done'))
+
+    await waitFor(() => expect(update).toHaveBeenCalled())
+    await waitFor(() =>
+      expect(window.alert).toHaveBeenCalledWith(expect.stringContaining('log that set')),
+    )
+    // The rest countdown must NOT have started: a set that did not log must
+    // not start a rest timer or otherwise claim it was recorded. The countdown
+    // renders its own seconds field, which nothing else on the page does.
+    expect(screen.queryByLabelText('Set timer seconds')).not.toBeInTheDocument()
+  })
+
+  it('surfaces a failed replace instead of closing the sheet silently', async () => {
+    vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession())
+    vi.spyOn(api, 'similarExercises').mockResolvedValue([
+      {
+        exercise: makeBrief({ id: 55, name: 'Dumbbell Bench Press' }),
+        verdict: 'equivalent',
+        same_pattern: true,
+        muscle_overlap: 0.8,
+        equipment_changed: true,
+        rationale: 'Solid equivalent.',
+      },
+    ])
+    vi.spyOn(api, 'replaceWorkoutExercise').mockRejectedValue(new Error('502: Bad Gateway'))
+
+    renderWithProviders(<WorkoutPage />)
+    fireEvent.click(await screen.findByText('replace'))
+    fireEvent.click(await screen.findByText('Dumbbell Bench Press'))
+
+    await waitFor(() =>
+      expect(window.alert).toHaveBeenCalledWith(expect.stringContaining('Dumbbell Bench Press')),
+    )
+  })
+
+  it('surfaces a failed finish rather than dropping out of "Finishing…"', async () => {
+    vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession())
+    vi.spyOn(api, 'finishWorkout').mockRejectedValue(new Error('502: Bad Gateway'))
+
+    renderWithProviders(<WorkoutPage />)
+    fireEvent.click(await screen.findByText('Finish'))
+    fireEvent.click(await screen.findByText('Skip'))
+
+    await waitFor(() =>
+      expect(window.alert).toHaveBeenCalledWith(expect.stringContaining('finish this workout')),
+    )
+  })
+})
+
+// The catalog has 873 seeded exercises and no "Hanging Knee Raise". Hybrid
+// search always returns plausible near-matches, so the sheet's "No matches"
+// state was unreachable and there was no way to add the move you actually
+// wanted without abandoning the swap.
+describe('WorkoutPage — replacing with an exercise the catalog lacks', () => {
+  beforeEach(() => localStorage.setItem(ACTIVE_KEY, '10'))
+
+  it('offers to create the searched name and uses it for the swap', async () => {
+    vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession())
+    vi.spyOn(api, 'similarExercises').mockResolvedValue([])
+    // What the real backend returns for this query: near-misses, never nothing.
+    vi.spyOn(api, 'searchExercises').mockResolvedValue([
+      makeHit({ id: 319, name: 'Hanging Leg Raise' }),
+      makeHit({ id: 44, name: 'Bent-Knee Hip Raise' }),
+    ])
+    const create = vi.spyOn(api, 'createExercise').mockResolvedValue({
+      created: true,
+      reason: 'created',
+      exercise: makeExercise({ id: 900, name: 'Hanging Knee Raise' }),
+      duplicate_of: null,
+      similar_to: null,
+      similar_to_similarity: null,
+    })
+    const replace = vi
+      .spyOn(api, 'replaceWorkoutExercise')
+      .mockResolvedValue(makeSessionExercise({ exercise: makeBrief({ id: 900 }) }))
+
+    renderWithProviders(<WorkoutPage />)
+    fireEvent.click(await screen.findByText('replace'))
+    fireEvent.change(await screen.findByPlaceholderText('Or search for any exercise…'), {
+      target: { value: 'hanging knee raise' },
+    })
+
+    fireEvent.click(await screen.findByRole('button', { name: /and use it here/ }))
+    await waitFor(() =>
+      expect(create).toHaveBeenCalledWith({ name: 'hanging knee raise', force: false }),
+    )
+    // Created AND swapped in, in one tap — not created and left for the user
+    // to search again.
+    await waitFor(() => expect(replace).toHaveBeenCalledWith(10, 100, 900))
+  })
+
+  it('uses the existing exercise when the name is already in the catalog', async () => {
+    vi.spyOn(api, 'getWorkout').mockResolvedValue(makeSession())
+    vi.spyOn(api, 'similarExercises').mockResolvedValue([])
+    vi.spyOn(api, 'searchExercises').mockResolvedValue([
+      makeHit({ id: 319, name: 'Hanging Leg Raise' }),
+      makeHit({ id: 320, name: 'Hanging Pike' }),
+    ])
+    renderWithProviders(<WorkoutPage />)
+    fireEvent.click(await screen.findByText('replace'))
+    fireEvent.change(await screen.findByPlaceholderText('Or search for any exercise…'), {
+      target: { value: 'Hanging Pike' },
+    })
+    expect(await screen.findByText('Hanging Pike')).toBeInTheDocument()
+    // Exact match present → no create affordance, which would only produce the
+    // server's duplicate prompt.
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /and use it here/ })).not.toBeInTheDocument(),
+    )
   })
 })

@@ -6,6 +6,7 @@ import {
   type RecordMetric,
   type RecordWindow,
 } from '../lib/api'
+import { reportWriteFailure } from '../lib/writeFailure'
 import { useSettings } from '../lib/useSettings'
 import { fmtClock } from '../lib/timer'
 import { Button, Card, EmptyState, PageTitle, Spinner } from '../components/ui'
@@ -86,7 +87,7 @@ function SessionsView() {
       exitSelect()
       refresh()
     } catch (e) {
-      alert(`Couldn't delete: ${(e as Error).message.replace(/^\d+:\s*/, '')}`)
+      reportWriteFailure('delete those workouts', e)
       refresh() // some may have deleted — resync the list
     } finally {
       setBusy(false)
