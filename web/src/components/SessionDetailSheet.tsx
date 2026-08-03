@@ -8,6 +8,7 @@ import {
   type WeightUnit,
   type WorkoutSession,
 } from '../lib/api'
+import { reportWriteFailure } from '../lib/writeFailure'
 import { useSettings } from '../lib/useSettings'
 import { useTagSuggestions } from '../lib/useTagSuggestions'
 import { fmtClock } from '../lib/timer'
@@ -302,7 +303,7 @@ export default function SessionDetailSheet({
       onClose()
       onDeleted?.()
     } catch (e) {
-      alert(`Couldn't delete: ${(e as Error).message.replace(/^\d+:\s*/, '')}`)
+      reportWriteFailure('delete that workout', e)
     } finally {
       setBusy(false)
     }

@@ -23,6 +23,7 @@ import { useCountdown, fmtClock, fireTimerAlert, firePing, unlockAudioForTimers 
 import { useWakeLock } from '../lib/wakeLock'
 import { schedulePush, cancelPush } from '../lib/push'
 import { logSetOfflineFirst } from '../lib/setSync'
+import { reportWriteFailure, withWriteFailure } from '../lib/writeFailure'
 import { useSettings } from '../lib/useSettings'
 import { useTagSuggestions } from '../lib/useTagSuggestions'
 import { Button, Card, EmptyState, PageTitle, Sheet, Spinner } from '../components/ui'
@@ -118,6 +119,7 @@ function StartView({ onStarted }: { onStarted: (id: number) => void }) {
   const start = useMutation({
     mutationFn: (templateId: number | null) => api.startWorkout({ template_id: templateId }),
     onSuccess: (ws) => onStarted(ws.id),
+    onError: (e) => reportWriteFailure('start a workout', e),
   })
   const [activityOpen, setActivityOpen] = useState(false)
   // Same-day ailment check-in gate (vires-ops#58) — mirrors PlanPage's planned-
@@ -297,6 +299,7 @@ function ActiveWorkout({ id, onClear }: { id: number; onClear: () => void }) {
         target_reps: settings.default_reps,
       }),
     onSuccess: invalidate,
+    onError: (e) => reportWriteFailure('add that exercise', e),
   })
   // Drag-and-drop reorder: one batch PATCH with the full new id order.
   // Optimistically reorders the cached exercise list first so the drag lands
@@ -311,6 +314,7 @@ function ActiveWorkout({ id, onClear }: { id: number; onClear: () => void }) {
       })
     },
     onSettled: invalidate,
+    onError: (e) => reportWriteFailure('reorder those exercises', e),
   })
   const finish = useMutation({
     mutationFn: (
@@ -321,10 +325,15 @@ function ActiveWorkout({ id, onClear }: { id: number; onClear: () => void }) {
       onClear()
       nav('/history')
     },
+    // Without this the sheet just drops back out of "Finishing…" with the
+    // workout still open and no reason given — observed 2026-08-03 against a
+    // wedged API, where the request never returned at all.
+    onError: (e) => reportWriteFailure('finish this workout', e),
   })
   const discard = useMutation({
     mutationFn: () => api.deleteWorkout(id),
     onSuccess: () => onClear(),
+    onError: (e) => reportWriteFailure('discard this workout', e),
   })
 
   if (missing) return null // stale pointer cleared; parent switches to the start view
@@ -434,7 +443,8 @@ function SessionDetails({
   const qc = useQueryClient()
   const tagSuggestions = useTagSuggestions()
   const save = async (body: Parameters<typeof api.updateWorkout>[1]) => {
-    await api.updateWorkout(session.id, body)
+    if (!(await withWriteFailure('save that change', () => api.updateWorkout(session.id, body))))
+      return
     // A new tag should show up as a quick-complete suggestion on the NEXT
     // session immediately, not after the query's staleTime lapses.
     if ('tags' in body) qc.invalidateQueries({ queryKey: ['workout-tags'] })
@@ -699,7 +709,11 @@ function ExerciseBlock({
     // queues the write in IndexedDB (keyed by a client UUID) and registers a
     // background-sync tag so the SW replays it on reconnect. Never throws on a
     // network failure — the set is durably queued instead of lost.
-    await logSetOfflineFirst(session.id, se.id, body)
+    // logSetOfflineFirst never throws on a network failure — it queues the
+    // write in IndexedDB instead. It CAN still throw on a 4xx/5xx from a
+    // reachable-but-broken API, which is not a queueable condition.
+    if (!(await withWriteFailure('add a set', () => logSetOfflineFirst(session.id, se.id, body))))
+      return
     onChanged()
   }
 
@@ -707,7 +721,10 @@ function ExerciseBlock({
     const secs = restInput === '' ? settings.default_rest_seconds : Number(restInput)
     setRestSecs(secs)
     if (secs !== persistedRest) {
-      await api.updateWorkoutExercise(session.id, se.id, { rest_seconds: secs })
+      const ok = await withWriteFailure('save the rest timer', () =>
+        api.updateWorkoutExercise(session.id, se.id, { rest_seconds: secs }),
+      )
+      if (!ok) return
       onChanged()
     }
   }
@@ -720,7 +737,10 @@ function ExerciseBlock({
   ) {
     const later = se.sets.filter((s) => s.set_number > afterSetNumber)
     if (later.length === 0) return
-    await Promise.all(later.map((s) => api.updateSet(session.id, se.id, s.id, patch)))
+    const ok = await withWriteFailure('auto-fill the later sets', () =>
+      Promise.all(later.map((s) => api.updateSet(session.id, se.id, s.id, patch))),
+    )
+    if (!ok) return
     onChanged()
   }
 
@@ -749,8 +769,10 @@ function ExerciseBlock({
           <button
             className="text-xs text-slate-500"
             onClick={async () => {
-              await api.removeWorkoutExercise(session.id, se.id)
-              onChanged()
+              const ok = await withWriteFailure('remove that exercise', () =>
+                api.removeWorkoutExercise(session.id, se.id),
+              )
+              if (ok) onChanged()
             }}
           >
             remove
@@ -763,8 +785,10 @@ function ExerciseBlock({
         onClose={() => setReplaceOpen(false)}
         exercise={se.exercise}
         onReplace={async (ex) => {
-          await api.replaceWorkoutExercise(session.id, se.id, ex.id)
-          onChanged()
+          const ok = await withWriteFailure(`replace this with ${ex.name}`, () =>
+            api.replaceWorkoutExercise(session.id, se.id, ex.id),
+          )
+          if (ok) onChanged()
         }}
       />
 
@@ -909,8 +933,10 @@ function SetNumButton({
   return (
     <button
       onClick={async () => {
-        await api.updateSet(sessionId, seId, set.id, { is_warmup: !set.is_warmup })
-        onChanged()
+        const ok = await withWriteFailure('toggle warm-up', () =>
+          api.updateSet(sessionId, seId, set.id, { is_warmup: !set.is_warmup }),
+        )
+        if (ok) onChanged()
       }}
       className={`h-7 w-7 rounded-md text-xs font-bold ${
         set.is_warmup ? 'bg-amber-600/40 text-amber-200' : 'bg-slate-700 text-slate-300'
@@ -937,8 +963,10 @@ function DeleteSetButton({
     <button
       className="text-slate-600 hover:text-red-400"
       onClick={async () => {
-        await api.deleteSet(sessionId, seId, setId)
-        onChanged()
+        const ok = await withWriteFailure('delete that set', () =>
+          api.deleteSet(sessionId, seId, setId),
+        )
+        if (ok) onChanged()
       }}
     >
       ✕
@@ -1001,7 +1029,7 @@ function SetRow({
     value: number | undefined,
     prev: number | null,
   ) {
-    await save({ [field]: value })
+    if (!(await withWriteFailure('save that value', () => save({ [field]: value })))) return
     if (value !== undefined && value !== prev) onCascade(set.set_number, { [field]: value })
   }
 
@@ -1023,7 +1051,16 @@ function SetRow({
     if (cols.weight) patch.weight = weight === '' ? undefined : Number(weight)
     if (cols.reps) patch.reps = reps === '' ? undefined : Number(reps)
     if (cols.timer) patch.duration_seconds = seconds()
-    await api.updateSet(sessionId, seId, set.id, patch)
+    // The set is not done until the API says so. Reported 2026-08-03: with the
+    // API wedged, tapping ✓ did nothing at all and gave no reason — the button
+    // sat un-ticked while the user kept tapping it. Never ping or start the
+    // rest countdown for a set that did not actually log; a confirmation beep
+    // over a discarded write is worse than the silence it replaced.
+    const ok = await withWriteFailure(
+      nowDone ? 'log that set' : 'un-tick that set',
+      () => api.updateSet(sessionId, seId, set.id, patch),
+    )
+    if (!ok) return
     if (nowDone) {
       if (!silent) ping() // audible + haptic confirmation that the set was logged
       if (restEnabled) runTimer('rest', seId, set.id, restSecs)

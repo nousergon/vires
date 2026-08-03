@@ -86,6 +86,16 @@ export default function ExercisePicker({
         value={q}
         onChange={(e) => setQ(e.target.value)}
         placeholder="Search e.g. RDL, bench press, or describe it…"
+        // See ReplaceExerciseSheet's copy of this: without a declared type and
+        // these hints iOS Safari shows its AutoFill accessory bar (passwords /
+        // credit cards / contacts) over the results.
+        type="search"
+        name="exercise-search"
+        autoComplete="off"
+        autoCorrect="off"
+        autoCapitalize="none"
+        spellCheck={false}
+        enterKeyHint="search"
         className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 text-base outline-none focus:border-amber-500"
       />
 
