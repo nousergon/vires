@@ -28,6 +28,12 @@ logger = logging.getLogger(__name__)
 
 TOOL_NAME = "emit_program_spec"
 
+# Join key for cost attribution and SFT capture — registered as `vires-coach`
+# in alpha-engine-config's LLM_CALLSITE_REGISTRY.yaml. krepis >=0.32 requires
+# a non-empty callsite_id on every LLMClient; this call site is the one place
+# the coach constructs a client.
+CALLSITE_ID = "vires-coach"
+
 # The system prompt is loaded at call time — tuned-private if hydrated onto the
 # box, else the committed public baseline (see prompt_loader). The prompt is the
 # Vires coaching edge, so its tuned form is NOT in this public repo.
@@ -412,7 +418,7 @@ def generate_spec(
             f"'{spec_cfg.provider}')."
         )
 
-    client = LLMClient(spec_cfg, api_key=api_key)
+    client = LLMClient(spec_cfg, api_key=api_key, callsite_id=CALLSITE_ID)
 
     user_text = (
         f"CONTEXT:\n{_context_block(ctx, today, obj_ctx)}\n\nREQUEST:\n{message.strip()}"
