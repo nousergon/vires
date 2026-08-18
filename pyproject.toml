@@ -8,7 +8,7 @@ license = { text = "AGPL-3.0-only" }
 authors = [{ name = "Brian McMahon", email = "brian@nousergon.ai" }]
 dependencies = [
     "fastapi>=0.141.1",
-    "uvicorn[standard]>=0.52.1",
+    "uvicorn[standard]>=0.52.3",
     "sqlalchemy>=2.0.52",
     "alembic>=1.19.1",
     "pydantic>=2.7",
