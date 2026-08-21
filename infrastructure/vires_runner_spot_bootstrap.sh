@@ -4,10 +4,12 @@
 # nousergon/vires, let it pick up exactly ONE queued job, then
 # self-terminate. alpha-engine-config-I2572 (source design).
 #
-# SIBLING of ci_watch_spot_bootstrap.sh/sf_watch_spot_bootstrap.sh — mirrors
-# their proven skeleton VERBATIM for the watchdog/deferred-shutdown mechanics
-# (see ci_watch_spot_bootstrap.sh's header for the full config#1472 incident
-# history behind that piece). DIFFERENT WORKLOAD, though: those two run a
+# SIBLING of alpha-engine-config's infrastructure/overseer_spot_bootstrap.sh —
+# mirrors its proven skeleton VERBATIM for the watchdog/deferred-shutdown
+# mechanics (see that script's header for the full config#1472 incident history
+# behind that piece). The skeleton was first written in
+# ci_watch_spot_bootstrap.sh / sf_watch_spot_bootstrap.sh, deleted by
+# alpha-engine-config-I7987. DIFFERENT WORKLOAD, though: the overseer playbooks run a
 # bespoke Claude Code agent over SSM outside the GHA Actions protocol; this
 # one runs the actual `actions-runner` binary and lets GitHub's own Actions
 # service dispatch the already-queued job to it — the workflow YAML (checkout,
@@ -73,9 +75,11 @@ RUN_USER_HOME="$(getent passwd "$VIRES_RUNNER_USER" | cut -d: -f6)"
 RUNNER_DIR="${RUN_USER_HOME}/actions-runner"
 
 # ── Hard-timeout watchdog + guaranteed teardown ────────────────────────────────
-# Copied VERBATIM from ci_watch_spot_bootstrap.sh — see its header for the
-# full config#1472 postmortem this mechanism fixes (SSM's own status-report
-# race with an immediate shutdown). Do not "simplify".
+# Copied VERBATIM from alpha-engine-config's overseer_spot_bootstrap.sh (it
+# came from ci_watch_spot_bootstrap.sh, deleted by alpha-engine-config-I7987)
+# — see that script's header for the full config#1472 postmortem this
+# mechanism fixes (SSM's own status-report race with an immediate shutdown).
+# Do not "simplify".
 systemd-run --on-active="${MAX_RUNTIME_SECONDS}" --unit=vires-runner-watchdog \
   --description='vires-runner spot hard-timeout' /sbin/shutdown -h now \
   >/dev/null 2>&1 || log "WARN: watchdog arm failed (shutdown_behavior=terminate still applies)"
