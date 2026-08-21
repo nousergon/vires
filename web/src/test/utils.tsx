@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react'
-import { render } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import type {
@@ -16,6 +16,43 @@ import type {
   TemplateSummary,
   WorkoutSession,
 } from '../lib/api'
+
+/**
+ * Click a button by its accessible name, after waiting for it to be ENABLED.
+ *
+ * Why this exists (vires-ops#77). `fireEvent.click` on a `disabled` button is a
+ * SILENT no-op: React does not fire `onClick`, nothing throws, and the
+ * assertion that follows fails as "the handler was never called" — which reads
+ * as a product defect rather than a test that acted too early. That is exactly
+ * how `ObjectiveSheet.test.tsx` failed on CI's Node 20 while passing on newer
+ * Node locally: the test waited for the NAME field to prefill and then clicked
+ * a button whose `disabled` is derived from several other pieces of state, so
+ * "the form is populated" and "the button is clickable" are not the same event
+ * and their order is not guaranteed.
+ *
+ * Two properties, both load-bearing:
+ *
+ * 1. It waits for the button to be enabled, so the click cannot land early.
+ * 2. It ASSERTS the button is enabled rather than clicking regardless — a
+ *    button that never enables fails here, naming the button, instead of
+ *    failing later as an uncalled mock.
+ *
+ * Prefer this over `fireEvent.click(screen.getByText(...))` anywhere the target
+ * is a button whose `disabled` is computed. Sweep of the remaining call sites
+ * is tracked on vires-ops#77.
+ */
+export async function clickEnabledButton(name: string | RegExp) {
+  const button = await screen.findByRole('button', { name })
+  await waitFor(() => {
+    if ((button as HTMLButtonElement).disabled) {
+      throw new Error(
+        `button "${String(name)}" is still disabled — the click would be a silent no-op`,
+      )
+    }
+  })
+  fireEvent.click(button)
+  return button
+}
 
 /** Render a component with react-query + router providers (retries off for tests). */
 export function renderWithProviders(ui: ReactElement, { route = '/' } = {}) {
