@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { screen, fireEvent, waitFor } from '@testing-library/react'
-import { renderWithProviders, makeObjective, makeActiveObjective } from '../test/utils'
+import { clickEnabledButton, makeActiveObjective, makeObjective, renderWithProviders } from '../test/utils'
 import ObjectiveSheet from './ObjectiveSheet'
 import { api } from '../lib/api'
 
@@ -88,7 +88,12 @@ describe('ObjectiveSheet', () => {
     renderWithProviders(<ObjectiveSheet open objectiveId={1} onClose={() => {}} onSaved={() => {}} />)
 
     expect((await screen.findByDisplayValue('Climb Baker')).getAttribute('value')).toBe('Climb Baker')
-    fireEvent.click(screen.getByText('Update objective'))
+    // vires-ops#77: the name field prefilling and the submit button becoming
+    // clickable are different events. `canSave` also depends on kind/targetDate,
+    // and `fireEvent.click` on a disabled button is a SILENT no-op — which is how
+    // this failed on CI's Node 20 as "updateObjective was never called" while
+    // passing locally on newer Node.
+    await clickEnabledButton('Update objective')
     await waitFor(() =>
       expect(update).toHaveBeenCalledWith(1, expect.objectContaining({ name: 'Climb Baker' })),
     )
