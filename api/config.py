@@ -43,13 +43,18 @@ class Settings(BaseSettings):
     # AI coach — provider-agnostic via the krepis adapter. WHICH model runs is
     # operator config, resolved (in order): VIRES_COACH_LLM env override →
     # /vires/llm/coach SSM parameter (60s TTL — flip providers live, no
-    # redeploy; e.g. "openrouter:moonshotai/kimi-k2.6") → the code default
-    # below (anthropic + coach_model). Keys are hydrated onto the box from SSM
-    # at deploy time (see infrastructure/deploy-on-merge.sh); a missing key
-    # for the ACTIVE provider => the coach endpoints 503 and the rest of the
-    # app keeps working.
+    # redeploy) → the code default below (anthropic + coach_model). A value
+    # naming "openrouter:<model>" is REFUSED by
+    # api.services.coach.agent._reject_direct_openrouter (2026-08-03 ruling,
+    # alpha-engine-config#6367) rather than resolved — there is deliberately
+    # no openrouter_api_key setting to hold a credential for a linkage that
+    # is now permanently banned (alpha-engine-config#9092 removed the field
+    # and the deploy-on-merge SSM hydration step that fed it). The key is
+    # hydrated onto the box from SSM at deploy time (see
+    # infrastructure/deploy-on-merge.sh); a missing key for the ACTIVE
+    # provider => the coach endpoints 503 and the rest of the app keeps
+    # working.
     anthropic_api_key: str | None = None
-    openrouter_api_key: str | None = None
     coach_llm_ssm_param: str = "/vires/llm/coach"
     coach_model: str = "claude-haiku-4-5"
     coach_max_tokens: int = 4096

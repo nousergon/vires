@@ -346,19 +346,22 @@ def _resolve_spec():
     The code default is the pre-adapter behavior (Anthropic + coach_model),
     so a deploy with no SSM param seeded is behavior-identical.
 
-    OpenRouter models get a ``reasoning`` override applied here (rather than
-    requiring the flip value itself to carry one): a reasoning-capable model
-    (e.g. Kimi K2.6) can spend its entire output budget on invisible
-    chain-of-thought and return empty content with a clean ``finish_reason
-    ="stop"`` (config#1999, root-caused + fixed in krepis#16). Defaulting to
-    ``{"exclude": True}`` (cheapest, longest-content option per krepis#16's
-    live comparison) means the operational flip surface can stay the plain
-    ``"openrouter:<model>"`` string without depending on remembering an
-    inline reasoning directive. An explicit ``reasoning`` supplied via the
-    SSM/env JSON form still wins.
-    """
-    from dataclasses import replace
+    A flip-surface value naming ``openrouter`` is refused by
+    :func:`_reject_direct_openrouter` rather than resolved: the 2026-08-03
+    ruling (alpha-engine-config#6367) bans a call site holding its own
+    OpenRouter credential and addressing openrouter.ai directly, and this
+    call site's operational flip surface (``VIRES_COACH_LLM`` env /
+    ``/vires/llm/coach`` SSM, 60-second TTL, no deploy or code review) was
+    exactly how it fell into breach with no code change at all
+    (alpha-engine-config#9092, live-observed 2026-08-28).
 
+    The historical OpenRouter ``reasoning`` default (config#1999, root-caused
+    in krepis#16 — a reasoning-capable model like Kimi K2.6 could spend its
+    whole output budget on invisible chain-of-thought and return empty
+    content with a clean ``finish_reason="stop"``) is removed here: it can
+    never observe a spec this function returns, since every ``openrouter``
+    spec is now rejected before this function returns anything.
+    """
     from krepis.llm_config import ModelSpec, resolve_model_spec
 
     settings = get_settings()
@@ -370,18 +373,50 @@ def _resolve_spec():
         ),
         max_tokens=settings.coach_max_tokens,
     )
-    if spec.provider == "openrouter" and spec.reasoning is None:
-        spec = replace(spec, reasoning={"exclude": True})
+    _reject_direct_openrouter(spec, f"VIRES_COACH_LLM / {settings.coach_llm_ssm_param}")
     return spec
+
+
+def _reject_direct_openrouter(spec, source: str) -> None:  # noqa: ANN001
+    """Refuse a spec that addresses openrouter.ai directly.
+
+    Mirrors ``metron_ops.metron_ext.advisor.llm._reject_direct_openrouter`` —
+    the fleet's reference pattern for this class (alpha-engine-config#9092).
+    RULING alpha-engine-config#6367 (2026-08-03): no agent may be directly
+    linked to OpenRouter. The coach was in breach through the flip surface
+    rather than through code — ``/vires/llm/coach`` accepted (and the
+    deploy-on-merge hydration step fed a live key to) any operator value
+    naming ``openrouter:<model>``, a 60-second-TTL parameter no deploy or
+    review passes through. A ruling that only the code honours is not
+    enforced, so it is enforced HERE, where every resolution path converges.
+
+    Raising rather than silently rerouting is deliberate: an operator who set
+    that value wanted a specific model, and quietly serving a different one
+    is the failure `fail-loud` exists to prevent. The message names the
+    remedy.
+    """
+    if getattr(spec, "provider", None) == "openrouter":
+        raise CoachUnavailable(
+            f"AI coach model config refused: {source} names provider "
+            f"'openrouter', a direct OpenRouter linkage prohibited by the "
+            f"2026-08-03 ruling (alpha-engine-config#6367). Clear the "
+            f"override to use the Anthropic default, or set an explicit "
+            f"non-openrouter spec."
+        )
 
 
 def _api_key_for(spec) -> str | None:  # noqa: ANN001
     """The settings-held key for the active provider (VIRES_-prefixed env,
-    SSM-hydrated at deploy — NOT the bare env vars krepis defaults to)."""
+    SSM-hydrated at deploy — NOT the bare env vars krepis defaults to).
+
+    Only ``anthropic`` is a legitimate direct linkage today — ``openrouter``
+    never reaches here (:func:`_reject_direct_openrouter` raises first), and
+    no other provider is wired to a settings-held key.
+    """
     settings = get_settings()
     if spec.provider == "anthropic":
         return settings.anthropic_api_key
-    return settings.openrouter_api_key
+    return None
 
 
 def generate_spec(
