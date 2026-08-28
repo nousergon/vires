@@ -471,32 +471,47 @@ def test_weekday_rejects_unknown():
 
 
 # --------------------------------------------------------------------------- #
-# _resolve_spec: OpenRouter reasoning-exclude default (config#1999, krepis#16)
+# _resolve_spec / _reject_direct_openrouter (alpha-engine-config-I6367,
+# alpha-engine-config-I9092): the coach's flip surface (VIRES_COACH_LLM env /
+# /vires/llm/coach SSM, 60s TTL) must never resolve to a live OpenRouter
+# linkage, however the value is spelled.
 # --------------------------------------------------------------------------- #
-def test_resolve_spec_defaults_reasoning_exclude_for_openrouter(monkeypatch):
-    from api.services.coach.agent import _resolve_spec
+def test_resolve_spec_rejects_openrouter_flip_short_form(monkeypatch):
+    from api.services.coach.agent import CoachUnavailable, _resolve_spec
 
     monkeypatch.setenv("VIRES_COACH_LLM", "openrouter:moonshotai/kimi-k2.6")
-    spec = _resolve_spec()
-    assert spec.provider == "openrouter"
-    assert spec.reasoning == {"exclude": True}
+    with pytest.raises(CoachUnavailable, match="alpha-engine-config#6367"):
+        _resolve_spec()
 
 
-def test_resolve_spec_keeps_explicit_reasoning_override(monkeypatch):
-    from api.services.coach.agent import _resolve_spec
+def test_resolve_spec_rejects_openrouter_flip_json_form(monkeypatch):
+    from api.services.coach.agent import CoachUnavailable, _resolve_spec
 
     monkeypatch.setenv(
         "VIRES_COACH_LLM",
         '{"provider": "openrouter", "model": "moonshotai/kimi-k2.6", '
         '"reasoning": {"effort": "low"}}',
     )
-    spec = _resolve_spec()
-    assert spec.reasoning == {"effort": "low"}
+    with pytest.raises(CoachUnavailable, match="alpha-engine-config#6367"):
+        _resolve_spec()
 
 
-def test_resolve_spec_anthropic_has_no_reasoning_override():
+def test_resolve_spec_anthropic_is_unaffected():
     from api.services.coach.agent import _resolve_spec
 
     spec = _resolve_spec()  # _hermetic_coach_spec autouse fixture pins anthropic
     assert spec.provider == "anthropic"
-    assert spec.reasoning is None
+
+
+def test_api_key_for_returns_none_for_non_anthropic_provider():
+    """No settings field can leak a credential to a non-anthropic provider —
+    the direct-OpenRouter credential store was removed entirely (I9092)."""
+    from dataclasses import dataclass
+
+    from api.services.coach.agent import _api_key_for
+
+    @dataclass
+    class _FakeSpec:
+        provider: str
+
+    assert _api_key_for(_FakeSpec(provider="deepseek")) is None

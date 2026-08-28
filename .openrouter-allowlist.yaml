@@ -1,0 +1,64 @@
+# .openrouter-allowlist.yaml — pre-cleared OpenRouter-literal matches for
+# vires (alpha-engine-config-I9092: the guard did not exist in this repo
+# before I9092 — vires-coach's flip surface reached a live direct-OpenRouter
+# linkage undetected on main for an unknown period).
+#
+# Schema: nousergon-lib scripts/openrouter_guard.py::load_allowlist. Every
+# entry needs path, pattern, reason, expires (YYYY-MM-DD — a past date fails
+# CI loudly), and tracking.
+#
+# Every entry below is prose (docstrings/comments naming the ruling this repo
+# now complies with) or the defensive check / regression test that PROVES
+# compliance — not a live call site. There is no genuinely-unmigrated entry
+# in this file: I9092's fix removed the only real linkage this repo ever had.
+schema_version: 1
+entries:
+  - path: api/config.py
+    pattern: attr_key
+    reason: >-
+      Comment explaining that the openrouter_api_key setting was REMOVED
+      (I9092) — names the identifier it is documenting the absence of, not a
+      call site.
+    expires: "2027-08-28"
+    tracking: alpha-engine-config-I9092
+  - path: api/services/coach/agent.py
+    pattern: base_url
+    reason: >-
+      Docstring prose on _resolve_spec / _reject_direct_openrouter explaining
+      what the guard function refuses. Not a call site — the function never
+      constructs a base_url.
+    expires: "2027-08-28"
+    tracking: alpha-engine-config-I9092
+  - path: api/services/coach/agent.py
+    pattern: provider_comparison
+    reason: >-
+      _reject_direct_openrouter's OWN defensive check
+      (getattr(spec, "provider", None) == "openrouter") — mirrors
+      metron-ops's reference _reject_direct_openrouter pattern. This IS the
+      fix, not a linkage.
+    expires: "2027-08-28"
+    tracking: alpha-engine-config-I9092
+  - path: infrastructure/deploy-on-merge.sh
+    pattern: attr_key
+    reason: >-
+      Comment explaining that Settings.openrouter_api_key was removed and no
+      key is hydrated for it anymore (I9092). Not a call site.
+    expires: "2027-08-28"
+    tracking: alpha-engine-config-I9092
+  - path: infrastructure/deploy-on-merge.sh
+    pattern: env_key
+    reason: >-
+      Scrubs any VIRES_OPENROUTER_API_KEY a PRIOR deploy left in .env — the
+      opposite of a linkage: this line only ever removes the credential, and
+      no code path in the app reads it anymore (I9092).
+    expires: "2027-08-28"
+    tracking: alpha-engine-config-I9092
+  - path: tests/test_coach.py
+    pattern: provider_literal
+    reason: >-
+      Regression test fixture constructs an openrouter-naming flip value on
+      purpose to assert _resolve_spec raises CoachUnavailable naming
+      alpha-engine-config#6367 (I9092). A test asserting the ban is enforced
+      is not a call site.
+    expires: "2027-08-28"
+    tracking: alpha-engine-config-I9092

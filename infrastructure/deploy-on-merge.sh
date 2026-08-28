@@ -99,24 +99,17 @@ else
   echo "coach: no tuned prompt at ${PROMPT_S3} — using public baseline (non-fatal)"
 fi
 
-# --- AI coach open-model provider: hydrate the OpenRouter key from SSM ------- #
-# The coach's ACTIVE provider is the /vires/llm/coach SSM param (krepis adapter;
-# flip live, no redeploy — e.g. "openrouter:moonshotai/kimi-k2.6"; rollback =
-# put-parameter back to "anthropic:claude-haiku-4-5"). NON-FATAL: missing key
-# => the coach 503s only while the active spec points at an OpenRouter provider.
-OR_PARAM="${VIRES_OPENROUTER_SSM_PARAM:-/vires/openrouter_api_key}"
-if ORKEY=$(aws ssm get-parameter --name "$OR_PARAM" --with-decryption \
-             --query Parameter.Value --output text 2>/dev/null) \
-   && [ -n "$ORKEY" ] && [ "$ORKEY" != "None" ]; then
-  grep -v '^VIRES_OPENROUTER_API_KEY=' "$ENV_FILE" > "$ENV_FILE.tmp" || true
-  mv "$ENV_FILE.tmp" "$ENV_FILE"
-  printf 'VIRES_OPENROUTER_API_KEY=%s\n' "$ORKEY" >> "$ENV_FILE"   # value not traced (no set -x)
-  chmod 600 "$ENV_FILE"
-  unset ORKEY
-  echo "coach: hydrated OpenRouter key from ${OR_PARAM}"
-else
-  echo "coach: no key at ${OR_PARAM} — open-model providers unavailable (non-fatal)"
-fi
+# --- AI coach open-model provider -------------------------------------------- #
+# No OpenRouter key is hydrated here (removed alpha-engine-config-I9092,
+# 2026-08-28): the coach's /vires/llm/coach SSM flip param can no longer
+# resolve to a live OpenRouter linkage at all —
+# api.services.coach.agent._reject_direct_openrouter refuses any spec naming
+# "openrouter" (2026-08-03 ruling, alpha-engine-config#6367) before a key is
+# ever looked up, and the settings field that used to hold this credential
+# (Settings.openrouter_api_key) is gone. Hydrating a key here would only
+# stand up a credential nothing in the coach can legally use.
+grep -v '^VIRES_OPENROUTER_API_KEY=' "$ENV_FILE" > "$ENV_FILE.tmp" 2>/dev/null || true
+[ -f "$ENV_FILE.tmp" ] && mv "$ENV_FILE.tmp" "$ENV_FILE"  # scrub any key from a prior deploy
 
 # --- LLM SFT capture: hydrate the capture flag from SSM into .env ------------- #
 # Coach invocations gate SFT distillation rows on LLM_SFT_CAPTURE_ENABLED
