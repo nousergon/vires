@@ -60,25 +60,18 @@ if ! sudo cmp -s "$UNIT_SRC" "$UNIT_LIVE" 2>/dev/null; then
   sudo systemctl enable vires >/dev/null 2>&1 || true
 fi
 
-# --- AI coach secret: hydrate the Anthropic key from SSM into .env ---------- #
-# Single source of truth is SSM Parameter Store; rotation = update the param +
-# redeploy. The key value is NEVER echoed (CLI-output-safety rule). Missing key
-# is NON-FATAL: the coach endpoints 503 and the rest of the app keeps working.
-SSM_PARAM="${VIRES_ANTHROPIC_SSM_PARAM:-/vires/anthropic_api_key}"
+# --- AI coach: direct-Anthropic key hydration RETIRED (2026-08-29 ruling) --- #
+# The coach funnels through the krepis router edge (api/services/coach/agent.py
+# _default_spec / _reject_non_router_override) — it never constructs a direct
+# Anthropic client any more, so there is no VIRES_ANTHROPIC_API_KEY consumer
+# left to hydrate. Scrub any key a prior deploy left in .env rather than leave
+# a live, unused credential on the box (vires-ops-I<N> tracks deleting the now-
+# orphaned /vires/anthropic_api_key SSM parameter).
 ENV_FILE="$REPO/.env"
 touch "$ENV_FILE"
-if KEY=$(aws ssm get-parameter --name "$SSM_PARAM" --with-decryption \
-           --query Parameter.Value --output text 2>/dev/null) \
-   && [ -n "$KEY" ] && [ "$KEY" != "None" ]; then
-  grep -v '^VIRES_ANTHROPIC_API_KEY=' "$ENV_FILE" > "$ENV_FILE.tmp" || true
-  mv "$ENV_FILE.tmp" "$ENV_FILE"
-  printf 'VIRES_ANTHROPIC_API_KEY=%s\n' "$KEY" >> "$ENV_FILE"   # value not traced (no set -x)
-  chmod 600 "$ENV_FILE"
-  unset KEY
-  echo "coach: hydrated Anthropic key from ${SSM_PARAM}"
-else
-  echo "coach: no key at ${SSM_PARAM} — AI coach unavailable (non-fatal)"
-fi
+grep -v '^VIRES_ANTHROPIC_API_KEY=' "$ENV_FILE" > "$ENV_FILE.tmp" || true
+mv "$ENV_FILE.tmp" "$ENV_FILE"
+chmod 600 "$ENV_FILE"
 
 # --- Coaching edge: hydrate the tuned coach prompt from S3 (private) --------- #
 # The tuned prompt is the Vires edge (Commercial-tier) — kept out of the public
@@ -100,14 +93,16 @@ else
 fi
 
 # --- AI coach open-model provider -------------------------------------------- #
-# No OpenRouter key is hydrated here (removed alpha-engine-config-I9092,
-# 2026-08-28): the coach's /vires/llm/coach SSM flip param can no longer
-# resolve to a live OpenRouter linkage at all —
-# api.services.coach.agent._reject_direct_openrouter refuses any spec naming
-# "openrouter" (2026-08-03 ruling, alpha-engine-config#6367) before a key is
-# ever looked up, and the settings field that used to hold this credential
-# (Settings.openrouter_api_key) is gone. Hydrating a key here would only
-# stand up a credential nothing in the coach can legally use.
+# No direct-provider key (OpenRouter, Anthropic, or otherwise) is hydrated
+# here. Removed alpha-engine-config-I9092 (2026-08-28) for OpenRouter, then
+# generalized 2026-08-29 (Brian ruling: every LLM call funnels through the
+# krepis router, no other parallel setups) — the coach's /vires/llm/coach SSM
+# flip param can no longer resolve to ANY direct-provider linkage;
+# api.services.coach.agent._reject_non_router_override refuses any spec whose
+# provider isn't the router edge itself before a key is ever looked up, and
+# no settings field holds a credential for a linkage that can never legally
+# be used. Hydrating a key here would only stand up a credential nothing in
+# the coach can legally use.
 grep -v '^VIRES_OPENROUTER_API_KEY=' "$ENV_FILE" > "$ENV_FILE.tmp" 2>/dev/null || true
 [ -f "$ENV_FILE.tmp" ] && mv "$ENV_FILE.tmp" "$ENV_FILE"  # scrub any key from a prior deploy
 

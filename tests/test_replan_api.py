@@ -92,43 +92,16 @@ def test_replan_409_when_nothing_fired(client):
     assert r.status_code == 409  # no LLM call when no trigger
 
 
-class _MockMessages:
-    spec: dict = {}
-
-    def create(self, **_kw):
-        class _Block:
-            type = "tool_use"
-            name = "emit_program_spec"
-            input = _MockMessages.spec
-
-        class _Resp:
-            content = [_Block()]
-
-        return _Resp()
-
-
-class _MockClient:
-    def __init__(self, **_kw):
-        pass
-
-    @property
-    def messages(self):
-        return _MockMessages()
-
-
 def test_replan_proposes_but_does_not_persist(client, monkeypatch):
-    import anthropic
-
-    from api.config import get_settings
+    from tests.conftest import install_fake_coach_client
 
     prog, tpl_id = _program(client)
     _make_missed(client, prog, 2)
     before = client.get("/app/api/plan/programs").json()
 
-    # mock the coach to emit a valid grounded spec for this program's template
-    _MockMessages.spec = _spec(tpl_id)
-    monkeypatch.setattr(get_settings(), "anthropic_api_key", "test-key")
-    monkeypatch.setattr(anthropic, "Anthropic", _MockClient)
+    # mock the coach (krepis router-edge fake) to emit a valid grounded spec
+    # for this program's template
+    install_fake_coach_client(monkeypatch, [_spec(tpl_id)])
 
     r = client.post(f"/app/api/coach/programs/{prog['id']}/replan")
     assert r.status_code == 200, r.text

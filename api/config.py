@@ -40,23 +40,23 @@ class Settings(BaseSettings):
     dev_tenant_id: str = "dev-tenant"
     dev_user_id: str = "dev-user"
 
-    # AI coach — provider-agnostic via the krepis adapter. WHICH model runs is
-    # operator config, resolved (in order): VIRES_COACH_LLM env override →
-    # /vires/llm/coach SSM parameter (60s TTL — flip providers live, no
-    # redeploy) → the code default below (anthropic + coach_model). A value
-    # naming "openrouter:<model>" is REFUSED by
-    # api.services.coach.agent._reject_direct_openrouter (2026-08-03 ruling,
-    # alpha-engine-config#6367) rather than resolved — there is deliberately
-    # no openrouter_api_key setting to hold a credential for a linkage that
-    # is now permanently banned (alpha-engine-config#9092 removed the field
-    # and the deploy-on-merge SSM hydration step that fed it). The key is
-    # hydrated onto the box from SSM at deploy time (see
-    # infrastructure/deploy-on-merge.sh); a missing key for the ACTIVE
-    # provider => the coach endpoints 503 and the rest of the app keeps
-    # working.
-    anthropic_api_key: str | None = None
+    # AI coach — funnels through the krepis router (api/services/coach/agent.py).
+    # WHICH model serves the "low" router group is a registry decision, not a
+    # setting here (principle 8, substitutability). The operator flip surface
+    # is VIRES_COACH_LLM env → /vires/llm/coach SSM parameter (60s TTL — no
+    # redeploy needed to flip) → the router-derived default; an override may
+    # only pin the model the router edge itself serves (provider
+    # "litellm_proxy"), never address a provider directly
+    # (api.services.coach.agent._reject_non_router_override — Brian's
+    # 2026-08-29 ruling retiring direct-Anthropic and requiring every call to
+    # funnel through the krepis router; supersedes the narrower
+    # _reject_direct_openrouter from alpha-engine-config-I9092). There is
+    # deliberately no anthropic_api_key / openrouter_api_key setting here any
+    # more — no credential store exists for a linkage that can never legally
+    # be constructed. The router edge resolves its own credentials off its
+    # SSM/env chain; a router-unresolvable config => the coach endpoints 503
+    # and the rest of the app keeps working.
     coach_llm_ssm_param: str = "/vires/llm/coach"
-    coach_model: str = "claude-haiku-4-5"
     coach_max_tokens: int = 4096
     # Coach telemetry sinks (parents auto-created). Cost rows append on every
     # generation (krepis record_llm_call — provider/tokens/cost_source); SFT

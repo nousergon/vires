@@ -52,9 +52,15 @@ _USER_TABLES = [
 def _hermetic_coach_spec(monkeypatch):
     """Pin the coach ModelSpec via the env override so tests never read the
     live /vires/llm/coach SSM parameter (the env layer wins before any boto3
-    call in krepis resolve_model_spec). The anthropic transport keeps the
-    existing `anthropic.Anthropic` monkeypatch seams working unchanged."""
-    monkeypatch.setenv("VIRES_COACH_LLM", "anthropic:claude-haiku-4-5")
+    call in krepis resolve_model_spec). Names the router-edge provider
+    ("litellm_proxy") — the only provider api.services.coach.agent's
+    _reject_non_router_override accepts from an override since the
+    2026-08-29 krepis-router migration (direct anthropic/openrouter specs are
+    refused). Transport is therefore always OpenAI-compatible in tests; the
+    `api.services.coach.agent._transport_client_factory` seam injects a fake
+    `chat.completions`-shaped client (see tests/conftest.py's
+    `install_fake_coach_client` helper) instead of monkeypatching an SDK."""
+    monkeypatch.setenv("VIRES_COACH_LLM", "litellm_proxy:test-router-model")
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -139,3 +145,86 @@ def raw_client(db):
     with TestClient(app, base_url="https://testserver") as c:
         yield c
     app.dependency_overrides.clear()
+
+
+# --------------------------------------------------------------------------- #
+# Coach LLM test seam — OpenAI-compatible fake transport client.
+#
+# Since the 2026-08-29 krepis-router migration (api/services/coach/agent.py),
+# every resolvable coach ModelSpec uses the OpenAI-compatible transport (the
+# router edge never resolves the anthropic transport) — so tests inject a
+# `chat.completions.create`-shaped fake via
+# `api.services.coach.agent._transport_client_factory`, not an
+# `anthropic.Anthropic` monkeypatch. This is the one shared shape every coach
+# test file (test_coach.py, test_coach_routines.py, test_objective_coach.py,
+# test_replan_api.py) builds on.
+class FakeChatMessage:
+    def __init__(self, content: str) -> None:
+        self.content = content
+
+
+class FakeChatChoice:
+    def __init__(self, content: str) -> None:
+        self.message = FakeChatMessage(content)
+        self.finish_reason = "stop"
+
+
+class FakeChatCompletion:
+    def __init__(self, content: str, model: str = "deepseek/deepseek-v4-flash") -> None:
+        self.choices = [FakeChatChoice(content)]
+        self.model = model
+        self.usage = None
+        self.id = "fake-completion"
+
+
+class FakeChatCompletions:
+    """Records every outbound request; returns the next canned payload (as
+    the model's structured-output JSON) on each `.create()` call."""
+
+    def __init__(self, canned: list[dict]) -> None:
+        self.canned = canned
+        self.calls = 0
+        self.last_request: dict | None = None
+
+    def create(self, **kwargs):
+        import json as _json
+
+        self.last_request = kwargs
+        payload = self.canned[min(self.calls, len(self.canned) - 1)]
+        self.calls += 1
+        return FakeChatCompletion(_json.dumps(payload))
+
+
+class FakeLLMClient:
+    """OpenAI-SDK-shaped fake — `client.chat.completions.create(...)`, the
+    only surface krepis's openai transport touches on the structured() path
+    when a `client_factory` is supplied."""
+
+    def __init__(self, canned: list[dict]) -> None:
+        self.chat = _Namespace(completions=FakeChatCompletions(canned))
+
+    @property
+    def calls(self) -> int:
+        return self.chat.completions.calls
+
+    @property
+    def last_request(self) -> dict | None:
+        return self.chat.completions.last_request
+
+
+class _Namespace:
+    def __init__(self, **kw) -> None:
+        self.__dict__.update(kw)
+
+
+def install_fake_coach_client(monkeypatch, canned: list[dict]) -> FakeLLMClient:
+    """Point `api.services.coach.agent._transport_client_factory` at a fresh
+    `FakeLLMClient` seeded with `canned` (a list of dicts — the structured
+    payload each successive model call returns; the last entry repeats once
+    exhausted, mirroring the retry-then-succeed shape most coach tests want).
+    Returns the fake so callers can assert on `.calls` / `.last_request`."""
+    from api.services.coach import agent
+
+    fake = FakeLLMClient(canned)
+    monkeypatch.setattr(agent, "_transport_client_factory", lambda: fake)
+    return fake

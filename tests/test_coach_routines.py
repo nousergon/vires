@@ -171,44 +171,13 @@ def test_grounding_allows_existing_template_exercise_id():
 # --------------------------------------------------------------------------- #
 # e2e: generate authors routines, save persists them as real templates
 # --------------------------------------------------------------------------- #
-class _FakeBlock:
-    type = "tool_use"
-    name = "emit_program_spec"
+def _install_fake(monkeypatch, payload: dict):
+    """Repo-local alias for the shared conftest helper (krepis router-edge
+    fake, not an anthropic.Anthropic monkeypatch — see
+    api/services/coach/agent.py's 2026-08-29 migration)."""
+    from tests.conftest import install_fake_coach_client
 
-    def __init__(self, payload):
-        self.input = payload
-
-
-class _FakeResp:
-    def __init__(self, payload):
-        self.content = [_FakeBlock(payload)]
-
-
-class _FakeClient:
-    canned: dict = {}
-
-    def __init__(self, **_kw):
-        pass
-
-    @property
-    def messages(self):
-        client = self
-
-        class _M:
-            def create(self, **_kw):
-                return _FakeResp(client.canned)
-
-        return _M()
-
-
-def _install_fake(monkeypatch, payload):
-    import anthropic
-
-    from api.config import get_settings
-
-    monkeypatch.setattr(get_settings(), "anthropic_api_key", "test-key")
-    _FakeClient.canned = payload
-    monkeypatch.setattr(anthropic, "Anthropic", _FakeClient)
+    return install_fake_coach_client(monkeypatch, [payload])
 
 
 def _set_alpine_objective(client):

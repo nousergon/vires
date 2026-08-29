@@ -371,51 +371,26 @@ def test_activity_outside_the_lookback_window_does_not_reach_the_coach(client, d
 # --------------------------------------------------------------------------- #
 # end-to-end: /api/coach/generate feeds the active objective to the model
 # --------------------------------------------------------------------------- #
-class _CapturingMessages:
-    def create(self, **kw):
-        _CapturingClient.captured.append(kw)
-        payload = {
-            "name": "Baker Block",
-            "start_date": "2026-06-29",
-            "duration_weeks": 4,
-            "schedule": [{"template_id": _CapturingClient.tpl_id, "weekday": "monday"}],
-            "progressions": [],
-            "deload_weeks": [4],
-            "coach_summary": "Periodized to the summit; final week tapers.",
-        }
-
-        class _Block:
-            type = "tool_use"
-            name = "emit_program_spec"
-            input = payload
-
-        class _Resp:
-            content = [_Block()]
-
-        return _Resp()
-
-
-class _CapturingClient:
-    captured: list[dict] = []
-    tpl_id = 0
-
-    def __init__(self, **_kw):
-        pass
-
-    @property
-    def messages(self):
-        return _CapturingMessages()
-
-
 def _install_capturing(monkeypatch, tpl_id: int):
-    import anthropic
+    """krepis router-edge fake (see tests/conftest.py's install_fake_coach_client)
+    seeded with a canned ProgramSpec for `tpl_id`. Returns the FakeLLMClient so
+    callers can read `.last_request["messages"]` to inspect what the model was
+    sent — on the OpenAI-compatible transport every router-resolved spec uses,
+    `messages[-1]["content"]` is the user turn (`messages[0]` is now the system
+    prompt, unlike the retired anthropic transport where `messages` held only
+    the user turn and `system` was a separate top-level field)."""
+    from tests.conftest import install_fake_coach_client
 
-    from api.config import get_settings
-
-    monkeypatch.setattr(get_settings(), "anthropic_api_key", "test-key")
-    _CapturingClient.captured = []
-    _CapturingClient.tpl_id = tpl_id
-    monkeypatch.setattr(anthropic, "Anthropic", _CapturingClient)
+    payload = {
+        "name": "Baker Block",
+        "start_date": "2026-06-29",
+        "duration_weeks": 4,
+        "schedule": [{"template_id": tpl_id, "weekday": "monday"}],
+        "progressions": [],
+        "deload_weeks": [4],
+        "coach_summary": "Periodized to the summit; final week tapers.",
+    }
+    return install_fake_coach_client(monkeypatch, [payload])
 
 
 def test_generate_feeds_active_objective_and_constraint(client, monkeypatch):
@@ -446,12 +421,12 @@ def test_generate_feeds_active_objective_and_constraint(client, monkeypatch):
         },
     )
 
-    _install_capturing(monkeypatch, tpl["id"])
+    fake = _install_capturing(monkeypatch, tpl["id"])
     r = client.post("/app/api/coach/generate", json={"message": "build my plan"})
     assert r.status_code == 200, r.text
 
     # the model saw the objective + constraint in its user message
-    user_text = _CapturingClient.captured[0]["messages"][0]["content"]
+    user_text = fake.last_request["messages"][-1]["content"]
     assert "Climb Baker" in user_text
     assert "2026-09-05" in user_text
     assert "recovering L4-L5 disc" in user_text
@@ -478,11 +453,11 @@ def test_generate_feeds_full_dated_timeline(client, monkeypatch):
         json={"name": "Run a 50k", "kind": "dated", "target_date": "2030-07-15"},
     )
 
-    _install_capturing(monkeypatch, tpl["id"])
+    fake = _install_capturing(monkeypatch, tpl["id"])
     r = client.post("/app/api/coach/generate", json={"message": "build my plan"})
     assert r.status_code == 200, r.text
 
-    user_text = _CapturingClient.captured[0]["messages"][0]["content"]
+    user_text = fake.last_request["messages"][-1]["content"]
     payload = json.loads(user_text.split("CONTEXT:\n", 1)[1].split("\n\nREQUEST:", 1)[0])
     goal = payload["goal"]
     # focus = the nearer peak; the timeline carries both, chronologically
@@ -542,9 +517,7 @@ def test_generate_accepts_and_materializes_a_phased_season(client, monkeypatch):
     """End-to-end: the model sees the timeline (with objective_id + event window)
     and emits a phased season; grounding accepts it and the materializer expands
     both blocks."""
-    import anthropic
-
-    from api.config import get_settings
+    from tests.conftest import install_fake_coach_client
 
     e = client.get("/app/api/exercises/search", params={"q": "step up"}).json()[0]["exercise"]["id"]
     tpl = client.post(
@@ -572,39 +545,16 @@ def test_generate_accepts_and_materializes_a_phased_season(client, monkeypatch):
         "coach_summary": "alpine then rock",
     }
 
-    captured: list[dict] = []
-
-    class _Msgs:
-        def create(self, **kw):
-            captured.append(kw)
-
-            class _B:
-                type = "tool_use"
-                name = "emit_program_spec"
-                input = phased
-
-            class _R:
-                content = [_B()]
-
-            return _R()
-
-    class _Cli:
-        def __init__(self, **_kw):
-            pass
-
-        @property
-        def messages(self):
-            return _Msgs()
-
-    monkeypatch.setattr(get_settings(), "anthropic_api_key", "test-key")
-    monkeypatch.setattr(anthropic, "Anthropic", _Cli)
+    fake = install_fake_coach_client(monkeypatch, [phased])
 
     r = client.post("/app/api/coach/generate", json={"message": "plan my whole season"})
     assert r.status_code == 200, r.text
     # both blocks materialized (2 weeks each)
     assert len(r.json()["planned_workouts"]) == 4
     # the model was handed the timeline with the data needed to phase-plan
-    user_text = captured[0]["messages"][0]["content"]
+    # (messages[-1] is the user turn on the OpenAI-compatible transport every
+    # router-resolved spec uses; messages[0] is the system prompt)
+    user_text = fake.last_request["messages"][-1]["content"]
     assert '"event_end_date": "2030-06-25"' in user_text
     assert f'"objective_id": {o1["id"]}' in user_text
 
