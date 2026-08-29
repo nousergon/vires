@@ -1,11 +1,24 @@
 """The coach LLM call: grounded, forced structured output.
 
-A single Anthropic Messages call with a **forced** tool choice makes the model
-emit a ``ProgramSpec`` (validated by Pydantic) rather than free text we'd have to
-parse — the institutional pattern (structured tool-use over ``json.loads``). The
-model is *grounded*: it only ever sees, and may only reference, the user's real
-template/exercise ids. It proposes a declarative spec (schedule + curves); the
-deterministic materializer does the arithmetic.
+A single krepis ``structured()`` call with a **forced** tool choice / strict
+json_schema makes the model emit a ``ProgramSpec`` (validated by Pydantic)
+rather than free text we'd have to parse — the institutional pattern
+(structured tool-use over ``json.loads``). The model is *grounded*: it only
+ever sees, and may only reference, the user's real template/exercise ids. It
+proposes a declarative spec (schedule + curves); the deterministic
+materializer does the arithmetic.
+
+Routing (2026-08-29 migration, vires-ops-I<N>): every call funnels through
+the krepis router — mirrors ``flow_doctor.core.router.resolve_router_edge``
+and ``metron_ext.advisor.llm`` (the fleet's two reference patterns for this
+class; see ``model-router-policy.md`` §5). Direct-Anthropic is retired fleet-
+wide by Brian's 2026-08-29 ruling ("we shouldn't be using the anthropic api
+at all") — the prior code default (``ModelSpec("anthropic", ...)``) and the
+narrower ``_reject_direct_openrouter`` guard from alpha-engine-config-I9092
+are both superseded by :func:`_default_spec` (router-group-derived, fail-
+closed off any non-compelled route) and :func:`_reject_non_router_override`
+(an operator override may only pin the model the router edge itself serves,
+never address a provider directly).
 """
 
 from __future__ import annotations
@@ -34,13 +47,35 @@ TOOL_NAME = "emit_program_spec"
 # the coach constructs a client.
 CALLSITE_ID = "vires-coach"
 
+# krepis router model_group this call site asks for — a CAPABILITY TIER, never
+# a model id or provider (principle 8, substitutability). Matches the
+# LLM_CALLSITE_REGISTRY.yaml `model_group: low` row already on file for
+# `vires-coach`; that row's `provider`/`model` fields still name the retired
+# `anthropic`/`claude-haiku-4-5` default and need an alpha-engine-config
+# update to match (out of scope for this repo — flagged, not edited here).
+ROUTER_GROUP = "low"
+
 # The system prompt is loaded at call time — tuned-private if hydrated onto the
 # box, else the committed public baseline (see prompt_loader). The prompt is the
 # Vires coaching edge, so its tuned form is NOT in this public repo.
 
 
 class CoachUnavailable(RuntimeError):
-    """Raised when the coach can't run (no API key). Router maps this to HTTP 503."""
+    """Raised when the coach can't run (router unresolvable or model config
+    invalid). Router maps this to HTTP 503."""
+
+
+class CoachRouterUnresolvable(RuntimeError):
+    """The krepis router could not resolve ``ROUTER_GROUP`` to a callable
+    endpoint on a compelled route.
+
+    A distinct type (mirrors ``flow_doctor.core.router.RouterUnresolvable``
+    and ``model-router-policy`` R20) so callers never mistake "the router
+    could not be reached" for "the router was reached and declined" — this
+    always means the LLM call did not happen at all. Caught and re-raised as
+    :class:`CoachUnavailable` at the one call site that constructs a client,
+    so the HTTP layer keeps its single 503 mapping.
+    """
 
 
 class CoachError(RuntimeError):
@@ -340,83 +375,123 @@ def _validate_grounding(
             )
 
 
-def _resolve_spec():
-    """The active coach ModelSpec: VIRES_COACH_LLM env → SSM (60s TTL) → default.
+_COMPELLED_ROUTES = frozenset({"litellm_proxy", "egress_proxy"})
 
-    The code default is the pre-adapter behavior (Anthropic + coach_model),
-    so a deploy with no SSM param seeded is behavior-identical.
 
-    A flip-surface value naming ``openrouter`` is refused by
-    :func:`_reject_direct_openrouter` rather than resolved: the 2026-08-03
-    ruling (alpha-engine-config#6367) bans a call site holding its own
-    OpenRouter credential and addressing openrouter.ai directly, and this
-    call site's operational flip surface (``VIRES_COACH_LLM`` env /
-    ``/vires/llm/coach`` SSM, 60-second TTL, no deploy or code review) was
-    exactly how it fell into breach with no code change at all
-    (alpha-engine-config#9092, live-observed 2026-08-28).
+def _default_spec():
+    """Router-derived default: ``resolve_group_spec(ROUTER_GROUP)``, fail-
+    closed off any route that is not one of the two ``_COMPELLED_ROUTES``
+    paths — ``litellm_proxy`` (the authenticated router edge) or
+    ``egress_proxy`` (its registry-derived, DLP-scanned degraded fallback).
 
-    The historical OpenRouter ``reasoning`` default (config#1999, root-caused
-    in krepis#16 — a reasoning-capable model like Kimi K2.6 could spend its
-    whole output budget on invisible chain-of-thought and return empty
-    content with a clean ``finish_reason="stop"``) is removed here: it can
-    never observe a spec this function returns, since every ``openrouter``
-    spec is now rejected before this function returns anything.
+    Mirrors ``flow_doctor.core.router.resolve_router_edge`` /
+    ``COMPELLED_ROUTES`` and ``model-router-policy.md`` §5 — the fleet's
+    reference pattern for this class. Never falls back to a direct provider
+    chosen by krepis's own internal fallback, and never constructs a bare
+    ``ModelSpec("anthropic", ...)`` — the pre-adapter default this supersedes
+    (Brian ruling 2026-08-29: direct Anthropic API retired fleet-wide,
+    "we shouldn't be using the anthropic api at all"; "the entire nous ergon
+    system should now be running through the krepis router ... no other
+    parallel setups").
     """
-    from krepis.llm_config import ModelSpec, resolve_model_spec
+    from krepis.router import resolve_group_spec
 
     settings = get_settings()
-    spec = resolve_model_spec(
-        settings.coach_llm_ssm_param,
-        env_var="VIRES_COACH_LLM",
-        default=ModelSpec(
-            "anthropic", settings.coach_model, max_tokens=settings.coach_max_tokens
-        ),
-        max_tokens=settings.coach_max_tokens,
-    )
-    _reject_direct_openrouter(spec, f"VIRES_COACH_LLM / {settings.coach_llm_ssm_param}")
+    try:
+        spec, route = resolve_group_spec(ROUTER_GROUP, max_tokens=settings.coach_max_tokens)
+    except Exception as exc:  # noqa: BLE001 — categorized by the raise below
+        raise CoachRouterUnresolvable(
+            f"router group {ROUTER_GROUP!r} did not resolve: {exc}"
+        ) from exc
+    resolved_route = route.get("route") if isinstance(route, dict) else None
+    if resolved_route not in _COMPELLED_ROUTES:
+        raise CoachRouterUnresolvable(
+            f"router group {ROUTER_GROUP!r} resolved to route {resolved_route!r} "
+            f"(provider={getattr(spec, 'provider', None)!r}), which is not a "
+            f"compelled path — refusing a direct-provider call chosen by "
+            f"krepis's own fallback (model-router-policy.md §5). Compelled "
+            f"routes: {sorted(_COMPELLED_ROUTES)}"
+        )
     return spec
 
 
-def _reject_direct_openrouter(spec, source: str) -> None:  # noqa: ANN001
-    """Refuse a spec that addresses openrouter.ai directly.
+def _reject_non_router_override(spec, source: str) -> None:  # noqa: ANN001
+    """An operator override (``VIRES_COACH_LLM`` env / ``/vires/llm/coach``
+    SSM) may only PIN which model the router edge itself serves — never
+    bypass the edge to address a provider directly.
 
-    Mirrors ``metron_ops.metron_ext.advisor.llm._reject_direct_openrouter`` —
-    the fleet's reference pattern for this class (alpha-engine-config#9092).
-    RULING alpha-engine-config#6367 (2026-08-03): no agent may be directly
-    linked to OpenRouter. The coach was in breach through the flip surface
-    rather than through code — ``/vires/llm/coach`` accepted (and the
-    deploy-on-merge hydration step fed a live key to) any operator value
-    naming ``openrouter:<model>``, a 60-second-TTL parameter no deploy or
-    review passes through. A ruling that only the code honours is not
-    enforced, so it is enforced HERE, where every resolution path converges.
+    An override's ``ModelSpec`` carries no ``route`` (it did not come from
+    ``resolve_group_spec``), so provider identity is the only signal
+    available; only ``ROUTER_EDGE_PROVIDER`` ("litellm_proxy") is verifiably
+    compelled from that signal alone — a bare ``"anthropic:..."`` or
+    ``"openrouter:..."`` value would construct an ``LLMClient`` that talks to
+    that provider's endpoint directly, exactly the parallel setup Brian's
+    2026-08-29 ruling forbids ("no other parallel setups ... it should all
+    funnel through the krepis router").
 
-    Raising rather than silently rerouting is deliberate: an operator who set
-    that value wanted a specific model, and quietly serving a different one
-    is the failure `fail-loud` exists to prevent. The message names the
-    remedy.
+    Supersedes the narrower ``_reject_direct_openrouter`` this replaced
+    (alpha-engine-config-I9092 / #6367 are subsumed: neither ``openrouter``
+    nor ``anthropic`` may be named directly here any more, only the edge).
+    Raising rather than silently rerouting is deliberate — fail-loud, per the
+    repo's rules: an operator who set that value wanted a specific model, and
+    quietly serving a different one is worse than a loud 503.
     """
-    if getattr(spec, "provider", None) == "openrouter":
+    from krepis.llm_config import ROUTER_EDGE_PROVIDER
+
+    if getattr(spec, "provider", None) != ROUTER_EDGE_PROVIDER:
         raise CoachUnavailable(
             f"AI coach model config refused: {source} names provider "
-            f"'openrouter', a direct OpenRouter linkage prohibited by the "
-            f"2026-08-03 ruling (alpha-engine-config#6367). Clear the "
-            f"override to use the Anthropic default, or set an explicit "
-            f"non-openrouter spec."
+            f"{getattr(spec, 'provider', None)!r} directly. Per Brian's "
+            f"2026-08-29 ruling, every LLM call funnels through the krepis "
+            f"router — an override may only pin the model the router edge "
+            f"itself serves (provider: {ROUTER_EDGE_PROVIDER!r}), never "
+            f"address a provider directly. Clear the override to use the "
+            f"router-derived {ROUTER_GROUP!r} group default, or set an "
+            f"explicit {ROUTER_EDGE_PROVIDER}:<model> spec."
         )
 
 
-def _api_key_for(spec) -> str | None:  # noqa: ANN001
-    """The settings-held key for the active provider (VIRES_-prefixed env,
-    SSM-hydrated at deploy — NOT the bare env vars krepis defaults to).
+def _resolve_spec():
+    """The active coach ModelSpec: ``VIRES_COACH_LLM`` env → SSM (60s TTL) →
+    the router-derived default (:func:`_default_spec`).
 
-    Only ``anthropic`` is a legitimate direct linkage today — ``openrouter``
-    never reaches here (:func:`_reject_direct_openrouter` raises first), and
-    no other provider is wired to a settings-held key.
+    An env/SSM override is validated by :func:`_reject_non_router_override`
+    before use; the default is already validated by :func:`_default_spec`
+    (identity-compared here so the stricter override check is never applied
+    to a spec that already passed the router's own compelled-route check).
+    An env override is checked directly (rather than always resolving the
+    router default first, only to discard it) so a set ``VIRES_COACH_LLM``
+    never pays for — or depends on the availability of — a live router
+    resolution it doesn't need; :func:`resolve_model_spec` applies the same
+    env-first precedence internally, this only avoids the redundant work.
     """
+    import os
+
+    from krepis.llm_config import resolve_model_spec
+
     settings = get_settings()
-    if spec.provider == "anthropic":
-        return settings.anthropic_api_key
-    return None
+    source = f"VIRES_COACH_LLM / {settings.coach_llm_ssm_param}"
+    if os.environ.get("VIRES_COACH_LLM"):
+        spec = resolve_model_spec(settings.coach_llm_ssm_param, env_var="VIRES_COACH_LLM")
+        _reject_non_router_override(spec, source)
+        return spec
+
+    default_spec = _default_spec()
+    spec = resolve_model_spec(
+        settings.coach_llm_ssm_param,
+        env_var="VIRES_COACH_LLM",
+        default=default_spec,
+    )
+    if spec is not default_spec:
+        _reject_non_router_override(spec, source)
+    return spec
+
+
+# Test seam (mirrors ``metron_ext.advisor.llm._transport_client_factory``):
+# when set, its return value is injected as the transport client for every
+# generation — tests patch this instead of reaching into krepis or the
+# retired ``anthropic`` SDK.
+_transport_client_factory = None
 
 
 def generate_spec(
@@ -429,10 +504,10 @@ def generate_spec(
     """Call the model (forced structured output) and return a validated,
     grounded ProgramSpec.
 
-    Runs through the krepis provider-agnostic adapter: forced tool-use on the
-    anthropic transport, strict json_schema on OpenAI-compatible providers —
-    the same validated ``ProgramSpec`` contract either way. The grounding
-    check (`_validate_grounding`) plugs into the adapter's bounded corrective
+    Runs through the krepis router edge — strict json_schema on the
+    OpenAI-compatible transport every router-resolved spec uses (no
+    call site here ever resolves the anthropic transport any more). The
+    grounding check (`_validate_grounding`) plugs into the adapter's bounded corrective
     retry, so an ungrounded spec is fed back to the model exactly as before.
 
     When ``obj_ctx`` carries an active objective/constraints, the model is asked
@@ -444,16 +519,21 @@ def generate_spec(
 
     try:
         spec_cfg = _resolve_spec()
-    except LLMConfigError as e:
+    except (LLMConfigError, CoachRouterUnresolvable) as e:
         raise CoachUnavailable(f"AI coach model config is invalid: {e}") from e
-    api_key = _api_key_for(spec_cfg)
-    if not api_key:
-        raise CoachUnavailable(
-            f"AI coach is not configured (no API key for provider "
-            f"'{spec_cfg.provider}')."
-        )
 
-    client = LLMClient(spec_cfg, api_key=api_key, callsite_id=CALLSITE_ID)
+    # The ROUTER EDGE resolves credentials on its own chain (SSM/env, not a
+    # settings-held per-provider key) — see krepis.llm.LLMClient._resolve_api_key.
+    # No explicit api_key is passed on the live path; the test seam below
+    # injects one only to satisfy LLMClient's constructor when a fake
+    # transport is in play.
+    if _transport_client_factory is not None:
+        fake = _transport_client_factory()
+        client = LLMClient(
+            spec_cfg, api_key="test", client_factory=lambda *_a: fake, callsite_id=CALLSITE_ID
+        )
+    else:
+        client = LLMClient(spec_cfg, callsite_id=CALLSITE_ID)
 
     user_text = (
         f"CONTEXT:\n{_context_block(ctx, today, obj_ctx)}\n\nREQUEST:\n{message.strip()}"

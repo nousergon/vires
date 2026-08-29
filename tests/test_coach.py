@@ -182,49 +182,16 @@ def test_kg_uses_smaller_plate_increment():
 
 
 # --------------------------------------------------------------------------- #
-# /coach/generate with a mocked Anthropic client
+# /coach/generate with a mocked krepis router-edge client
 # --------------------------------------------------------------------------- #
-class _FakeBlock:
-    type = "tool_use"
-    name = "emit_program_spec"
+def _install_fake(monkeypatch, canned: list[dict]):
+    """Thin repo-local alias for the shared conftest helper — kept so the
+    many call sites below didn't need touching beyond dropping the retired
+    `key=` param (credentials no longer route through a settings field; see
+    api/services/coach/agent.py)."""
+    from tests.conftest import install_fake_coach_client
 
-    def __init__(self, payload: dict):
-        self.input = payload
-
-
-class _FakeResp:
-    def __init__(self, payload: dict):
-        self.content = [_FakeBlock(payload)]
-
-
-class _FakeMessages:
-    def create(self, **_kw):
-        payload = _FakeClient.canned[min(_FakeClient.calls, len(_FakeClient.canned) - 1)]
-        _FakeClient.calls += 1
-        return _FakeResp(payload)
-
-
-class _FakeClient:
-    canned: list[dict] = []
-    calls = 0
-
-    def __init__(self, **_kw):
-        pass
-
-    @property
-    def messages(self):
-        return _FakeMessages()
-
-
-def _install_fake(monkeypatch, canned: list[dict], key: str | None = "test-key"):
-    import anthropic
-
-    from api.config import get_settings
-
-    monkeypatch.setattr(get_settings(), "anthropic_api_key", key)
-    _FakeClient.canned = canned
-    _FakeClient.calls = 0
-    monkeypatch.setattr(anthropic, "Anthropic", _FakeClient)
+    return install_fake_coach_client(monkeypatch, canned)
 
 
 def _bench_template(client) -> tuple[int, int]:
@@ -277,19 +244,21 @@ def test_generate_retries_on_invalid_grounding(client, monkeypatch):
     bad = _canned_spec(tpl_id)
     bad["schedule"] = [{"template_id": 999999, "weekday": 0}]  # unknown template -> retry
     good = _canned_spec(tpl_id)
-    _install_fake(monkeypatch, [bad, good])
+    fake = _install_fake(monkeypatch, [bad, good])
     resp = client.post("/app/api/coach/generate", json={"message": "go"})
     assert resp.status_code == 200, resp.text
-    assert _FakeClient.calls == 2  # initial + one correction
+    assert fake.calls == 2  # initial + one correction
 
 
 def test_generate_503_without_key(client, monkeypatch):
+    """A router-unresolvable config (no compelled route) 503s, same contract
+    as the retired "no API key" case — the router is now the single point of
+    configuration, so this is how a coach outage is expressed post-migration."""
     _bench_template(client)
-    from api.config import get_settings
-
-    monkeypatch.setattr(get_settings(), "anthropic_api_key", None)
+    monkeypatch.setenv("VIRES_COACH_LLM", "anthropic:claude-haiku-4-5")
     resp = client.post("/app/api/coach/generate", json={"message": "anything"})
     assert resp.status_code == 503
+    assert "litellm_proxy" in resp.text
 
 
 def test_generate_400_without_templates(client, monkeypatch):
@@ -390,9 +359,7 @@ def test_modify_503_without_key(client, monkeypatch):
     prog = client.post(
         "/app/api/coach/programs", json={"spec": _future_spec(tpl_id, 4, start)}
     ).json()
-    from api.config import get_settings
-
-    monkeypatch.setattr(get_settings(), "anthropic_api_key", None)
+    monkeypatch.setenv("VIRES_COACH_LLM", "anthropic:claude-haiku-4-5")
     resp = client.post(f"/app/api/coach/programs/{prog['id']}/modify", json={"message": "x"})
     assert resp.status_code == 503
 
@@ -471,16 +438,88 @@ def test_weekday_rejects_unknown():
 
 
 # --------------------------------------------------------------------------- #
-# _resolve_spec / _reject_direct_openrouter (alpha-engine-config-I6367,
-# alpha-engine-config-I9092): the coach's flip surface (VIRES_COACH_LLM env /
-# /vires/llm/coach SSM, 60s TTL) must never resolve to a live OpenRouter
-# linkage, however the value is spelled.
+# _resolve_spec / _default_spec / _reject_non_router_override
+# (alpha-engine-config-I6367, -I9092, and Brian's 2026-08-29 ruling: direct
+# Anthropic is retired fleet-wide and every LLM call funnels through the
+# krepis router, no other parallel setups). The coach's flip surface
+# (VIRES_COACH_LLM env / /vires/llm/coach SSM, 60s TTL) must never resolve to
+# a live direct-provider linkage — anthropic, openrouter, or any other name —
+# however the value is spelled; only the router edge itself
+# ("litellm_proxy") is a legal override target, and the no-override default
+# must go through resolve_group_spec and fail closed off a non-compelled
+# route.
 # --------------------------------------------------------------------------- #
+def test_default_spec_uses_router_group(monkeypatch):
+    """The no-override default resolves via resolve_group_spec(ROUTER_GROUP)
+    -- never a direct ModelSpec("anthropic", ...). Regression test for the
+    2026-08-29 retirement: this failed before the fix, since the prior
+    default built ModelSpec("anthropic", settings.coach_model, ...) directly
+    with no router call at all."""
+    from dataclasses import dataclass
+
+    import krepis.router as router_mod
+
+    from api.services.coach.agent import ROUTER_GROUP, _default_spec
+
+    assert ROUTER_GROUP == "low"  # matches the LLM_CALLSITE_REGISTRY.yaml row
+
+    @dataclass
+    class _FakeSpec:
+        provider: str = "litellm_proxy"
+        model: str = "test-model"
+
+    calls: dict = {}
+
+    def _fake_resolve_group_spec(group, **kw):
+        calls["group"] = group
+        return _FakeSpec(), {"route": "litellm_proxy"}
+
+    monkeypatch.setattr(router_mod, "resolve_group_spec", _fake_resolve_group_spec)
+    spec = _default_spec()
+    assert calls["group"] == ROUTER_GROUP
+    assert spec.provider == "litellm_proxy"
+
+
+def test_default_spec_fails_closed_on_noncompelled_route(monkeypatch):
+    """A router resolution landing on a route outside {litellm_proxy,
+    egress_proxy} raises rather than being used -- mirrors
+    flow_doctor.core.router.RouterUnresolvable's fail-closed contract."""
+    from dataclasses import dataclass
+
+    import krepis.router as router_mod
+
+    from api.services.coach.agent import CoachRouterUnresolvable, _default_spec
+
+    @dataclass
+    class _FakeSpec:
+        provider: str = "anthropic"
+        model: str = "claude-haiku-4-5"
+
+    monkeypatch.setattr(
+        router_mod,
+        "resolve_group_spec",
+        lambda group, **kw: (_FakeSpec(), {"route": "direct"}),
+    )
+    with pytest.raises(CoachRouterUnresolvable, match="not a compelled path"):
+        _default_spec()
+
+
+def test_resolve_spec_rejects_direct_anthropic_flip(monkeypatch):
+    """The specific regression this migration fixes: the coach's flip
+    surface used to accept (and the code default even singled out)
+    "anthropic:<model>" — now refused like any other direct-provider name."""
+    from api.services.coach.agent import CoachUnavailable, _resolve_spec
+
+    monkeypatch.setenv("VIRES_COACH_LLM", "anthropic:claude-haiku-4-5")
+    with pytest.raises(CoachUnavailable, match="litellm_proxy"):
+        _resolve_spec()
+
+
 def test_resolve_spec_rejects_openrouter_flip_short_form(monkeypatch):
     from api.services.coach.agent import CoachUnavailable, _resolve_spec
 
     monkeypatch.setenv("VIRES_COACH_LLM", "openrouter:moonshotai/kimi-k2.6")
-    with pytest.raises(CoachUnavailable, match="alpha-engine-config#6367"):
+    with pytest.raises(CoachUnavailable, match="litellm_proxy"):
         _resolve_spec()
 
 
@@ -492,26 +531,12 @@ def test_resolve_spec_rejects_openrouter_flip_json_form(monkeypatch):
         '{"provider": "openrouter", "model": "moonshotai/kimi-k2.6", '
         '"reasoning": {"effort": "low"}}',
     )
-    with pytest.raises(CoachUnavailable, match="alpha-engine-config#6367"):
+    with pytest.raises(CoachUnavailable, match="litellm_proxy"):
         _resolve_spec()
 
 
-def test_resolve_spec_anthropic_is_unaffected():
+def test_resolve_spec_accepts_router_edge_override():
     from api.services.coach.agent import _resolve_spec
 
-    spec = _resolve_spec()  # _hermetic_coach_spec autouse fixture pins anthropic
-    assert spec.provider == "anthropic"
-
-
-def test_api_key_for_returns_none_for_non_anthropic_provider():
-    """No settings field can leak a credential to a non-anthropic provider —
-    the direct-OpenRouter credential store was removed entirely (I9092)."""
-    from dataclasses import dataclass
-
-    from api.services.coach.agent import _api_key_for
-
-    @dataclass
-    class _FakeSpec:
-        provider: str
-
-    assert _api_key_for(_FakeSpec(provider="deepseek")) is None
+    spec = _resolve_spec()  # _hermetic_coach_spec autouse fixture pins litellm_proxy
+    assert spec.provider == "litellm_proxy"
