@@ -7,7 +7,7 @@
 [![frontend coverage](https://raw.githubusercontent.com/nousergon/vires/badges/coverage-frontend.svg)](https://github.com/nousergon/vires/actions/workflows/ci.yml)
 [![License](https://img.shields.io/github/license/nousergon/vires)](LICENSE)
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![React](https://img.shields.io/badge/React-19-149ECA?logo=react&logoColor=white)](https://react.dev/)
+[![React](https://img.shields.io/badge/React-149ECA?logo=react&logoColor=white)](https://react.dev/)
 [![PWA](https://img.shields.io/badge/PWA-installable-5A0FC8?logo=pwa&logoColor=white)](https://web.dev/progressive-web-apps/)
 
 A strength-training tracker. Log workouts, build reusable routines, and find
