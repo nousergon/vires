@@ -67,5 +67,8 @@ omit = ["api/db/seed.py"]  # one-shot catalog seeding, not unit-tested
 
 [tool.coverage.report]
 # Native coverage GATE: CI fails if backend coverage drops below this floor.
-# Ratchet — raise as coverage improves (currently ~92%).
-fail_under = 85
+# Ratchet — raise as coverage improves. Raised 85 -> 92 on 2026-09-10
+# (repository-baseline-policy.md §4.2 C3) against a measured 92.98%.
+# tests/test_coverage_scope.py protects this value and the measurement scope
+# it applies to.
+fail_under = 92
