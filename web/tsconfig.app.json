@@ -4,7 +4,11 @@
     "target": "es2023",
     "lib": ["ES2023", "DOM"],
     "module": "esnext",
-    "types": ["vite/client", "vite-plugin-pwa/react"],
+    // "node" added for src/test/coverage-scope.test.ts, which reads
+    // vitest.config.ts and walks src/ via node:fs/node:path/node:url to
+    // assert the coverage measurement scope (repository-baseline-policy.md
+    // §4.2 C5). @types/node is already a devDependency.
+    "types": ["vite/client", "vite-plugin-pwa/react", "node"],
     "skipLibCheck": true,
 
     /* Bundler mode */
