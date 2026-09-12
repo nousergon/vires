@@ -6,9 +6,19 @@ name: Deploy Vires via SSM
 # restart, health). The host never builds the frontend — CI owns the build.
 #
 # Configure once (repo Settings → Secrets and variables → Actions → Variables):
-#   AWS_DEPLOY_ROLE_ARN  – IAM role to assume via OIDC
 #   VIRES_INSTANCE_ID    – EC2 instance id to deploy to
 #   VIRES_DIST_S3        – s3:// path for the built web bundle
+#
+# The OIDC role is a literal, not a variable (alpha-engine-config-I10340).
+# Until 2026-09-12 `vars.AWS_DEPLOY_ROLE_ARN` pointed at the shared
+# github-actions-lambda-deploy, which holds no s3:PutObject on the bundle
+# key — every push to main since 2026-09-09 died at "Upload bundle to S3"
+# with AccessDenied. The purpose-built `github-actions-vires-deploy` role
+# (codified in nous-ergon-ops/infrastructure/iam/github-actions-vires-deploy/)
+# holds exactly the three calls below and its trust pins THIS workflow file
+# on main; a variable could be re-pointed at a role whose trust refuses this
+# file, which fails identically to the bug being removed, so the ARN is
+# written where the reader of this file can see it.
 
 on:
   push:
@@ -43,7 +53,7 @@ jobs:
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-to-assume: arn:aws:iam::711398986525:role/github-actions-vires-deploy
           aws-region: us-east-1
       - name: Upload bundle to S3
         run: aws s3 cp web-dist.tgz "${{ vars.VIRES_DIST_S3 }}"
@@ -60,7 +70,7 @@ jobs:
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-to-assume: arn:aws:iam::711398986525:role/github-actions-vires-deploy
           aws-region: us-east-1
 
       - name: Send SSM deploy command
