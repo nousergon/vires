@@ -288,6 +288,10 @@ def test_calendar_feed_materialized_occurrence_stops_being_virtual(client):
 
 
 def test_calendar_feed_future_activity_status_is_upcoming(client):
+    # Relative, not a literal: a hard-coded "2026-09-12T14:00:00Z" was
+    # "future" until that morning and then failed on every run — the test
+    # was a calendar bomb, not a regression detector (broke 2026-09-12).
+    future = _date.today() + _timedelta(days=30)
     client.post(
         "/app/api/workouts/activity",
         json={
@@ -295,10 +299,10 @@ def test_calendar_feed_future_activity_status_is_upcoming(client):
             "template_key": "race",
             "regions": "legs",
             "intensity": "hard",
-            "started_at": "2026-09-12T14:00:00Z",
+            "started_at": f"{future.isoformat()}T14:00:00Z",
         },
     )
-    cal = _cal(client, "2026-09-01", "2026-09-30")
+    cal = _cal(client, (future - _timedelta(days=15)).isoformat(), (future + _timedelta(days=15)).isoformat())
     race = next(c for c in cal if c["name"] == "Mailbox Peak")
     assert race["status"] == "upcoming"
     assert race["session_type"] == "activity"
