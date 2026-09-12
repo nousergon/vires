@@ -302,7 +302,8 @@ def test_calendar_feed_future_activity_status_is_upcoming(client):
             "started_at": f"{future.isoformat()}T14:00:00Z",
         },
     )
-    cal = _cal(client, (future - _timedelta(days=15)).isoformat(), (future + _timedelta(days=15)).isoformat())
+    window = _timedelta(days=15)
+    cal = _cal(client, (future - window).isoformat(), (future + window).isoformat())
     race = next(c for c in cal if c["name"] == "Mailbox Peak")
     assert race["status"] == "upcoming"
     assert race["session_type"] == "activity"
