@@ -52,6 +52,32 @@ describe('LoginPage', () => {
     expect(await screen.findByText(/Too many requests/)).toBeInTheDocument()
   })
 
+  it('retries once when the request is cut off in flight, then succeeds', async () => {
+    magicLink
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce({ error: null } as never)
+    renderWithProviders(<LoginPage />)
+    fireEvent.change(screen.getByPlaceholderText('you@example.com'), {
+      target: { value: 'brian@example.com' },
+    })
+    fireEvent.click(screen.getByText('Send login link'))
+    expect(await screen.findByText(/Check your email/, {}, { timeout: 4000 })).toBeInTheDocument()
+    expect(magicLink).toHaveBeenCalledTimes(2)
+  })
+
+  it('shows a plain connection message when the retry also fails', async () => {
+    magicLink.mockResolvedValue({ error: { status: 0, message: 'Load failed' } } as never)
+    renderWithProviders(<LoginPage />)
+    fireEvent.change(screen.getByPlaceholderText('you@example.com'), {
+      target: { value: 'brian@example.com' },
+    })
+    fireEvent.click(screen.getByText('Send login link'))
+    expect(
+      await screen.findByText(/Couldn't reach the sign-in service/, {}, { timeout: 4000 }),
+    ).toBeInTheDocument()
+    expect(magicLink).toHaveBeenCalledTimes(2)
+  })
+
   it('disables the button until an email is entered', () => {
     renderWithProviders(<LoginPage />)
     expect(screen.getByText('Send login link')).toBeDisabled()

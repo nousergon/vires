@@ -5,6 +5,31 @@ import { BUILD_ID, fetchDeployedBuildId, isStale } from '../lib/version'
 // balances promptness against noise. We also check on every foreground/focus,
 // which is the common case for an installed PWA reopened after a deploy.
 const POLL_MS = 5 * 60 * 1000
+// Upper bound on waiting for a new service worker to take control on tap.
+const ACTIVATE_WAIT_MS = 4000
+
+// Fetch the new SW, ask a waiting one to activate, and resolve when it takes
+// control of this page (or after ACTIVATE_WAIT_MS, whichever comes first).
+async function activateNewWorker(): Promise<void> {
+  const sw = navigator.serviceWorker
+  const reg = await sw?.getRegistration()
+  if (!sw || !reg) return
+  await reg.update()
+  const pending = reg.waiting ?? reg.installing
+  if (!pending) return
+  await new Promise<void>((resolve) => {
+    const done = () => {
+      sw.removeEventListener('controllerchange', done)
+      window.clearTimeout(timer)
+      resolve()
+    }
+    const timer = window.setTimeout(done, ACTIVATE_WAIT_MS)
+    sw.addEventListener('controllerchange', done)
+    // Workbox's generated SW honours SKIP_WAITING; autoUpdate builds also
+    // skipWaiting on their own, in which case this is a no-op.
+    reg.waiting?.postMessage({ type: 'SKIP_WAITING' })
+  })
+}
 
 // Proactive "update available" banner (vires-ops#59). Polls /version on mount,
 // on every foreground/focus, and on an interval while visible; the moment the
@@ -45,13 +70,14 @@ export default function UpdateBanner() {
   }, [check])
 
   const reload = useCallback(() => {
-    // Best-effort: nudge the SW to fetch/activate the new build before the
-    // reload so the reload actually lands new code when autoUpdate is healthy.
+    // Best-effort: get the new SW in control BEFORE reloading. reg.update()
+    // resolves once the new worker is fetched, not once it is active, so an
+    // immediate reload is still served the old precached bundle — and the
+    // banner comes straight back. Wait (bounded) for the controller to change.
     // The detection above never depended on this succeeding; reload regardless.
     void (async () => {
       try {
-        const reg = await navigator.serviceWorker?.getRegistration()
-        await reg?.update()
+        await activateNewWorker()
       } catch {
         // ignore — the reload still happens
       }
