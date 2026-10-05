@@ -20,8 +20,11 @@ const MODIFY_PLACEHOLDER =
 const OBJECTIVE_DEFAULT_PROMPT = 'Build my training plan for this objective.'
 
 function friendlyError(message: string): string {
-  if (message.startsWith('503')) return "The AI coach isn't configured yet (no API key)."
-  return message.replace(/^\d+:\s*/, '') // strip the "NNN: " status prefix from req()
+  const detail = message.replace(/^\d+:\s*/, '') // strip the "NNN: " status prefix from req()
+  // A 503 means the coach can't reach its model right now (router or model
+  // config), not a missing key — keep the server's reason so it can be acted on.
+  if (message.startsWith('503')) return `The AI coach is unavailable right now. ${detail}`
+  return detail
 }
 
 function exerciseLine(

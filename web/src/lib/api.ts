@@ -880,9 +880,16 @@ export const api = {
     }),
   // Speech-to-text: POST the raw audio blob (not JSON), get back transcribed text.
   transcribe: async (blob: Blob): Promise<string> => {
+    // Raw-body upload, so it can't go through req() — but it still needs the
+    // shared-identity bearer: since the phase-2 cutover there is no cookie
+    // fallback, and without it the endpoint 401s "Not authenticated".
+    const token = await getIdentityToken()
     const res = await fetch(`${BASE}/coach/transcribe`, {
       method: 'POST',
-      headers: { 'Content-Type': blob.type || 'audio/webm' },
+      headers: {
+        'Content-Type': blob.type || 'audio/webm',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
       body: blob,
     })
     if (!res.ok) {

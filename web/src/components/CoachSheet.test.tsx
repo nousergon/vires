@@ -68,13 +68,17 @@ describe('CoachSheet', () => {
   })
 
   it('surfaces a friendly error when the coach is unavailable', async () => {
-    vi.spyOn(api, 'coachGenerate').mockRejectedValue(new Error('503: not configured'))
+    vi.spyOn(api, 'coachGenerate').mockRejectedValue(
+      new Error("503: AI coach model config is invalid: router group 'low' did not resolve"),
+    )
     renderWithProviders(<CoachSheet open onClose={() => {}} onSaved={() => {}} />)
     fireEvent.change(screen.getByPlaceholderText(/Run both my routines/i), {
       target: { value: 'plan me' },
     })
     fireEvent.click(screen.getByText('Generate plan'))
-    expect(await screen.findByText(/isn't configured yet/i)).toBeInTheDocument()
+    expect(
+      await screen.findByText(/AI coach is unavailable right now\. .*router group 'low' did not resolve/),
+    ).toBeInTheDocument()
   })
 
   it('shows a Modify title and uses the modify endpoint for a program', async () => {
