@@ -16,6 +16,19 @@ const VERIFY_ERROR_MESSAGES: Record<string, string> = {
 }
 const DEFAULT_VERIFY_ERROR_MESSAGE = 'Something went wrong signing you in. Please try again.'
 
+const RETRY_DELAY_MS = 1500
+const NETWORK_FAILURE_MESSAGE =
+  "Couldn't reach the sign-in service. Check your connection and try again."
+
+// The browser's own wording for a request that never got a response:
+// Chrome "Failed to fetch", Safari "Load failed", Firefox "NetworkError…".
+function isNetworkFailure(e: unknown): boolean {
+  if (e instanceof TypeError) return true
+  const err = e as { status?: number; message?: string } | null
+  if (err?.status === 0) return true
+  return /failed to fetch|load failed|networkerror/i.test(err?.message ?? '')
+}
+
 // Passwordless sign-in against the shared nousergon-auth service
 // (vires-ops#60). One flow for new and returning users; the service's own
 // verify endpoint sets the cross-subdomain session cookie and redirects back
@@ -32,12 +45,35 @@ export default function LoginPage() {
 
   const request = useMutation({
     mutationFn: async () => {
-      const { error } = await authClient.signIn.magicLink({
-        email,
-        callbackURL: `${window.location.origin}/app/`,
-        metadata: { product: 'vires' },
-      })
-      if (error) throw new Error(error.message ?? "Couldn't send the sign-in link.")
+      const send = () =>
+        authClient.signIn.magicLink({
+          email,
+          callbackURL: `${window.location.origin}/app/`,
+          metadata: { product: 'vires' },
+        })
+      // A request cut off in flight (flaky mobile network, or the page being
+      // swapped by a service-worker update mid-tap) surfaces as the browser's
+      // bare "Failed to fetch". Sending a magic link is idempotent from the
+      // user's side, so retry such a failure once before showing anything.
+      let result
+      try {
+        result = await send()
+        if (result.error && isNetworkFailure(result.error)) throw result.error
+      } catch (e) {
+        if (!isNetworkFailure(e)) throw e
+        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS))
+        try {
+          result = await send()
+        } catch (e2) {
+          if (isNetworkFailure(e2)) throw new Error(NETWORK_FAILURE_MESSAGE)
+          throw e2
+        }
+      }
+      const { error } = result
+      if (error) {
+        if (isNetworkFailure(error)) throw new Error(NETWORK_FAILURE_MESSAGE)
+        throw new Error(error.message ?? "Couldn't send the sign-in link.")
+      }
     },
     onSuccess: () => {
       // Clear a stale `?error=` once a fresh link is on its way — otherwise
