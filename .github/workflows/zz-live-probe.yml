@@ -1,0 +1,29 @@
+name: zz-live-probe (temporary diagnostic)
+on:
+  push:
+    branches: [claude/vires-login-probe]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - run: npm i --no-save playwright@1 >/dev/null 2>&1 && npx playwright install --with-deps chromium >/dev/null 2>&1; echo installed
+      - run: |
+          cat > p.mjs <<'JS'
+          import { chromium } from 'playwright'
+          const b = await chromium.launch()
+          const p = await b.newPage()
+          p.on('console', m => console.log('CONSOLE', m.type(), m.text()))
+          p.on('requestfailed', r => console.log('REQFAILED', r.method(), r.url(), r.failure()?.errorText))
+          p.on('response', r => { if (/auth\.nousergon|\/app\/(api|version)/.test(r.url())) console.log('RESP', r.status(), r.request().method(), r.url(), JSON.stringify(r.headers()['access-control-allow-origin'] ?? null)) })
+          for (let i = 0; i < 3; i++) {
+            await p.goto('https://vires.nousergon.ai/app/login', { waitUntil: 'networkidle' })
+            console.log('URL', p.url())
+            await p.fill('input[type=email]', `probe-unapproved-${i}@example.com`)
+            await p.getByRole('button', { name: /send|log in|email|link/i }).first().click()
+            await p.waitForTimeout(4000)
+            console.log('BODY', (await p.textContent('body')).replace(/\s+/g, ' ').slice(0, 300))
+          }
+          await b.close()
+          JS
+          node p.mjs
