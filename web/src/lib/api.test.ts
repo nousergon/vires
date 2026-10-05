@@ -95,6 +95,14 @@ describe('transcribe (raw blob upload)', () => {
     expect((init.headers as Record<string, string>)['Content-Type']).toBe('audio/webm')
   })
 
+  it('attaches the shared-identity bearer to the audio upload', async () => {
+    vi.mocked(getIdentityToken).mockResolvedValueOnce('jwt-123')
+    const f = mockFetch({ json: { text: 'ok' } })
+    await api.transcribe(new Blob(['x'], { type: 'audio/webm' }))
+    const [, init] = f.mock.calls[0] as [string, RequestInit]
+    expect(init.headers).toEqual({ 'Content-Type': 'audio/webm', Authorization: 'Bearer jwt-123' })
+  })
+
   it('throws on a transcribe error', async () => {
     mockFetch({ ok: false, status: 400, json: { detail: 'no audio' } })
     await expect(api.transcribe(new Blob([]))).rejects.toThrow('400: no audio')
