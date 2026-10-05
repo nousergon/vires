@@ -56,4 +56,31 @@ describe('UpdateBanner', () => {
     await userEvent.click(await screen.findByText(bannerText))
     await waitFor(() => expect(reload).toHaveBeenCalled())
   })
+
+  it('waits for a waiting service worker to take control before reloading', async () => {
+    stubVersion('a-newer-sha')
+    const reload = vi.fn()
+    Object.defineProperty(window, 'location', {
+      value: { ...window.location, reload },
+      configurable: true,
+      writable: true,
+    })
+    const listeners: Array<() => void> = []
+    const waiting = { postMessage: vi.fn(() => listeners.forEach((l) => l())) }
+    const reg = { update: vi.fn(async () => {}), waiting, installing: null }
+    Object.defineProperty(navigator, 'serviceWorker', {
+      value: {
+        getRegistration: vi.fn(async () => reg),
+        addEventListener: (_: string, l: () => void) => listeners.push(l),
+        removeEventListener: vi.fn(),
+      },
+      configurable: true,
+    })
+    render(<UpdateBanner />)
+    await userEvent.click(await screen.findByText(bannerText))
+    await waitFor(() => expect(reload).toHaveBeenCalled())
+    expect(reg.update).toHaveBeenCalled()
+    expect(waiting.postMessage).toHaveBeenCalledWith({ type: 'SKIP_WAITING' })
+    Reflect.deleteProperty(navigator, 'serviceWorker')
+  })
 })
