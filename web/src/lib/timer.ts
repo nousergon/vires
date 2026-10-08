@@ -26,16 +26,44 @@ function getAudioContext(): AudioContext | null {
 /** Call from a real user-gesture handler that starts a timer (e.g. "mark set
  * done" / "start hold") so the alert that fires later, unattended, can
  * actually be heard. Safe to call repeatedly. */
+//
+// Resuming is not enough on iOS: the rest timer was audible only because the
+// ✓ tap that starts it also plays the set-logged ping, and that sound is what
+// actually starts WebKit's audio session. The hold ▶ plays nothing when
+// tapped, so 45s later the hold's own completion buzz went out silent
+// (reported 2026-10-08, hollow hold on iPhone Safari). So the unlock also
+// plays a one-sample silent buffer inside the gesture, the standard iOS
+// unlock, which every timer-starting tap gets whether or not it pings.
 export function unlockAudioForTimers() {
   const ctx = getAudioContext()
-  if (ctx?.state === 'suspended') void ctx.resume()
+  if (!ctx) return
+  resumeIfIdle(ctx)
+  try {
+    const src = ctx.createBufferSource()
+    src.buffer = ctx.createBuffer(1, 1, 22050)
+    src.connect(ctx.destination)
+    src.start(0)
+  } catch {
+    /* audio not available */
+  }
+}
+
+// iOS reports 'interrupted' (not 'suspended') after a phone call, Siri, or
+// another app taking the audio session, so resume on anything not running.
+function resumeIfIdle(ctx: AudioContext) {
+  if (ctx.state === 'running') return
+  try {
+    void Promise.resolve(ctx.resume()).catch(() => {})
+  } catch {
+    /* audio not available */
+  }
 }
 
 function beep() {
   try {
     const ctx = getAudioContext()
     if (!ctx) return
-    if (ctx.state === 'suspended') void ctx.resume()
+    resumeIfIdle(ctx)
     const osc = ctx.createOscillator()
     const gain = ctx.createGain()
     osc.connect(gain)
@@ -60,7 +88,7 @@ function buzz() {
   try {
     const ctx = getAudioContext()
     if (!ctx) return
-    if (ctx.state === 'suspended') void ctx.resume()
+    resumeIfIdle(ctx)
     const pulseCount = 3
     const pulseDuration = 0.14
     const gapDuration = 0.09
