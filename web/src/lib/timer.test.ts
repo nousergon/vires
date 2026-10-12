@@ -79,6 +79,13 @@ describe('unlockAudioForTimers', () => {
     class FakeAudioContext {
       state = 'suspended'
       resume = resume
+      destination = {}
+      createBuffer() {
+        return {}
+      }
+      createBufferSource() {
+        return { buffer: null, connect() {}, start() {} }
+      }
     }
     vi.stubGlobal('AudioContext', FakeAudioContext)
 
@@ -87,6 +94,32 @@ describe('unlockAudioForTimers', () => {
 
     unlockAudioForTimers()
     expect(resume).toHaveBeenCalledTimes(1) // already running — not resumed again
+  })
+
+  it('plays a silent buffer inside the gesture and resumes an interrupted context', async () => {
+    // iOS only truly starts the audio session when a sound plays during the
+    // tap. The hold ▶ plays nothing else, so without this its completion
+    // buzz was silent while the rest timer (started by the pinging ✓) was not.
+    vi.resetModules()
+    const starts: number[] = []
+    const resume = vi.fn(() => Promise.resolve())
+    class FakeAudioContext {
+      state = 'interrupted'
+      resume = resume
+      destination = {}
+      createBuffer = vi.fn(() => ({}))
+      createBufferSource() {
+        return { buffer: null, connect() {}, start: (t: number) => starts.push(t) }
+      }
+    }
+    vi.stubGlobal('AudioContext', FakeAudioContext)
+    const { unlockAudioForTimers: freshUnlock } = await import('./timer')
+
+    freshUnlock()
+
+    expect(resume).toHaveBeenCalledTimes(1)
+    expect(starts).toEqual([0])
+    vi.resetModules()
   })
 })
 
