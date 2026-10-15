@@ -184,7 +184,25 @@ else
 fi
 
 # --- restart + health check ------------------------------------------------- #
+# Poll /health until uvicorn has bound the port, up to a deadline, instead of a
+# fixed sleep. A single probe 4s after restart raced uvicorn's import time:
+# deploys 2026-10-06, 10-12, 10-14 and 10-15 failed with `curl: (7) Failed to
+# connect to 127.0.0.1 port 8530 after 0 ms` (nothing listening yet) while the
+# next deploy of the same box passed — startup time varies with a fresh
+# `pip install` (cold .pyc) and box load, so 4s was sometimes too short.
+# On timeout the unit status + journal tail go to stdout, so the GHA log shows
+# WHY the service did not come up rather than only that it did not.
 sudo systemctl restart vires
-sleep 4
-curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null || { echo "vires health FAILED"; exit 1; }
-echo "deploy OK — vires healthy on :${PORT}"
+HEALTH_DEADLINE_S="${VIRES_HEALTH_DEADLINE_S:-90}"
+waited=0
+until curl -fsS -m 5 "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; do
+  if [ "$waited" -ge "$HEALTH_DEADLINE_S" ]; then
+    echo "vires health FAILED — no healthy response on :${PORT} within ${HEALTH_DEADLINE_S}s"
+    sudo systemctl status vires --no-pager -l 2>&1 | tail -n 20 || true
+    sudo journalctl -u vires --no-pager -n 60 --since "-$((HEALTH_DEADLINE_S + 30))s" 2>&1 || true
+    exit 1
+  fi
+  sleep 2
+  waited=$((waited + 2))
+done
+echo "deploy OK — vires healthy on :${PORT} (after ~${waited}s)"
