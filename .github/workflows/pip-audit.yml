@@ -39,6 +39,67 @@ jobs:
         # workflow; add `--ignore-vuln <ID>` here with a reason comment
         # if a transitive dep has no fix release available.
         #
-        # No ignores at time of writing — `pip-audit --strict .` is
-        # clean against vires's declared dep set.
-        run: pip-audit --strict .
+        # DATED, SELF-EXPIRING IGNORES (alpha-engine-config-I12480; Brian's
+        # ruling 2026-10-21 23:12Z, "Accept, dated"):
+        #
+        #   pillow 12.3.0 — 8 advisories (24 after the 2026-10-22 extension
+        #   below) fixed only in pillow 13.0.0. pillow
+        #   reaches vires only through fastembed, and fastembed 0.9.0 (latest
+        #   on PyPI, and qdrant/fastembed main as of 2026-10-22) declares
+        #   `pillow<13.0` for every Python version, so no resolvable fix
+        #   exists. vires uses fastembed's TextEmbedding only and decodes no
+        #   untrusted images (see the PR that added this block).
+        #
+        # EXPIRY IS MACHINE-ENFORCED: the IDs are passed only while today
+        # (UTC) is on or before PILLOW_IGNORE_EXPIRES. From 2026-11-05 the
+        # ignores lapse on their own and this gate goes red again — on the
+        # daily cron as well as on pushes — until the pin is fixed or a new
+        # ruling re-dates them. Remove the whole block as soon as a fastembed
+        # release allows pillow>=13, whichever comes first.
+        #
+        # EXTENDED 2026-10-22 (Brian, Director thread decision card,
+        # 2026-10-22 15:36Z: "Extend"): 16 more pillow 12.3.0 advisories with
+        # the same cause (fastembed caps pillow<13), the same fix version
+        # (13.0.0) and the SAME expiry — all 24 lapse together on 2026-11-05.
+        #
+        # Exactly these 24 IDs; every other advisory stays enforced.
+        env:
+          PILLOW_IGNORE_EXPIRES: "2026-11-04"
+          PILLOW_IGNORE_IDS: >-
+            CVE-2026-112395
+            CVE-2026-112397
+            CVE-2026-112400
+            CVE-2026-112404
+            CVE-2026-112895
+            CVE-2026-112896
+            CVE-2026-112897
+            CVE-2026-112899
+            CVE-2026-112390
+            CVE-2026-112391
+            CVE-2026-112392
+            CVE-2026-112393
+            CVE-2026-112396
+            CVE-2026-112399
+            CVE-2026-112401
+            CVE-2026-112402
+            CVE-2026-112405
+            CVE-2026-112406
+            CVE-2026-112891
+            CVE-2026-112892
+            CVE-2026-112893
+            CVE-2026-112894
+            CVE-2026-112900
+            CVE-2026-112901
+        run: |
+          set -euo pipefail
+          IGNORE_ARGS=()
+          TODAY="$(date -u +%F)"
+          if [[ ! "$TODAY" > "$PILLOW_IGNORE_EXPIRES" ]]; then
+            for id in $PILLOW_IGNORE_IDS; do
+              IGNORE_ARGS+=(--ignore-vuln "$id")
+            done
+            echo "::warning::pip-audit ignoring $(( ${#IGNORE_ARGS[@]} / 2 )) pillow advisories until ${PILLOW_IGNORE_EXPIRES} (alpha-engine-config-I12480: fastembed caps pillow<13)"
+          else
+            echo "::error::pillow ignores expired on ${PILLOW_IGNORE_EXPIRES} (alpha-engine-config-I12480) — bump fastembed/pillow or get the ruling re-dated"
+          fi
+          pip-audit --strict "${IGNORE_ARGS[@]}" .
