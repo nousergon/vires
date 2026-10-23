@@ -42,8 +42,8 @@ jobs:
         # DATED, SELF-EXPIRING IGNORES (alpha-engine-config-I12480; Brian's
         # ruling 2026-10-21 23:12Z, "Accept, dated"):
         #
-        #   pillow 12.3.0 — 8 advisories (24 after the 2026-10-22 extension
-        #   below) fixed only in pillow 13.0.0. pillow
+        #   pillow 12.3.0 — 8 advisories (35 after the 2026-10-22 and
+        #   2026-10-23 extensions below) fixed only in pillow 13.0.0. pillow
         #   reaches vires only through fastembed, and fastembed 0.9.0 (latest
         #   on PyPI, and qdrant/fastembed main as of 2026-10-22) declares
         #   `pillow<13.0` for every Python version, so no resolvable fix
@@ -62,7 +62,13 @@ jobs:
         # the same cause (fastembed caps pillow<13), the same fix version
         # (13.0.0) and the SAME expiry — all 24 lapse together on 2026-11-05.
         #
-        # Exactly these 24 IDs; every other advisory stays enforced.
+        # EXTENDED AGAIN 2026-10-23 (alpha-engine-config-I12541; PENDING
+        # Brian's red-line-3 merge): 11 more pillow 12.3.0 advisories published
+        # after the 2026-10-22 extension (CVE-2026-96636..96644, CVE-2026-96778,
+        # GHSA-78g4-xqwv-q3g8). Same cause, same fix version (13.0.0), SAME
+        # expiry — all 35 lapse together on 2026-11-05.
+        #
+        # Exactly these 35 IDs; every other advisory stays enforced.
         env:
           PILLOW_IGNORE_EXPIRES: "2026-11-04"
           PILLOW_IGNORE_IDS: >-
@@ -90,6 +96,17 @@ jobs:
             CVE-2026-112894
             CVE-2026-112900
             CVE-2026-112901
+            CVE-2026-96636
+            CVE-2026-96637
+            CVE-2026-96638
+            CVE-2026-96639
+            CVE-2026-96640
+            CVE-2026-96641
+            CVE-2026-96642
+            CVE-2026-96643
+            CVE-2026-96644
+            CVE-2026-96778
+            GHSA-78g4-xqwv-q3g8
         run: |
           set -euo pipefail
           IGNORE_ARGS=()
