@@ -13,7 +13,11 @@ dependencies = [
     "alembic>=1.19.1",
     "pydantic>=2.7",
     "pydantic-settings>=2.15.0",
-    "fastembed>=0.4",
+    "fastembed>=0.9.1",
+    # Transitive via fastembed; floored so the 37 pillow 12.3.0 advisories
+    # fixed in 13.0.0 cannot resolve back in (alpha-engine-config-I12480).
+    # fastembed 0.9.1 is the first release whose cap (pillow<14) allows it.
+    "pillow>=13.0.0",
     "numpy>=1.26",
     "httpx>=0.27",
     # Guards untrusted GPX-file XML parsing against entity-expansion/DTD
