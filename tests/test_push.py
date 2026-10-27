@@ -164,3 +164,49 @@ def test_sanitize_empty():
     assert push._sanitize("") == ""
     assert push._sanitize("a\r\nb") == "ab"
     assert push._sanitize("\r\n") == ""
+
+
+def test_sanitize_none_and_c1_controls():
+    """Regression for alpha-engine-config-I8019: no input bypasses the replace
+    calls (the old early ``return s`` handed back the raw value), and DEL/C1
+    controls are stripped too."""
+    assert push._sanitize(None) == ""
+    assert push._sanitize("a\x7fb\x85c\x9fd") == "abcd"
+
+
+def test_scheduled_push_failure_log_is_single_line(monkeypatch, caplog):
+    """A CR/LF-bearing user_id/timer_id cannot forge a second log line."""
+    import logging
+
+    async def boom(tenant, user, payload):
+        raise RuntimeError("delivery failed")
+
+    monkeypatch.setattr(push, "deliver_to_user", boom)
+
+    async def run():
+        push.schedule("tn", "u9\r\nFORGED", "t9\nFORGED", 0.0, {"title": "x", "body": ""})
+        await asyncio.sleep(0.05)
+
+    with caplog.at_level(logging.ERROR, logger="vires.push"):
+        asyncio.run(run())
+    msgs = [r.getMessage() for r in caplog.records if r.name == "vires.push"]
+    assert msgs == ["scheduled push failed for user=u9FORGED timer=t9FORGED"]
+
+
+def test_send_failure_log_is_single_line(monkeypatch, caplog):
+    """The push service's error text is externally sourced: it is sanitised too."""
+    import logging
+
+    from pywebpush import WebPushException
+
+    def raise_wpe(**kwargs):
+        raise WebPushException("upstream said\r\nCRITICAL forged")
+
+    monkeypatch.setattr(push, "webpush", raise_wpe)
+    sub = PushSubscription(endpoint="https://push.example.invalid/x", p256dh="k", auth="a")
+    with caplog.at_level(logging.WARNING, logger="vires.push"):
+        assert push._send_one(sub, {"title": "x"}) is True
+    msgs = [r.getMessage() for r in caplog.records if r.name == "vires.push"]
+    assert len(msgs) == 1
+    assert "\n" not in msgs[0] and "\r" not in msgs[0]
+    assert "CRITICAL forged" in msgs[0]
