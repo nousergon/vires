@@ -25,7 +25,7 @@ log = logging.getLogger("vires.push")
 MAX_DELAY_SECONDS = 3600.0
 
 
-def _sanitize(s: str) -> str:
+def _sanitize(s: str | None) -> str:
     """Strip control chars (except tab) to prevent log forging (CRLF injection).
 
     CodeQL ``py/log-injection`` sink guard — user-controlled values that reach a
@@ -34,14 +34,20 @@ def _sanitize(s: str) -> str:
 
     The explicit ``.replace("\r", "").replace("\n", "")`` calls are load-bearing:
     they are the pattern CodeQL recognises as a CRLF sanitizer. The subsequent
-    generator expression strips every remaining C0 control character (0x00-0x1f)
-    except tab (0x09, kept because it is harmless in log output and common in
-    structured formatting).
+    generator expression strips every remaining C0 control character (0x00-0x1f),
+    DEL and the C1 range (0x7f-0x9f), except tab (0x09, kept because it is
+    harmless in log output and common in structured formatting).
     """
-    if not s:
-        return s
-    s = s.replace("\r", "").replace("\n", "")
-    return "".join(c for c in s if c == "\t" or c >= "\x20")
+    # No early ``return s`` for a falsy input: that path handed the caller the
+    # UNSANITISED value, so taint reached the log sink without passing the
+    # replace calls; it is the only unsanitised path to the sink in this module
+    # and the likely reason CodeQL alert #23 stayed open after this helper
+    # landed (alpha-engine-config-I8019). Every path now goes through the
+    # replace calls, and ``None`` becomes "". C1 controls (0x7f-0x9f) are
+    # stripped too.
+    text = "" if s is None else str(s)
+    text = text.replace("\r", "").replace("\n", "")
+    return "".join(c for c in text if c == "\t" or (c >= "\x20" and not "\x7f" <= c <= "\x9f"))
 
 
 def push_configured() -> bool:
@@ -68,7 +74,7 @@ def _send_one(sub: PushSubscription, payload: dict) -> bool:
         status = getattr(getattr(e, "response", None), "status_code", None)
         if status in (404, 410):  # Gone / Not Found => dead subscription
             return False
-        log.warning("push send failed (status=%s): %s", status, e)
+        log.warning("push send failed (status=%s): %s", status, _sanitize(str(e)))
         return True  # transient — keep the subscription
 
 
