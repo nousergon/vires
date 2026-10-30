@@ -1,0 +1,52 @@
+# .provider-linkage-allowlist.yaml — pre-cleared provider-linkage matches for
+# the generalized any-vendor guard (alpha-engine-config-I9295). Schema:
+# nousergon-lib scripts/provider_linkage_guard.py::load_allowlist. Every
+# entry needs path, pattern, reason, expires (a past date fails CI) and
+# tracking. The legacy .openrouter-allowlist.yaml stays beside it until the
+# OpenRouter-only guard is retired fleet-wide.
+schema_version: 1
+entries:
+  - path: api/config.py
+    pattern: "openai:base_url"
+    reason: >-
+      LIVE direct linkage, baselined rather than cleared: speech-to-text
+      (`stt_base_url`, /coach/transcribe) posts audio straight to the OpenAI
+      Whisper endpoint, outside the krepis router. Tracked as genuine
+      migration debt by vires-ops-I82 / -I81; the short expiry makes this
+      entry go red if the migration stalls.
+    expires: "2026-12-31"
+    tracking: vires-ops-I82
+  - path: infrastructure/deploy-on-merge.sh
+    pattern: "anthropic:env_key"
+    reason: >-
+      Scrubs any VIRES_ANTHROPIC_API_KEY a prior deploy left in .env. The
+      line only ever removes the credential; nothing in the app reads it
+      since the 2026-08-29 krepis-router migration.
+    expires: "2027-04-30"
+    tracking: alpha-engine-config-I9295
+  - path: infrastructure/deploy-on-merge.sh
+    pattern: "openrouter:env_key"
+    reason: >-
+      Scrubs any VIRES_OPENROUTER_API_KEY a prior deploy left in .env (the
+      same entry the legacy OpenRouter allowlist carries, I9092). Removal
+      only, never a linkage.
+    expires: "2027-04-30"
+    tracking: alpha-engine-config-I9295
+  - path: uv.lock
+    pattern: "openai:dist"
+    reason: >-
+      The lock resolves `krepis[openai]`, krepis's OpenAI-compatible wire to
+      the router edge (pyproject.toml), so the `openai` distribution appears
+      here. Coach calls go through krepis by model group; the one direct
+      OpenAI use is the STT entry above, which this lock line does not
+      license.
+    expires: "2027-04-30"
+    tracking: alpha-engine-config-I9295
+  - path: .openrouter-allowlist.yaml
+    pattern: "openrouter:env_key"
+    reason: >-
+      The legacy OpenRouter guard's own allowlist, whose prose names the
+      scrubbed VIRES_OPENROUTER_API_KEY. Configuration of a guard, not a
+      call site; goes away with that file.
+    expires: "2027-04-30"
+    tracking: alpha-engine-config-I9295
