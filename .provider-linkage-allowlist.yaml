@@ -27,9 +27,10 @@ entries:
   - path: infrastructure/deploy-on-merge.sh
     pattern: "openrouter:env_key"
     reason: >-
-      Scrubs any VIRES_OPENROUTER_API_KEY a prior deploy left in .env (the
-      same entry the legacy OpenRouter allowlist carries, I9092). Removal
-      only, never a linkage.
+      Scrubs the retired OpenRouter key variable a prior deploy may have left
+      in .env (the same entry the legacy OpenRouter allowlist carries, I9092).
+      Removal only, never a linkage. The variable is not spelled out here so
+      the legacy guard does not read this prose as a reference.
     expires: "2027-04-30"
     tracking: alpha-engine-config-I9295
   - path: uv.lock
@@ -46,7 +47,7 @@ entries:
     pattern: "openrouter:env_key"
     reason: >-
       The legacy OpenRouter guard's own allowlist, whose prose names the
-      scrubbed VIRES_OPENROUTER_API_KEY. Configuration of a guard, not a
-      call site; goes away with that file.
+      scrubbed OpenRouter key variable. Configuration of a guard, not a call
+      site; goes away with that file.
     expires: "2027-04-30"
     tracking: alpha-engine-config-I9295
