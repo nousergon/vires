@@ -65,7 +65,7 @@ fi
 # _default_spec / _reject_non_router_override) — it never constructs a direct
 # Anthropic client any more, so there is no VIRES_ANTHROPIC_API_KEY consumer
 # left to hydrate. Scrub any key a prior deploy left in .env rather than leave
-# a live, unused credential on the box (vires-ops-I<N> tracks deleting the now-
+# a live, unused credential on the box (vires-ops-I80 tracks deleting the now-
 # orphaned /vires/anthropic_api_key SSM parameter).
 ENV_FILE="$REPO/.env"
 touch "$ENV_FILE"

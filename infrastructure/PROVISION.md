@@ -12,7 +12,9 @@ origin cert for your domain. Vires vendors its own Python venv and a pinned Node
 doesn't depend on the host's system Node/Python versions.
 
 Configure these GitHub Actions **Variables** (repo Settings → Secrets and variables →
-Actions): `AWS_DEPLOY_ROLE_ARN`, `VIRES_INSTANCE_ID`, `VIRES_DIST_S3`.
+Actions): `VIRES_INSTANCE_ID`, `VIRES_DIST_S3`. The deploy role is not a variable: its ARN
+is written into `.github/workflows/deploy.yml` (`role-to-assume`), so a self-hosted fork
+edits it there.
 
 ## 1. DNS
 Point your domain (or subdomain) at the host. If fronting with Cloudflare, use an
@@ -40,27 +42,29 @@ Idempotent; exactly what CI runs each merge. First run downloads the embedding m
 (~13 MB) + builds the vector index. Health check hits `http://127.0.0.1:8530/health`.
 
 ## 5. Wire CI auto-deploy
-Set the Actions Variables above (`AWS_DEPLOY_ROLE_ARN`, `VIRES_INSTANCE_ID`,
-`VIRES_DIST_S3`). The IAM role must be allowed `ssm:SendCommand` to the instance and
-`s3:GetObject`/`PutObject` on the bundle path. Confirm with a `workflow_dispatch` run of
+Set the Actions Variables above (`VIRES_INSTANCE_ID`, `VIRES_DIST_S3`) and point
+`role-to-assume` in `deploy.yml` at your role. The IAM role must be allowed
+`ssm:SendCommand` to the instance and `s3:GetObject`/`PutObject` on the bundle path, and
+its trust policy must accept this workflow on `main`. Confirm with a `workflow_dispatch` run of
 "Deploy Vires via SSM".
 
 ## 6. Verify
 `curl https://<your-domain>/health` → 200, then open on your phone and
 **Add to Home Screen**.
 
-## 7. AI coach key (optional — enables the ✨ Coach)
-The AI coach calls Anthropic. `deploy-on-merge.sh` hydrates the key from SSM into
-`.env` on every deploy (quietly; the value is never logged). To enable it:
-```
-aws ssm put-parameter --name /vires/anthropic_api_key --type SecureString --value sk-ant-... 
-```
-and grant the instance role `ssm:GetParameter` on `arn:aws:ssm:<region>:<acct>:parameter/vires/anthropic_api_key`.
-Override the path with the `VIRES_ANTHROPIC_SSM_PARAM` env var if you reuse an existing
-parameter. **It's non-fatal:** with no key the deploy still succeeds and the coach
-endpoints return 503 (the calendar/view/start/manual-schedule features keep working).
-The model is set by `VIRES_COACH_MODEL` (default `claude-haiku-4-5`; bump to
-`claude-sonnet-4-6` for stronger plans).
+## 7. AI coach model route (optional — enables the ✨ Coach)
+The coach calls no provider directly and needs no provider key on this host. It resolves
+the `low` model group through the krepis router (`api/services/coach/agent.py`,
+`_default_spec`) and only accepts a compelled route (`litellm_proxy`, or the DLP-scanned
+`egress_proxy` fallback). The router edge resolves its own credentials. Do **not**
+create a provider key parameter for vires: `deploy-on-merge.sh` hydrates none, and it scrubs
+any `VIRES_ANTHROPIC_API_KEY` / `VIRES_OPENROUTER_API_KEY` line a prior deploy left in `.env`.
+**It's non-fatal:** if the router group does not resolve, the deploy still succeeds and the
+coach endpoints return 503 (the calendar/view/start/manual-schedule features keep working).
+To pin which model the router edge serves, set `VIRES_COACH_LLM` or the `/vires/llm/coach`
+SSM parameter (60s TTL, no redeploy) to `litellm_proxy:<model>`. A value that names any
+other provider is refused with a 503 (`_reject_non_router_override`), so leave both unset
+to use the router default.
 
 ### 7a. Tuned coach prompt (optional — the private edge)
 The coach's system prompt is the Vires *edge* (Commercial-tier), so the public repo
