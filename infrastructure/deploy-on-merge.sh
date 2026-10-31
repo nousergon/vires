@@ -126,62 +126,31 @@ printf 'LLM_SFT_CAPTURE_ENABLED=%s\n' "$SFT_VALUE" >> "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 unset SFT_VALUE
 
-# --- Speech-to-text: hydrate the STT key from SSM into .env ------------------ #
-# NON-FATAL: missing key => /coach/transcribe 503s and the mic is hidden client-side.
-STT_PARAM="${VIRES_STT_SSM_PARAM:-/vires/stt_api_key}"
-if STTKEY=$(aws ssm get-parameter --name "$STT_PARAM" --with-decryption \
-              --query Parameter.Value --output text 2>/dev/null) \
-   && [ -n "$STTKEY" ] && [ "$STTKEY" != "None" ]; then
-  grep -v '^VIRES_STT_API_KEY=' "$ENV_FILE" > "$ENV_FILE.tmp" || true
-  mv "$ENV_FILE.tmp" "$ENV_FILE"
-  printf 'VIRES_STT_API_KEY=%s\n' "$STTKEY" >> "$ENV_FILE"   # value not traced (no set -x)
-  chmod 600 "$ENV_FILE"
-  unset STTKEY
-  echo "stt: hydrated key from ${STT_PARAM}"
-else
-  echo "stt: no key at ${STT_PARAM} — voice input unavailable (non-fatal)"
-fi
+# --- Optional secrets: converge SSM -> .env (vires-ops#82, PROD-06) --------- #
+# Each optional key is three-state (infrastructure/lib/optional_ssm_env.sh):
+# present -> written; CONFIRMED ParameterNotFound -> REMOVED from .env, so
+# deleting the parameter and redeploying actually revokes it; anything else
+# (AccessDenied, network, throttling) is unknown and leaves .env untouched, so a
+# transient AWS failure never switches a working feature off. All NON-FATAL.
+# shellcheck source=lib/optional_ssm_env.sh
+. "$REPO/infrastructure/lib/optional_ssm_env.sh"
 
-# --- Web Push: hydrate the VAPID keypair from SSM ---------------------------- #
-# NON-FATAL: without both keys /push 503s and the client falls back to the
-# foreground beep + wake-lock. Private key never echoed; public key is non-secret.
-VAPID_PUB=$(aws ssm get-parameter --name "${VIRES_VAPID_PUBLIC_SSM_PARAM:-/vires/vapid_public_key}" \
-              --query Parameter.Value --output text 2>/dev/null || true)
-VAPID_PRIV=$(aws ssm get-parameter --name "${VIRES_VAPID_PRIVATE_SSM_PARAM:-/vires/vapid_private_key}" \
-               --with-decryption --query Parameter.Value --output text 2>/dev/null || true)
-if [ -n "$VAPID_PUB" ] && [ "$VAPID_PUB" != "None" ] \
-   && [ -n "$VAPID_PRIV" ] && [ "$VAPID_PRIV" != "None" ]; then
-  grep -vE '^VIRES_VAPID_(PUBLIC|PRIVATE)_KEY=' "$ENV_FILE" > "$ENV_FILE.tmp" || true
-  mv "$ENV_FILE.tmp" "$ENV_FILE"
-  printf 'VIRES_VAPID_PUBLIC_KEY=%s\n' "$VAPID_PUB" >> "$ENV_FILE"
-  printf 'VIRES_VAPID_PRIVATE_KEY=%s\n' "$VAPID_PRIV" >> "$ENV_FILE"   # not traced (no set -x)
-  chmod 600 "$ENV_FILE"
-  unset VAPID_PRIV
-  echo "push: hydrated VAPID keypair from SSM"
-else
-  echo "push: no VAPID keypair in SSM — locked-screen push unavailable (non-fatal)"
-fi
+# Speech-to-text: without the key /coach/transcribe 503s before any outbound call.
+hydrate_optional_key "${VIRES_STT_SSM_PARAM:-/vires/stt_api_key}" VIRES_STT_API_KEY stt
 
-# --- Magic-link email: hydrate the Resend key from SSM into .env ------------ #
-# Auth (vires-ops#49) requires this to actually send login links — unlike the
-# other optional secrets above, a missing key here breaks the ONLY way in
-# (dev_auth_bypass must never be true in a deployed .env). Deploy itself stays
-# non-fatal on a missing key (matches every other secret's convention here),
-# but every /auth/magic-link request will 502 until it's provisioned — see
-# infrastructure/PROVISION.md §7d.
-RESEND_PARAM="${VIRES_RESEND_SSM_PARAM:-/vires/resend_api_key}"
-if RESENDKEY=$(aws ssm get-parameter --name "$RESEND_PARAM" --with-decryption \
-                 --query Parameter.Value --output text 2>/dev/null) \
-   && [ -n "$RESENDKEY" ] && [ "$RESENDKEY" != "None" ]; then
-  grep -v '^VIRES_RESEND_API_KEY=' "$ENV_FILE" > "$ENV_FILE.tmp" || true
-  mv "$ENV_FILE.tmp" "$ENV_FILE"
-  printf 'VIRES_RESEND_API_KEY=%s\n' "$RESENDKEY" >> "$ENV_FILE"   # value not traced (no set -x)
-  chmod 600 "$ENV_FILE"
-  unset RESENDKEY
-  echo "auth: hydrated Resend key from ${RESEND_PARAM}"
-else
-  echo "auth: NO KEY at ${RESEND_PARAM} — magic-link login will 502 until provisioned"
-fi
+# Web Push VAPID keypair: without both keys /push 503s and the client falls back
+# to the foreground beep + wake-lock. The public key is non-secret.
+hydrate_optional_pair \
+  "${VIRES_VAPID_PUBLIC_SSM_PARAM:-/vires/vapid_public_key}" VIRES_VAPID_PUBLIC_KEY "" \
+  "${VIRES_VAPID_PRIVATE_SSM_PARAM:-/vires/vapid_private_key}" VIRES_VAPID_PRIVATE_KEY --with-decryption \
+  push
+
+# --- Magic-link email: Resend key hydration RETIRED --------------------------- #
+# vires-ops#60 moved sign-in to the shared nousergon-auth service and retired the
+# magic-link endpoints; nothing in api/ reads VIRES_RESEND_API_KEY any more.
+# Scrub any key a prior deploy left in .env rather than keep a live, unused
+# credential on the box (same treatment as the retired Anthropic key above).
+env_clear VIRES_RESEND_API_KEY
 
 # --- restart + health check ------------------------------------------------- #
 # Poll /health until uvicorn has bound the port, up to a deadline, instead of a

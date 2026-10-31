@@ -103,24 +103,21 @@ keypair `/push/*` returns 503 and the app falls back to the foreground beep + wa
 notification permission granted. The scheduler is in-process (single uvicorn proc) — a pending
 alert is lost if the box restarts mid-rest; rare and short-lived.
 
-### 7d. Magic-link email (required — the only login path)
-Auth (vires-ops#49) sends login links via [Resend](https://resend.com). Unlike the other
-secrets in this section, this one is **not cosmetic** — with no key, every
-`POST /auth/magic-link` 502s and nobody can log in (`dev_auth_bypass` must never be
-true in a deployed `.env`). `deploy-on-merge.sh` hydrates the key from SSM (quietly):
-```
-aws ssm put-parameter --name /vires/resend_api_key --type SecureString --value re_...
-```
-Grant the instance role `ssm:GetParameter` on it; override the path with
-`VIRES_RESEND_SSM_PARAM`. `VIRES_EMAIL_SENDER` must be a verified sending address/domain
-in the same Resend account (default `no-reply@nousergon.ai`). **Deploy itself is
-non-fatal** with no key (matches every other secret here), but login is broken until
-it's provisioned — check `journalctl -u vires` for `EmailError` if magic links 502.
-In `VIRES_ENV=development` only, a missing key logs the link instead of sending it, so
-local dev never needs a live inbox.
+### 7d. Magic-link email (RETIRED)
+Sign-in moved to the shared nousergon-auth service (vires-ops#60), and nothing in `api/`
+reads a Resend key any more. `deploy-on-merge.sh` no longer hydrates one; it scrubs any
+`VIRES_RESEND_API_KEY` a prior deploy left in `.env`.
+
+### Revoking an optional key (§7b, §7c)
+`deploy-on-merge.sh` converges each optional key three ways
+(`infrastructure/lib/optional_ssm_env.sh`): a present parameter is written to `.env`; a
+**confirmed `ParameterNotFound`** removes the key from `.env`; any other failure
+(AccessDenied, throttling, network) is treated as unknown and leaves `.env` untouched, so a
+transient AWS error never switches a feature off. Settings are cached for the life of the
+process, so revocation takes effect when the deploy restarts the service; the feature's
+endpoint then returns 503 before any outbound call.
 
 ## Notes
-- App secrets (all optional except §7d, SSM-hydrated into the box, never committed):
-  the AI-coach Anthropic key (§7), the tuned coach prompt (§7a), and the Resend
-  magic-link key (§7d, **required** for login to work at all).
+- App secrets (all optional, SSM- or S3-hydrated into the box, never committed): the tuned
+  coach prompt (§7a), the speech-to-text key (§7b) and the VAPID keypair (§7c).
 - The SQLite DB lives at `/home/ec2-user/vires/vires.db` (not in git) — back it up.
