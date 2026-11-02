@@ -48,6 +48,7 @@
   "overrides": {
     "xcode": {
       "uuid": "^14.0.0"
-    }
+    },
+    "minimatch": "^11.0.1"
   }
 }
