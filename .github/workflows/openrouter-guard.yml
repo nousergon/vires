@@ -29,4 +29,4 @@ concurrency:
 
 jobs:
   guard:
-    uses: nousergon/nousergon-lib/.github/workflows/openrouter-guard.yml@d8c10dbf0518d95832265e40bfde9f8191ee9b95  # nousergon-lib main @ 2026-08-28
+    uses: nousergon/nousergon-lib/.github/workflows/openrouter-guard.yml@f8696fd10f3eb7818e0f96184756a3d15ac69c8d  # nousergon-lib main @ 2026-08-28
